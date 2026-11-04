@@ -1,0 +1,11 @@
+{
+	// This is Luau, not Lua 5.x. The Luau Language Server understands the
+	// Roblox API, the Rojo sourcemap and type annotations; a plain Lua
+	// extension reports every Vector3 and every generic as an error.
+	"luau-lsp.sourcemap.enabled": true,
+	"luau-lsp.sourcemap.autogenerate": true,
+	// Two places live here; the language server reads one. Switch to lobby/ when working there.
+	"luau-lsp.sourcemap.rojoProjectFile": "gameplay/default.project.json",
+	"luau-lsp.platform.type": "roblox",
+	"Lua.diagnostics.enable": false
+}

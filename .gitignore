@@ -1,0 +1,13 @@
+# Place files built from the repo (rojo build) -- never the source of truth
+*.rbxl
+*.rbxlx
+
+# Roblox Studio lock files
+*.rbxl.lock
+*.rbxlx.lock
+
+sourcemap.json
+
+# Secrets: never commit one
+.env
+.env.*

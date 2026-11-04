@@ -1,0 +1,48 @@
+{
+  "name": "Fill the Ocean - Gameplay",
+  "servePort": 34873,
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Kit": {
+        "$className": "Folder",
+        "UI": {
+          "$path": "../../../shared/UI"
+        },
+        "Lib": {
+          "$path": "../../../shared/Lib"
+        }
+      },
+      "Common": {
+        "$path": "../common"
+      },
+      "Remotes": {
+        "$className": "Folder",
+        "Buy": {
+          "$className": "RemoteEvent"
+        },
+        "Card": {
+          "$className": "RemoteEvent"
+        },
+        "Results": {
+          "$className": "RemoteEvent"
+        }
+      }
+    },
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    }
+  }
+}

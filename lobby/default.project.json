@@ -1,0 +1,42 @@
+{
+  "name": "Fill the Ocean - Lobby",
+  "servePort": 34872,
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Kit": {
+        "$className": "Folder",
+        "UI": {
+          "$path": "../../../shared/UI"
+        },
+        "Lib": {
+          "$path": "../../../shared/Lib"
+        }
+      },
+      "Common": {
+        "$path": "../common"
+      },
+      "Remotes": {
+        "$className": "Folder",
+        "Notice": {
+          "$className": "RemoteEvent"
+        }
+      }
+    },
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    }
+  }
+}
