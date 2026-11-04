@@ -1,5 +1,5 @@
--- Lighting mood: a cozy sunny day. As the current basin fills it lifts to a slightly more
--- saturated, cloudier, sparklier look. Each stage starts dry again (the sun drained it).
+-- Lighting mood: a bright, vibrant sunny day. As the current basin fills it lifts to a slightly
+-- more saturated, cloudier look. Each stage starts dry again (the sun drained it).
 -- Runs on the client only, so changes are local and smooth. All effects are baked into the place.
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,43 +8,44 @@ local RunService = game:GetService("RunService")
 local EASE = 1.5 -- how quickly the mood follows the fill (slow, so it reads as weather)
 
 -- Two looks; everything in between is a blend by wetness (0 = dry, 1 = full).
--- Owner direction (2026-11-04): cozy and sunny, not deadly. The change from dry to wet is a
--- gentle "life comes back" lift, not desert vs oasis.
+-- Owner direction (2026-11-04): vibrant, happy and alive (reference: bright stylized sim
+-- lighting): deep blue sky, strong warm sun, crisp shadows, no grey haze, punchy colour.
+-- Filling a basin lifts it a little more (more saturation, puffier clouds).
 local DRY = {
-	clockTime = 14.5,
-	brightness = 2.7,
-	ambient = Color3.fromRGB(118, 110, 112),
-	outdoorAmbient = Color3.fromRGB(150, 140, 132),
-	tint = Color3.fromRGB(255, 244, 228),
-	saturation = 0.1,
-	contrast = 0.06,
-	atmosphereColor = Color3.fromRGB(205, 215, 230),
-	atmosphereDecay = Color3.fromRGB(120, 145, 180),
-	density = 0.27,
-	haze = 0.7,
-	glare = 0.15,
-	bloom = 0.5,
-	sunRays = 0.08,
-	cloudCover = 0.5,
-	cloudDensity = 0.45,
-	cloudColor = Color3.fromRGB(255, 252, 248),
+	clockTime = 13.8,
+	brightness = 3.2,
+	ambient = Color3.fromRGB(130, 126, 140),
+	outdoorAmbient = Color3.fromRGB(165, 160, 170),
+	tint = Color3.fromRGB(255, 250, 240),
+	saturation = 0.3,
+	contrast = 0.12,
+	atmosphereColor = Color3.fromRGB(199, 226, 255),
+	atmosphereDecay = Color3.fromRGB(92, 140, 200),
+	density = 0.22,
+	haze = 0,
+	glare = 0,
+	bloom = 0.35,
+	sunRays = 0.05,
+	cloudCover = 0.45,
+	cloudDensity = 0.55,
+	cloudColor = Color3.fromRGB(255, 255, 255),
 }
 local WET = {
-	clockTime = 15,
-	brightness = 2.6,
-	ambient = Color3.fromRGB(108, 112, 122),
-	outdoorAmbient = Color3.fromRGB(140, 145, 150),
-	tint = Color3.fromRGB(255, 250, 242),
-	saturation = 0.22,
-	contrast = 0.08,
-	atmosphereColor = Color3.fromRGB(195, 215, 235),
-	atmosphereDecay = Color3.fromRGB(105, 140, 185),
-	density = 0.25,
-	haze = 0.4,
-	glare = 0.1,
-	bloom = 0.45,
-	sunRays = 0.06,
-	cloudCover = 0.62,
+	clockTime = 14.2,
+	brightness = 3.2,
+	ambient = Color3.fromRGB(128, 130, 145),
+	outdoorAmbient = Color3.fromRGB(160, 165, 175),
+	tint = Color3.fromRGB(252, 252, 255),
+	saturation = 0.38,
+	contrast = 0.14,
+	atmosphereColor = Color3.fromRGB(195, 225, 255),
+	atmosphereDecay = Color3.fromRGB(85, 140, 205),
+	density = 0.2,
+	haze = 0,
+	glare = 0,
+	bloom = 0.35,
+	sunRays = 0.05,
+	cloudCover = 0.55,
 	cloudDensity = 0.6,
 	cloudColor = Color3.fromRGB(255, 255, 255),
 }
@@ -81,10 +82,10 @@ function Mood.start()
 	depth.FocusDistance = 40
 	depth.InFocusRadius = 70
 	depth.NearIntensity = 0
-	depth.FarIntensity = 0.18
+	depth.FarIntensity = 0.06
 	Lighting.GlobalShadows = true
-	Lighting.EnvironmentDiffuseScale = 0.6
-	Lighting.EnvironmentSpecularScale = 0.4
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 0.6
 
 	local wetness = 0
 	local applied = -1

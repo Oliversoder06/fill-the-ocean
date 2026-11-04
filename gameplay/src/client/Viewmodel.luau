@@ -71,7 +71,8 @@ function Viewmodel.start()
 		local modelName = player:GetAttribute("ToolModel")
 		local tier = player:GetAttribute("ToolTier")
 		local alive = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-		if type(modelName) ~= "string" or type(tier) ~= "number" or not alive or camera.CameraType ~= Enum.CameraType.Custom then
+		local equipped = player:GetAttribute("Equipped") ~= false
+		if type(modelName) ~= "string" or type(tier) ~= "number" or not alive or not equipped or camera.CameraType ~= Enum.CameraType.Custom then
 			if current then
 				current:Destroy()
 				current, currentName = nil, nil

@@ -179,3 +179,24 @@ art, sound, VFX, closer sources, Robux, saving, lobby, difficulties, reward spen
 - How the run starts in Studio play tests (for example, a short countdown after the first player
   spawns), and module and remote structure.
 - Buy UI layout (plain; no UI style is set yet).
+
+## Full game build (2026-11-04, owner decisions)
+
+- **Ladder:** 8 hero tools with levels between them: Spoon, Cup, Cup Lv2, Bucket, Bucket Lv2,
+  Bucket Lv3, Bathtub, Bathtub Lv2, Kiddie Pool, Kiddie Pool Lv2, Swimming Pool Lv1-3,
+  Cargo Ship Lv1-3, The Moon Lv1-4. Capacities, prices and pacing are unchanged from the tables
+  above; only names and models changed. Levels reuse their hero model, a little bigger on screen.
+- **Rewards:** Raindrops are saved (DataStore) and shown in the lobby; nothing to spend them on yet.
+- **Difficulty:** 5 levels. Each needs +40% water and pays +50% Raindrops. Beating your highest
+  unlocks the next.
+- **Lobby:** a plaza with 5 queue pads. Standing on an unlocked pad starts a 15 s countdown; up to
+  10 players teleport together into a fresh reserved gameplay server. The lobby writes a run
+  ticket (difficulty + members) to MemoryStore under the reserved server id; the gameplay server
+  reads it, lets only those members in, and waits up to 20 s for the party.
+- **End of run:** rewards saved, results shown for 15 s, then everyone returns to the lobby.
+- **Maps:** Pool = a walled backyard with a sunken tiled pool. Lake = a natural terrain lake with a
+  sandy shore in a pine valley (camp, pump, dock, cabin, tents). Ocean = a natural bay in a palm
+  beach cove (boardwalk, pier, huts, lifeguard tower). Water is a flat surface rising inside each
+  basin. All maps are enclosed (cliffs/walls plus invisible walls).
+- **No runtime generation:** stages, prompts, tool templates, HUDs and lighting are baked into the
+  places; code only checks they exist and fails with a clear message if not.

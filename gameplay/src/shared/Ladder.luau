@@ -60,4 +60,37 @@ function Ladder.missedFromEarlierStages(config, stageIndex: number, boughtPerSta
 	return missed
 end
 
+-- The next `count` items a player will be offered, in buy order: catch-up items from earlier
+-- stages first, then the rest of this stage's list. Each entry is { stage, item }.
+function Ladder.upcoming(config, stageIndex: number, boughtPerStage: { number }, count: number)
+	local list = Ladder.missedFromEarlierStages(config, stageIndex, boughtPerStage)
+	local stage = config.stages[stageIndex]
+	if stage then
+		for i = (boughtPerStage[stageIndex] or 0) + 1, #stage.items do
+			table.insert(list, { stage = stageIndex, item = stage.items[i] })
+		end
+	end
+	local result = {}
+	for i = 1, math.min(count, #list) do
+		result[i] = list[i]
+	end
+	return result
+end
+
+-- How many items of one kind ("walk", "hands", "tool") are bought, out of how many in the run.
+function Ladder.kindProgress(config, boughtPerStage: { number }, kind: string): (number, number)
+	local bought, total = 0, 0
+	for s, stage in config.stages do
+		for i, item in stage.items do
+			if item.kind == kind then
+				total += 1
+				if i <= (boughtPerStage[s] or 0) then
+					bought += 1
+				end
+			end
+		end
+	end
+	return bought, total
+end
+
 return Ladder

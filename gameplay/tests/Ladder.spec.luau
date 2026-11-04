@@ -82,4 +82,35 @@ function tests.nothing_missed_in_first_stage(t)
 	t.expectEq(#Ladder.missedFromEarlierStages(Config, 1, { 0 }), 0)
 end
 
+function tests.upcoming_starts_with_next_item(t)
+	local list = Ladder.upcoming(Config, 1, { 0 }, 3)
+	t.expectEq(#list, 3)
+	t.expectEq(list[1].item.name, "Cup")
+	t.expectEq(list[3].item.name, "Quick Hands 1")
+end
+
+function tests.upcoming_puts_catch_up_first(t)
+	local list = Ladder.upcoming(Config, 2, { 9, 0 }, 3)
+	t.expectEq(list[1].item.name, "Quick Hands 3", "missed pool item first")
+	t.expectEq(list[1].stage, 1)
+	t.expectEq(list[2].item.name, "Bucket Lv3")
+	t.expectEq(list[2].stage, 2)
+end
+
+function tests.upcoming_shrinks_at_end_of_list(t)
+	t.expectEq(#Ladder.upcoming(Config, 3, { 10, 9, 13 }, 3), 1)
+	t.expectEq(#Ladder.upcoming(Config, 3, { 10, 9, 14 }, 3), 0)
+	t.expectEq(#Ladder.upcoming(Config, 4, { 10, 9, 14 }, 3), 0, "after the last stage")
+end
+
+function tests.kind_progress_counts_bought_of_total(t)
+	local bought, total = Ladder.kindProgress(Config, { 0 }, "walk")
+	t.expectEq(bought, 0)
+	t.expectEq(total, 7)
+	bought = Ladder.kindProgress(Config, { 6, 2 }, "walk") -- Sneakers 1, 2, then 4
+	t.expectEq(bought, 3)
+	bought, total = Ladder.kindProgress(Config, { 10, 9, 14 }, "hands")
+	t.expectEq(bought, total)
+end
+
 return tests

@@ -28,8 +28,21 @@ Beating a run unlocks the next difficulty, where the sun is angrier.
 - In each folder, Rojo owns code only: `src/shared` -> ReplicatedStorage.Shared, `src/server` ->
   ServerScriptService.Server, `src/client` -> StarterPlayerScripts.Client, and
   `C:\RobloxDev\shared` -> ReplicatedStorage.Kit (UI and Lib). A change in Kit changes every game.
+  Both projects also map `common/` -> ReplicatedStorage.Common (difficulty, save progress, run
+  tickets, retries, place IDs) and declare their RemoteEvents in ReplicatedStorage.Remotes.
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
+- Nothing is generated at runtime. Baked into the places and only checked by code:
+  - gameplay: `workspace.Stages` (Pool, Lake, Ocean, with ScoopPrompt/PourPrompt),
+    `ReplicatedStorage.ToolModels` (one Model per hero tool; swap placeholders for real models
+    under the same name), `StarterGui.Hud`, Lighting effects and Terrain Clouds.
+  - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, Difficulty attribute, sign with Title
+    and Status labels), `StarterGui.LobbyHud`.
+- Lake and Ocean are terrain bowls (natural shoreline); their `Basin` part is invisible and only
+  marks the water's base. The Pool is a tiled tank.
+- Studio test helpers (gameplay): workspace attributes `WaterScale` (shorter runs),
+  `StudioFillStage` (fill the current stage), `StudioDifficulty` (1-5). Teleports and saving
+  need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.
 
@@ -38,4 +51,5 @@ Run in each folder you changed (`lobby/`, `gameplay/`):
 - `selene src` is clean.
 - `rojo build -o <folder>.rbxlx` succeeds.
 - `gameplay/`: `lune run tests/run` passes (Lune 0.11.1; tests cover the pure modules in
-  `src/shared`, which must not require anything or touch `game`).
+  `src/shared` and `common/` (Difficulty, Progress), which must not require anything or touch `game`).
+- `common/`: copy `gameplay/selene.toml` in, run `selene .`, remove it (common has no own config).

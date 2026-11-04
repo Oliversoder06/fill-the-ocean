@@ -123,12 +123,13 @@ local function update(pad)
 
 	if #party == 0 then
 		pad.endsAt = nil
-		pad.status.Text = if pad.difficulty == 1 then "Step on to play!" else `Unlock: beat Difficulty {pad.difficulty - 1}`
+		-- short so it reads from across the plaza; stepping on a locked pad explains what to beat
+		pad.status.Text = if pad.difficulty == 1 then "Step on to play!" else "Locked"
 		return
 	end
 	pad.endsAt = pad.endsAt or (os.clock() + COUNTDOWN)
 	local left = math.max(0, math.ceil(pad.endsAt - os.clock()))
-	pad.status.Text = `{#party}/{MAX_PARTY} players   starting in {left}s`
+	pad.status.Text = `{#party}/{MAX_PARTY} players - {left}s`
 	if left <= 0 then
 		task.spawn(launch, pad, party)
 	end

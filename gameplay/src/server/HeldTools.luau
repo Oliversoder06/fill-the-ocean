@@ -1,5 +1,5 @@
 -- Puts each player's current tool in their character's right hand so other players see it.
--- Follows the player attributes ToolModel and Carried that Run publishes.
+-- Follows the player attributes ToolModel, Carried and Equipped that Run publishes.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -23,6 +23,12 @@ local function refresh(player: Player)
 		return
 	end
 	local held = character:FindFirstChild(HELD_NAME)
+	if player:GetAttribute("Equipped") == false then
+		if held then
+			held:Destroy()
+		end
+		return
+	end
 	if not held or held:GetAttribute("ModelName") ~= modelName then
 		if held then
 			held:Destroy()
@@ -60,6 +66,9 @@ local function track(player: Player)
 		refresh(player)
 	end)
 	player:GetAttributeChangedSignal("Carried"):Connect(function()
+		refresh(player)
+	end)
+	player:GetAttributeChangedSignal("Equipped"):Connect(function()
 		refresh(player)
 	end)
 	player.CharacterAdded:Connect(function(character)

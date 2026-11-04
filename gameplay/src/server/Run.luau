@@ -14,6 +14,7 @@ local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Water = require(ReplicatedStorage.Shared.Water)
 local Rewards = require(ReplicatedStorage.Shared.Rewards)
 local Zones = require(ReplicatedStorage.Shared.Zones)
+local Session = require(ReplicatedStorage.Shared.Session)
 local Difficulty = require(ReplicatedStorage.Common.Difficulty)
 local Places = require(ReplicatedStorage.Common.Places)
 local PlayerData = require(ReplicatedStorage.Common.PlayerData)
@@ -43,8 +44,7 @@ local run = {
 	target = 0,
 	scale = 1,
 	difficulty = 1,
-	members = nil :: { [number]: boolean }?, -- party user ids in a reserved server; nil = anyone
-	expected = 0,
+	session = nil :: Session.State?, -- who may play here (see shared/Session)
 	firstArrival = nil :: number?,
 	allLitres = {} :: { number }, -- per stage, every player including leavers
 	results = nil :: { any }?, -- kept so a player who joins after the run still sees them
@@ -73,11 +73,11 @@ local function nextOffer(state)
 	if run.stage < 1 or run.stage > #Config.stages then
 		return nil, nil
 	end
-	local missed = Ladder.missedFromEarlierStages(Config, run.stage, state.boughtPerStage)
-	if missed[1] then
-		return missed[1].stage, missed[1].item
+	local offer = Ladder.upcoming(Config, run.stage, state.boughtPerStage, 1)[1]
+	if offer then
+		return offer.stage, offer.item
 	end
-	return run.stage, Ladder.nextItem(Config, run.stage, state.boughtPerStage[run.stage] or 0)
+	return nil, nil
 end
 
 local function publish(player: Player)
@@ -91,8 +91,13 @@ local function publish(player: Player)
 	player:SetAttribute("ToolName", state.stats.toolName)
 	player:SetAttribute("ToolModel", state.stats.toolModel)
 	player:SetAttribute("ToolTier", Ladder.toolTier(Config, state.stats.toolName))
+	player:SetAttribute("Equipped", state.equipped)
 	player:SetAttribute("NextItemName", if item then item.name else "")
 	player:SetAttribute("NextItemCost", if item then item.cost else -1)
+	-- Items bought per stage ("Bought1".."Bought3"): the shop previews what comes next from these.
+	for s = 1, #Config.stages do
+		player:SetAttribute(`Bought{s}`, state.boughtPerStage[s] or 0)
+	end
 end
 
 local function applyWalkSpeed(player: Player)
@@ -274,22 +279,24 @@ end
 local function partyPresent(): number
 	local n = 0
 	for player in states do
-		if not run.members or run.members[player.UserId] then
+		if run.session and Session.admits(run.session, player.UserId) then
 			n += 1
 		end
 	end
 	return n
 end
 
--- Waiting room: start when the whole party is in, or after the wait runs out.
+-- Waiting room: start when the whole party is in, or after the wait runs out. A closed server
+-- never starts a run.
 local function tryStart()
-	if run.started or not run.firstArrival then
+	local session = run.session
+	if run.started or not run.firstArrival or not session or session.mode == "closed" then
 		return
 	end
-	setGlobal("Waiting", if run.members then `{partyPresent()}/{run.expected}` else "")
+	setGlobal("Waiting", if session.mode == "party" then `{partyPresent()}/{session.expected}` else "")
 	local waited = os.clock() - run.firstArrival
-	if run.members then
-		if partyPresent() >= run.expected or waited >= PARTY_WAIT then
+	if session.mode == "party" then
+		if partyPresent() >= session.expected or waited >= PARTY_WAIT then
 			task.spawn(startRun)
 		end
 	elseif waited >= START_DELAY then
@@ -307,8 +314,10 @@ local function onPlayerCount(count: number)
 end
 
 local function onPlayerAdded(player: Player)
-	if run.members and not run.members[player.UserId] then
-		sendToLobby({ player }, "not in this party") -- default deny: only the lobby's party plays here
+	-- Default deny: only the lobby's party plays here. Anyone else (a friend who followed in, a
+	-- direct link, a public or VIP server) goes to the lobby.
+	if not (run.session and Session.admits(run.session, player.UserId)) then
+		sendToLobby({ player }, "not part of a run from the lobby")
 		return
 	end
 	states[player] = {
@@ -320,6 +329,7 @@ local function onPlayerAdded(player: Player)
 		holds = {} :: { [ProximityPrompt]: { began: number, ended: number? } },
 		buyWindowStart = 0,
 		buysInWindow = 0,
+		equipped = true,
 	}
 	publish(player)
 	if run.results then
@@ -360,6 +370,16 @@ local function onBuy(player: Player)
 	publish(player)
 end
 
+-- Hotbar: the player puts their tool away or takes it out. Unequipped, they can't scoop or pour.
+local function onEquip(player: Player, equipped: unknown)
+	local state = states[player]
+	if not state or type(equipped) ~= "boolean" or state.equipped == equipped then
+		return
+	end
+	state.equipped = equipped
+	publish(player)
+end
+
 local function checkFull()
 	if run.phase == "playing" and run.current >= run.target - 1e-6 then
 		setPhase("card") -- stop further pours; completeStage runs the transition
@@ -384,7 +404,7 @@ local function validTrigger(player: Player, prompt: ProximityPrompt, stageIndex:
 	if state then
 		state.holds[prompt] = nil
 	end
-	if not (state and hold) or run.phase ~= "playing" or run.stage ~= stageIndex then
+	if not (state and hold and state.equipped) or run.phase ~= "playing" or run.stage ~= stageIndex then
 		return false
 	end
 	if not nearPrompt(player, prompt) then
@@ -444,41 +464,39 @@ local function connectPrompt(part: BasePart, name: string, handler, stageIndex: 
 	end)
 end
 
--- Reserved server: read the lobby's ticket. Without one, nobody should be here.
+-- Decides who may play here. Only a reserved server the lobby made (with its ticket) runs; the
+-- ticket is read from MemoryStore, never from client teleport data.
 local function loadSession()
-	local isReserved = game.PrivateServerId ~= "" and game.PrivateServerOwnerId == 0
-	if not isReserved then
-		run.difficulty = Difficulty.clamp(workspace:GetAttribute("StudioDifficulty"))
-		return
+	local isStudio = RunService:IsStudio()
+	local reserved = game.PrivateServerId ~= "" and game.PrivateServerOwnerId == 0
+	local ticket, err = nil, nil
+	if reserved and not isStudio then
+		local deadline = os.clock() + TICKET_WAIT
+		repeat
+			ticket, err = RunTicket.read(game.PrivateServerId)
+			if not ticket then
+				task.wait(1)
+			end
+		until ticket or os.clock() > deadline
 	end
-	local ticket, err
-	local deadline = os.clock() + TICKET_WAIT
-	repeat
-		ticket, err = RunTicket.read(game.PrivateServerId)
-		if not ticket then
-			task.wait(1)
-		end
-	until ticket or os.clock() > deadline
-	if not ticket then
-		warn(`[Run] no run ticket for {game.PrivateServerId} ({err or "missing"}); sending everyone back`)
-		run.members = {}
-		run.expected = 0
-		sendToLobby(Players:GetPlayers(), "no run ticket")
-		return
-	end
-	run.difficulty = Difficulty.clamp(ticket.difficulty)
-	run.members = {}
-	for _, userId in ticket.members do
-		if type(userId) == "number" then
-			(run.members :: { [number]: boolean })[userId] = true
-			run.expected += 1
-		end
+	run.session = Session.decide({
+		isStudio = isStudio,
+		privateServerId = game.PrivateServerId,
+		privateServerOwnerId = game.PrivateServerOwnerId,
+		ticket = ticket,
+		studioDifficulty = workspace:GetAttribute("StudioDifficulty"),
+	}, Difficulty.clamp)
+	run.difficulty = run.session.difficulty
+	if run.session.mode == "closed" then
+		warn(`[Run] closed server ({if reserved then `no run ticket: {err or "missing"}` else "not a lobby run"}); sending everyone to the lobby`)
+		setGlobal("Waiting", "Taking you to the lobby...")
+		sendToLobby(Players:GetPlayers(), "closed server")
 	end
 end
 
 function Run.start(stages: Folder)
 	stagesFolder = stages
-	for _, name in { "Buy", "Card", "Results" } do
+	for _, name in { "Buy", "Card", "Results", "Equip" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Stage", 0)
@@ -490,6 +508,7 @@ function Run.start(stages: Folder)
 	setGlobal("Difficulty", run.difficulty)
 
 	remotes.Buy.OnServerEvent:Connect(onBuy)
+	remotes.Equip.OnServerEvent:Connect(onEquip)
 	for i in Config.stages do
 		local model = stageModel(i)
 		connectPrompt(Zones.part(model, "Source"), "ScoopPrompt", onScoop, i)
