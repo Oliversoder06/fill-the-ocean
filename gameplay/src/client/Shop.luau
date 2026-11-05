@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
@@ -24,6 +25,10 @@ local short, set = Hud.short, Hud.set
 
 local DESIGN_SIZE = Vector2.new(1000, 660) -- the shop plus room for its decorations
 local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+-- Upgrades button: squish down while held, spring back past full size on release.
+local HOLD_SCALE = 0.82
+local HOLD_DOWN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local HOLD_UP = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
 local Shop = {}
 
@@ -156,13 +161,57 @@ function Shop.start()
 		return phase == "playing" or phase == "card"
 	end
 
-	ContextActionService:BindAction("ToggleShop", function(_, inputState)
-		if inputState == Enum.UserInputState.Begin then
+	-- The Upgrades button (right edge) shows where the shop is. Holding Tab / Y / the mouse / a
+	-- finger squishes it down; letting go springs it back up and opens (or closes) the shop. Its key
+	-- tag tells keyboard and gamepad players which key does it.
+	local upgrades = Hud.find(gui, "UpgradesButton")
+	local upgradesPress = Hud.find(upgrades, "Press") :: UIScale
+	local upgradesKey = Hud.find(upgrades, "Key")
+	local upgradesKeyText = Hud.find(upgradesKey, "Text")
+	local held = false
+	local hovered = false
+	local function hold()
+		held = true
+		TweenService:Create(upgradesPress, HOLD_DOWN, { Scale = HOLD_SCALE }):Play()
+	end
+	local function release(toggle: boolean)
+		if not held then
+			return
+		end
+		held = false
+		TweenService:Create(upgradesPress, HOLD_UP, { Scale = if hovered then motion.hoverScale else 1 }):Play()
+		if toggle then
 			setOpen(not open and inRun())
 		end
+	end
+	ContextActionService:BindAction("ToggleShop", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			hold()
+		elseif inputState == Enum.UserInputState.End then
+			release(true)
+		elseif inputState == Enum.UserInputState.Cancel then
+			release(false) -- focus lost while held: spring back, don't open
+		end
 		return Enum.ContextActionResult.Sink
-	end, true, Enum.KeyCode.Tab, Enum.KeyCode.ButtonY)
-	ContextActionService:SetTitle("ToggleShop", "Shop")
+	end, false, Enum.KeyCode.Tab, Enum.KeyCode.ButtonY)
+	upgrades.MouseEnter:Connect(function()
+		hovered = true
+		if not held then
+			TweenService:Create(upgradesPress, QUICK, { Scale = motion.hoverScale }):Play()
+		end
+	end)
+	upgrades.MouseLeave:Connect(function()
+		hovered = false
+		if held then
+			release(false) -- dragged off the button: cancel, like a normal button
+		else
+			TweenService:Create(upgradesPress, QUICK, { Scale = 1 }):Play()
+		end
+	end)
+	upgrades.MouseButton1Down:Connect(hold) -- touch fires these too
+	upgrades.MouseButton1Up:Connect(function()
+		release(true)
+	end)
 
 	pressable(buyButton, buyButton.Press)
 	pressable(closeButton, closeButton.Press)
@@ -208,6 +257,11 @@ function Shop.start()
 		if open and not inRun() then
 			setOpen(false)
 		end
+		set(upgrades, "Visible", inRun() and not shop.Visible)
+		local input = UserInputService:GetLastInputType()
+		local touch = input == Enum.UserInputType.Touch
+		set(upgradesKey, "Visible", not touch)
+		set(upgradesKeyText, "Text", if input.Name:sub(1, 7) == "Gamepad" then "Y" else "TAB")
 		if not shop.Visible then
 			return
 		end

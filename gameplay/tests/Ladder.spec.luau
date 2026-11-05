@@ -34,27 +34,42 @@ function tests.cup_takes_two_sweeps_and_pickup_takes_one_off(t)
 	t.expectEq(Ladder.stats(Config, { pickup = 1 }).sweeps, 1, "never below one")
 end
 
-function tests.base_sweeps_grow_every_four_tools_up_to_five(t)
+function tests.base_sweeps_grow_every_two_tools_up_to_eight(t)
 	t.expectEq(Ladder.baseSweeps(Config, 1), 1, "spoon")
 	t.expectEq(Ladder.baseSweeps(Config, 2), 2, "cup")
-	t.expectEq(Ladder.baseSweeps(Config, 5), 2)
-	t.expectEq(Ladder.baseSweeps(Config, 6), 3)
-	t.expectEq(Ladder.baseSweeps(Config, 20), 5, "moon is capped")
+	t.expectEq(Ladder.baseSweeps(Config, 3), 2)
+	t.expectEq(Ladder.baseSweeps(Config, 4), 3, "bucket")
+	t.expectEq(Ladder.baseSweeps(Config, 14), 8, "cargo ship")
+	t.expectEq(Ladder.baseSweeps(Config, 20), 8, "moon is capped")
 end
 
-function tests.all_pickups_bring_every_stage_end_back_to_one_sweep(t)
-	local function lastIn(trackId, stage)
-		local n = 0
-		for i, level in Config.track(trackId).levels do
-			if level.stage <= stage then
-				n = i
-			end
+local function lastIn(trackId, stage)
+	local n = 0
+	for i, level in Config.track(trackId).levels do
+		if level.stage <= stage then
+			n = i
 		end
-		return n
 	end
+	return n
+end
+
+-- Pickup must never outrun the tools: with every Pickup a stage offers, its best tool still takes
+-- a few sweeps, so Quick Scoop keeps mattering to the end.
+function tests.stage_end_tools_still_take_several_sweeps(t)
 	for stage = 1, #Config.stages do
 		local s = Ladder.stats(Config, { tool = lastIn("tool", stage), pickup = lastIn("pickup", stage) })
-		t.expectEq(s.sweeps, 1, `end of stage {stage}`)
+		t.expectEq(s.sweeps >= 2, true, `end of stage {stage} takes {s.sweeps} sweep(s)`)
+	end
+end
+
+function tests.every_pickup_level_takes_a_sweep_off_the_stage_end_tool(t)
+	for stage = 1, #Config.stages do
+		local tool = lastIn("tool", stage)
+		for pickup = 1, lastIn("pickup", stage) do
+			local before = Ladder.stats(Config, { tool = tool, pickup = pickup - 1 }).sweeps
+			local after = Ladder.stats(Config, { tool = tool, pickup = pickup }).sweeps
+			t.expectEq(after, before - 1, `stage {stage} pickup {pickup}`)
+		end
 	end
 end
 

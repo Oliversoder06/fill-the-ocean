@@ -49,6 +49,15 @@ Cues.coins = {
 	burstVolume = 0.35,
 }
 
+-- Windows opening and closing (client/Window): one whoosh, a little lower on close.
+Cues.window = {
+	whoosh = "WindowWhoosh",
+	openVolume = 0.4,
+	closeVolume = 0.3,
+	openPitch = 1.1,
+	closePitch = 0.85,
+}
+
 -- Buying (client/Purchase). `sparkle` is an Attachment in ReplicatedStorage.Vfx.
 Cues.purchase = {
 	sting = "BuySting",
@@ -64,7 +73,8 @@ Cues.purchase = {
 
 -- Footsteps (client/Footsteps). Surfaces come from shared/Steps. Each surface's variants must come
 -- from one matched set (same recording), or the steps sound like two different people. Carrying
--- water makes steps heavier: lower and a little louder.
+-- water makes steps heavier: lower and a little louder. Dry floors puff dust (ReplicatedStorage.Vfx)
+-- at every step, and more on landing.
 Cues.steps = {
 	surfaces = {
 		stone = { "StepStone1", "StepStone2", "StepStone3", "StepStone4", "StepStone5", "StepStone6" },
@@ -78,6 +88,14 @@ Cues.steps = {
 	pitchMax = 1.05,
 	carryPitch = 0.88,
 	carryVolume = 1.25,
+	dust = "StepDust",
+	dustSurfaces = { stone = true, sand = true },
+	landDust = 3, -- times a step's puff
+}
+
+-- A full tool drips water while carried (client/Bodies, other players only).
+Cues.carry = {
+	drips = "Drips",
 }
 
 -- Ambience (client/Ambience): one looping bed per stage, plus a heat layer. A dry basin is hot and

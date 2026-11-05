@@ -5,7 +5,7 @@
 -- `stage` has started, so each stage opens a few more levels of every track.
 -- Trip time = 2 * tripDistance / walkSpeed + sweeps * actSeconds + pourSeconds (walk there and back,
 -- scoop sweeps, one quick pour). Each tool needs more sweeps (see Ladder.baseSweeps); each Pickup
--- level takes one off.
+-- level takes one off, but tools add sweeps faster than Pickup removes them.
 
 export type Level = {
 	cost: number,
@@ -43,7 +43,21 @@ Config.tripDistance = 80 -- studs, source centre to basin pour edge, same in eve
 Config.pourSeconds = 0.25 -- a pour is instant; this is only how long the tip plays
 Config.start = { capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spoon", toolModel = "Spoon" }
 -- Sweeps to fill a tool: 1 for the Spoon, then one more every `toolsPerSweep` tool levels, at most `maxSweeps`.
-Config.sweeps = { toolsPerSweep = 4, maxSweeps = 5 }
+-- Tools add sweeps faster than Pickup takes them off, so big tools never fill in one sweep and
+-- Quick Scoop keeps mattering.
+Config.sweeps = { toolsPerSweep = 2, maxSweeps = 8 }
+
+-- Fill milestones: crossing one starts a boost for everyone for `seconds`. Each stage plays every
+-- kind once, in a shuffled order. All are bonuses, never penalties.
+Config.boosts = {
+	seconds = 30,
+	milestones = { 0.25, 0.5, 0.75 },
+	kinds = {
+		{ id = "coins", tag = "2X COINS", card = "The sun dozed off! Double coins!", coins = 2 },
+		{ id = "gusher", tag = "GUSHER", card = "The well is gushing! Fill up in one sweep!", oneSweep = true },
+		{ id = "tailwind", tag = "TAILWIND", card = "A cool breeze! Run faster!", walk = 1.5 },
+	},
+}
 
 Config.stages = {
 	{ name = "Pool", minutes = 7, coinsPerLitre = 10, waterPerPlayer = 972 },

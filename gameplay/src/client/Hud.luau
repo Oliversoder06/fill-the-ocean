@@ -9,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 
 local player = Players.LocalPlayer
@@ -146,16 +147,23 @@ function Hud.start()
 	end)
 
 	-- Windows (shop, results) free the cursor. First person locks it to the centre every frame, so
-	-- this runs right after the camera and overrides that while a window is showing.
-	local windows = { find(gui, "Shop"), results }
+	-- this runs right after the camera and overrides that while a window is showing. In play the
+	-- mouse icon is hidden and the place's cursor image (StarterGui.Cursor) marks where you aim.
+	local windows = { find(gui, "Shop"), results, find(gui, "Admin") }
+	local crosshair = find(player:WaitForChild("PlayerGui"):WaitForChild("Cursor"), "Cursor")
 	RunService:BindToRenderStep("HudCursor", Enum.RenderPriority.Camera.Value + 3, function()
+		local windowOpen = false
 		for _, window in windows do
 			if window.Visible then
-				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-				UserInputService.MouseIconEnabled = true
-				return
+				windowOpen = true
+				break
 			end
 		end
+		if windowOpen then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end
+		set(UserInputService, "MouseIconEnabled", windowOpen)
+		set(crosshair, "Visible", not windowOpen)
 	end)
 
 	RunService.RenderStepped:Connect(function()
@@ -190,7 +198,15 @@ function Hud.start()
 			local stage = if type(index) == "number" then Config.stages[math.min(index, #Config.stages)] else nil
 			if stage then
 				set(placeText, "Text", `The {stage.name}`)
-				set(stageTag, "Text", `STAGE {math.min(index, #Config.stages)}/{#Config.stages}`)
+				-- A running fill-milestone boost takes over the stage tag with its countdown.
+				local boost = ReplicatedStorage:GetAttribute("Boost")
+				local endsAt = ReplicatedStorage:GetAttribute("BoostEndsAt")
+				local kind = if type(boost) == "string" and boost ~= "" then Boosts.kind(Config, boost) else nil
+				if kind and type(endsAt) == "number" then
+					set(stageTag, "Text", `{kind.tag} {math.max(0, math.ceil(endsAt - workspace:GetServerTimeNow()))}s`)
+				else
+					set(stageTag, "Text", `STAGE {math.min(index, #Config.stages)}/{#Config.stages}`)
+				end
 			end
 			local fill = ReplicatedStorage:GetAttribute("Fill")
 			local target = if type(fill) == "number" then math.clamp(fill, 0, 1) else 0

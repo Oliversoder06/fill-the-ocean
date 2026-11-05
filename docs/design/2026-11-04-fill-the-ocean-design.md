@@ -56,7 +56,10 @@ hook.
   bought level by level (Config.tracks); a level can be bought once its stage has started, so each
   stage opens a few more levels of every track (Claude's call, keeps the pacing):
   1. **Tool** (the joke ladder, in order): more litres per trip. A tool needs 1 sweep for the Spoon,
-     then one more every 4 tool levels, at most 5 (Claude's call).
+     then one more every 2 tool levels, at most 8. **Changed on 2026-11-05** (was every 4, at most
+     5): with 4 Pickup levels a maxed Pickup filled every tool in one sweep and made Quick Scoop
+     useless. Now tools add sweeps faster than Pickup takes them off; stage-end gear takes 2 / 3 / 4
+     sweeps (pool / lake / ocean).
   2. **Pickup**: each level takes one sweep off (never below 1); 4 levels.
   3. **Hold**: one-time buy (40); hold the button to keep sweeping until full.
   4. **Quick Scoop**: faster sweeps, 0.5 s down to 0.2 s; 7 levels.
@@ -64,7 +67,13 @@ hook.
   6. **Tip Jar**: +5 / 10 / 15 / 20 % coins per litre; 4 levels.
   Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price is split
   between Quick Scoop and Pickup. A perfect solo player who buys the cheapest affordable upgrade
-  fills pool / lake / ocean in about 6:01 / 10:46 / 18:30 (35:18, `lune run tools/simulate`).
+  fills pool / lake / ocean in about 6:07 / 11:11 / 20:15 (37:35, `lune run tools/simulate`;
+  boosts not counted).
+- **Fill-milestone boosts (2026-11-05)**, against the trips feeling the same: at 25 / 50 / 75 %
+  fill everyone gets a 30 s bonus, each kind once per stage in a shuffled order: double coins,
+  a gushing well (fill in one sweep) or a tailwind (x1.5 walk speed). Bonuses only, never penalties.
+  Announced with the stage card text; the run panel's stage tag counts it down (Config.boosts,
+  shared/Boosts).
 - Before 2026-11-05 the upgrade types were Tool size, Move speed and Quick Hands (back to one sweep
   and faster), bought in one fixed order.
 - Later (not prototype): closer or better sources unlocking mid-stage; late tools that change *how*
@@ -223,3 +232,35 @@ setup window (sunbaked-sea style, one column) and picks max players (1-10), a di
 unlocked, and friends-only (friends of the host). Others join by stepping on; anyone may join a
 difficulty the host unlocked. The run starts when the session is full or the host presses Start.
 If the host steps off or leaves, the earliest remaining member hosts. Rules: `common/SessionRules`.
+
+## Progression: account level and season pass (2026-11-05, owner decisions)
+**Why.** Owner's first full playtest (2 players, about 40 min): "time flew by, but I would never come
+back… nothing special." Players "like to grind for something". The run itself stays chill and
+satisfying (the owner rejected "the sun fights back"). What was missing is a reason to play beyond
+one run: nothing earned in a run mattered afterwards.
+
+**One XP, two tracks.** Every run earns XP. The same XP fills both tracks.
+
+| | Account level (permanent) | Season pass (seasonal) |
+|---|---|---|
+| Resets | Never. Shown above your head and in the lobby. | Pass tiers reset each season; claimed rewards are kept forever. |
+| Gives | **Power, capped and spaced out:** small permanent perks (for example +1% coins, +1% walk, each with a cap) and starting gear (begin runs with a better tool at milestone levels). | **Fresh stuff:** cosmetics (tool skins, splash colours, trails, titles) and Raindrops. |
+| Curve | Each level needs more XP than the last (owner). Draft: XP to the next level = 100 × level^1.5. | Flat XP per tier. Draft: 50 tiers × 750 XP. |
+| Premium | n/a | Free track now; a premium (Robux) track later on the same tiers. |
+
+- **Why split.** Claimed rewards are kept, so power on a seasonal pass would stack every season
+  and the runs would get trivially short, killing the slow-to-fast climb. Power stays on the
+  permanent level (capped); seasons only add cosmetics and Raindrops.
+- **Seasons:** 3 months, aligned to the calendar: Jan 1, Apr 1, Jul 1, Oct 1.
+- **Draft pace (tune after testing):** a run at Difficulty 1 gives about 1,500 XP. A new player
+  gains about 4 levels in their first run, about 1 level per 2 runs around level 10, and slower
+  after that. Level table: 1→2 needs 100, 5→6 needs 1,118, 10→11 needs 3,162, 20→21 needs 8,944.
+  Season: about 2 tiers per run, so about 25 runs to finish (2 runs a week over a season).
+- **XP sources (draft):** XP for your share of each stage's water (by share, like rewards, so the
+  ocean doesn't dwarf the pool), a bonus for each stage completed and for finishing the run, ×
+  the difficulty multiplier.
+- **In run:** a small level bar near the wallet fills as you pour. Level up: a sting, sparkles and
+  a "LEVEL 12!" stamp, plus "next unlock" text. Pass tiers tick up the same way.
+- **Open:** the exact perk list, caps and starting-gear levels; the season-1 reward list; where
+  the pass window lives (lobby, gameplay or both); XP per run after a real playtest. The XP curve
+  goes to `C:\RobloxDev\library\balance` once the owner approves the numbers.

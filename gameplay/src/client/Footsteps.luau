@@ -1,8 +1,9 @@
 -- Footsteps. Yours land on each dip of the camera bob (client/CameraFeel), so the sound and the
 -- view move together; other players step every Steps.STRIDE studs they walk. The sound follows
--- the floor (shared/Steps), and carrying water makes your steps heavier. Roblox's default running
+-- the floor (shared/Steps), and carrying water makes your steps heavier. Dry floors puff dust
+-- (Footsteps.dust, also used by client/Bodies on landing). Roblox's default running
 -- sound is muted on every character so it doesn't play under ours. Names and volumes in
--- shared/Cues; the sounds are baked into ReplicatedStorage.Audio.
+-- shared/Cues; the sounds are baked into ReplicatedStorage.Audio, the dust into ReplicatedStorage.Vfx.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -14,15 +15,45 @@ local CameraFeel = require(script.Parent.CameraFeel)
 
 local OTHERS_RANGE = 120 -- studs; farther players' steps are skipped
 local SOUND_SECONDS = 2
+local DUST_SECONDS = 1.5
 local DEFAULT_RUNNING = "Running" -- the sound Roblox's character sounds script adds to the root
 
 local player = Players.LocalPlayer
 local Footsteps = {}
 
+-- A puff of dust at a humanoid's feet if the floor is dry; `scale` multiplies a step's puff.
+function Footsteps.dust(humanoid: Humanoid, scale: number)
+	local cue = Cues.steps
+	local root = humanoid.RootPart
+	local vfx = ReplicatedStorage:FindFirstChild("Vfx")
+	local template = vfx and vfx:FindFirstChild(cue.dust)
+	if not (root and template and cue.dustSurfaces[Steps.surface(humanoid.FloorMaterial.Name)]) then
+		return
+	end
+	local effect = (template :: Attachment):Clone()
+	effect.Parent = workspace.Terrain
+	effect.WorldPosition = root.Position - Vector3.new(0, root.Size.Y / 2 + humanoid.HipHeight, 0)
+	for _, emitter in effect:GetChildren() do
+		if emitter:IsA("ParticleEmitter") then
+			emitter:Emit(math.max(1, math.floor(emitter:GetAttribute("Burst") * scale + 0.5)))
+		end
+	end
+	task.delay(DUST_SECONDS, effect.Destroy, effect)
+end
+
 function Footsteps.start()
 	local cue = Cues.steps
 	local audio = ReplicatedStorage:WaitForChild("Audio", 10)
 	assert(audio, "ReplicatedStorage.Audio is missing (the sounds are baked into the place)")
+	local vfx = ReplicatedStorage:WaitForChild("Vfx", 10)
+	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
+	local dust = vfx:WaitForChild(cue.dust, 10)
+	assert(dust and dust:IsA("Attachment"), `Vfx is missing {cue.dust} (an Attachment)`)
+	for _, emitter in dust:GetChildren() do
+		if emitter:IsA("ParticleEmitter") then
+			assert(type(emitter:GetAttribute("Burst")) == "number", `Vfx.{cue.dust} needs a number attribute Burst on {emitter.Name}`)
+		end
+	end
 	local sounds: { [string]: Sound } = {}
 	for _, list in cue.surfaces do
 		for _, name in list do
@@ -55,6 +86,7 @@ function Footsteps.start()
 			cue.volume * (if carrying then cue.carryVolume else 1),
 			if carrying then cue.carryPitch else 1
 		)
+		Footsteps.dust(humanoid, 1)
 	end)
 
 	-- Mute the default running sound, and keep it muted if the default script resets it.
@@ -119,6 +151,7 @@ function Footsteps.start()
 				walked[other] = 0
 				if camera and (camera.CFrame.Position - pos).Magnitude <= OTHERS_RANGE then
 					step(humanoid.FloorMaterial, root, cue.otherVolume, 1)
+					Footsteps.dust(humanoid, 1)
 				end
 			end
 		end

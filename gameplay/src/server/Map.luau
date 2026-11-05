@@ -3,10 +3,12 @@
 -- Contract, one Model per stage named after config.stages[i].name:
 --   Spawn     where players are moved at stage start
 --   Source    invisible zone over the well; players aim at it to scoop (client/Action)
---   PourPoint at the basin rim; players stand near it and aim at it or the Water to pour;
---             tripDistance from Source
+--   PourPoint marks the usual pour spot at the basin rim (tripDistance from Source); pouring
+--             itself works anywhere next to where the Water will be (shared/Zones.nearFlood)
 --   Basin     the floor of the sunken basin; Water rises from it to ground level
---   Water     with a number attribute "Depth"; rises with the fill fraction
+--   Water     with a number attribute "Depth"; rises with the fill fraction. It may hold BasePart
+--             children: extra tiles for water wider than one part can be (2048 studs); every tile
+--             keeps its own X and Z and rises with it
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Zones = require(ReplicatedStorage.Shared.Zones)
@@ -22,13 +24,22 @@ local baseTransparency: { [BasePart]: number } = {} -- each Water part's look in
 function Map.setFill(stage: Model, fraction: number)
 	local water = Zones.part(stage, "Water")
 	local basin = Zones.part(stage, "Basin")
-	if baseTransparency[water] == nil then
-		baseTransparency[water] = water.Transparency
-	end
 	local height = math.max(0.05, (water:GetAttribute("Depth") :: number) * math.clamp(fraction, 0, 1))
-	water.Size = Vector3.new(water.Size.X, height, water.Size.Z)
-	water.Position = Vector3.new(basin.Position.X, basin.Position.Y + 0.5 + height / 2, basin.Position.Z)
-	water.Transparency = if fraction <= 0 then 1 else baseTransparency[water]
+	local y = basin.Position.Y + 0.5 + height / 2
+	local tiles: { BasePart } = { water }
+	for _, child in water:GetChildren() do
+		if child:IsA("BasePart") then
+			table.insert(tiles, child)
+		end
+	end
+	for _, tile in tiles do
+		if baseTransparency[tile] == nil then
+			baseTransparency[tile] = tile.Transparency
+		end
+		tile.Size = Vector3.new(tile.Size.X, height, tile.Size.Z)
+		tile.Position = Vector3.new(tile.Position.X, y, tile.Position.Z)
+		tile.Transparency = if fraction <= 0 then 1 else baseTransparency[tile]
+	end
 end
 
 function Map.ensure(config): Folder

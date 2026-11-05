@@ -2,7 +2,10 @@
 -- Clients send Act("scoop" | "pour") when they start a scoop sweep or a pour (aimed at the well or
 -- the basin, see client/Action) and Buy(trackId); state goes out as attributes. The server checks
 -- the distance and, for scoops, the pace (one per ActSeconds) when an action starts. A scoop is
--- credited when it ends, ActSeconds later; a pour is instant.
+-- credited when it ends, ActSeconds later; a pour is instant. Each accepted action is published as
+-- ActKind + ActAt (server time) so other clients can play it on that player's body (client/Bodies).
+-- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
+-- Admins (shared/Admins) send Admin(stage index) to jump the run to a stage (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the difficulty and the party; in Studio
 -- or a normal server, workspace attribute StudioDifficulty (default 1) and no party wait.
 local Players = game:GetService("Players")
@@ -10,8 +13,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 
+local Admins = require(ReplicatedStorage.Shared.Admins)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
+local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Water = require(ReplicatedStorage.Shared.Water)
 local Rewards = require(ReplicatedStorage.Shared.Rewards)
 local Zones = require(ReplicatedStorage.Shared.Zones)
@@ -29,10 +34,12 @@ local CARD_SECONDS = 3
 local RETURN_SECONDS = 15 -- results screen time before everyone goes back to the lobby
 local MAX_BUYS_PER_SECOND = 5
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
-local ACT_REACH = 12 -- studs from Source / PourPoint; keep in step with client/Action REACH
+local ACT_REACH = 12 -- studs from Source / from where the water will be; keep in step with client/Action REACH
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
 local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action pace check (mobile lag spikes)
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
+local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
+local LOOK_LIMIT = 80 -- degrees up or down
 
 local Run = {}
 
@@ -50,11 +57,19 @@ local run = {
 	allLitres = {} :: { number }, -- per stage, every player including leavers
 	results = nil :: { any }?, -- kept so a player who joins after the run still sees them
 	started = false,
+	boost = nil :: { id: string, token: number }?, -- the running fill-milestone boost (Config.boosts)
+	boostOrder = {} :: { string }, -- this stage's boost per milestone, shuffled at stage start
+	boostToken = 0,
 }
 local states: { [Player]: any } = {}
 
 local function setGlobal(name: string, value: any)
 	ReplicatedStorage:SetAttribute(name, value)
+end
+
+-- A player's stats with the running boost applied. state.stats stays what they bought.
+local function boosted(state)
+	return Boosts.apply(Config, state.stats, run.boost and run.boost.id)
 end
 
 local function stageModel(index: number): Model
@@ -77,7 +92,7 @@ local function publish(player: Player)
 	player:SetAttribute("Capacity", state.stats.capacity)
 	player:SetAttribute("WalkSpeed", state.stats.walkSpeed)
 	player:SetAttribute("ActSeconds", state.stats.actSeconds)
-	player:SetAttribute("Sweeps", state.stats.sweeps)
+	player:SetAttribute("Sweeps", boosted(state).sweeps)
 	player:SetAttribute("ToolName", state.stats.toolName)
 	player:SetAttribute("ToolModel", state.stats.toolModel)
 	player:SetAttribute("ToolTier", state.stats.toolTier)
@@ -93,7 +108,7 @@ end
 local function applyWalkSpeed(player: Player)
 	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = states[player].stats.walkSpeed
+		humanoid.WalkSpeed = boosted(states[player]).walkSpeed
 	end
 end
 
@@ -139,6 +154,49 @@ end
 
 local function card(text: string)
 	remotes.Card:FireAllClients(text, CARD_SECONDS)
+end
+
+-- Boost start and end change everyone's walk speed and sweeps at once.
+local function refreshAll()
+	for player in states do
+		applyWalkSpeed(player)
+		publish(player)
+	end
+end
+
+local function endBoost()
+	if run.boost then
+		run.boost = nil
+		setGlobal("Boost", "")
+		refreshAll()
+	end
+end
+
+local function startBoost(id: string)
+	local kind = Boosts.kind(Config, id)
+	assert(kind, `unknown boost {id}`)
+	run.boostToken += 1
+	local token = run.boostToken
+	run.boost = { id = id, token = token }
+	setGlobal("Boost", id)
+	setGlobal("BoostEndsAt", workspace:GetServerTimeNow() + Config.boosts.seconds)
+	card(kind.card)
+	refreshAll()
+	task.delay(Config.boosts.seconds, function()
+		if run.boost and run.boost.token == token then
+			endBoost()
+		end
+	end)
+end
+
+-- A pour moved the fill from `before` to `after`: crossing a milestone starts its boost, unless
+-- the stage just filled.
+local function checkBoost(before: number, after: number)
+	local index = Boosts.crossed(Config.boosts.milestones, before, after)
+	local id = index and run.boostOrder[index]
+	if id and after < 1 then
+		startBoost(id)
+	end
 end
 
 -- Sends players to the lobby. Studio can't teleport, so it only says so.
@@ -231,6 +289,7 @@ local startStage
 
 local function completeStage()
 	setPhase("card")
+	endBoost()
 	card("FULL!")
 	task.wait(CARD_SECONDS)
 	if run.stage < #Config.stages then
@@ -245,6 +304,11 @@ function startStage(index: number)
 	run.stage = index
 	run.allLitres[index] = 0
 	setGlobal("Stage", index)
+	local order, rng = {}, Random.new()
+	for _, kind in Config.boosts.kinds do
+		table.insert(order, rng:NextInteger(1, #order + 1), kind.id)
+	end
+	run.boostOrder = order
 	setWater(0, Water.target(Config.stages[index].waterPerPlayer, #Players:GetPlayers(), run.scale))
 	card(`The sun drained the {Config.stages[index].name}!`)
 	for player in states do
@@ -321,6 +385,7 @@ local function onPlayerAdded(player: Player)
 		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
 		buyWindowStart = 0,
 		buysInWindow = 0,
+		lastLookAt = 0, -- os.clock() of the last accepted Look
 		equipped = true,
 	}
 	publish(player)
@@ -373,6 +438,34 @@ local function onEquip(player: Player, equipped: unknown)
 	publish(player)
 end
 
+-- Where the player looks, for other clients to turn their head (client/Bodies). Cosmetic, so it is
+-- only range-checked and rate-limited.
+local function onLook(player: Player, pitch: unknown)
+	local state = states[player]
+	if not state or type(pitch) ~= "number" or pitch ~= pitch or math.abs(pitch) == math.huge then
+		return
+	end
+	local now = os.clock()
+	if now - state.lastLookAt < LOOK_INTERVAL then
+		return
+	end
+	state.lastLookAt = now
+	player:SetAttribute("Look", math.round(math.clamp(pitch, -LOOK_LIMIT, LOOK_LIMIT)))
+end
+
+-- Admin window (client/Admin): jump the run to a stage. Only mid-stage, so it never races a stage
+-- transition (startStage leaves "playing" at once, which also stops repeat clicks).
+local function onAdmin(player: Player, stageIndex: unknown)
+	if not Admins[player.UserId] or run.phase ~= "playing" then
+		return
+	end
+	if type(stageIndex) ~= "number" or stageIndex % 1 ~= 0 or stageIndex < 1 or stageIndex > #Config.stages then
+		return
+	end
+	endBoost()
+	task.spawn(startStage, stageIndex)
+end
+
 local function checkFull()
 	if run.phase == "playing" and run.current >= run.target - 1e-6 then
 		setPhase("card") -- stop further pours; completeStage runs the transition
@@ -385,8 +478,29 @@ local function nearPart(player: Player, part: BasePart): boolean
 	return root ~= nil and ((root :: BasePart).Position - part.Position).Magnitude <= ACT_REACH + DISTANCE_SLACK
 end
 
+-- Pouring works anywhere next to where the stage's water will be (shared/Zones.nearFlood).
+local function nearFlood(player: Player, stage: Model): boolean
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false
+	end
+	local characters = {}
+	for _, other in Players:GetPlayers() do
+		if other.Character then
+			table.insert(characters, other.Character)
+		end
+	end
+	return Zones.nearFlood(stage, (root :: BasePart).Position, ACT_REACH + DISTANCE_SLACK, characters)
+end
+
 local function creditScoop(state)
-	state.carried += Water.scoopAmount(state.carried, state.stats.capacity, state.stats.sweeps)
+	state.carried += Water.scoopAmount(state.carried, state.stats.capacity, boosted(state).sweeps)
+end
+
+-- Tells every client an accepted action started, so they can play it on this player's body.
+local function publishAct(player: Player, kind: string)
+	player:SetAttribute("ActKind", kind)
+	player:SetAttribute("ActAt", workspace:GetServerTimeNow())
 end
 
 local function creditPour(state, stageIndex: number): boolean
@@ -395,10 +509,12 @@ local function creditPour(state, stageIndex: number): boolean
 		return false
 	end
 	state.carried -= litres
-	state.money += litres * Config.stages[stageIndex].coinsPerLitre * state.stats.coinBonus
+	state.money += litres * Config.stages[stageIndex].coinsPerLitre * boosted(state).coinBonus
 	state.litres[stageIndex] = (state.litres[stageIndex] or 0) + litres
 	run.allLitres[stageIndex] += litres
+	local before = run.current / run.target
 	setWater(run.current + litres, run.target)
+	checkBoost(before, run.current / run.target)
 	return true
 end
 
@@ -417,8 +533,8 @@ local function onAct(player: Player, kind: unknown)
 	if kind == "scoop" and now < state.nextActAt - slack then
 		return
 	end
-	local part = Zones.part(stageModel(stageIndex), if kind == "scoop" then "Source" else "PourPoint")
-	if not nearPart(player, part) then
+	local stage = stageModel(stageIndex)
+	if not (if kind == "scoop" then nearPart(player, Zones.part(stage, "Source")) else nearFlood(player, stage)) then
 		return
 	end
 	if kind == "scoop" and state.carried >= state.stats.capacity - 1e-9 then
@@ -428,6 +544,7 @@ local function onAct(player: Player, kind: unknown)
 	end
 	if kind == "pour" then
 		if creditPour(state, stageIndex) then
+			publishAct(player, kind)
 			publish(player)
 			updateShares()
 			checkFull()
@@ -436,6 +553,7 @@ local function onAct(player: Player, kind: unknown)
 	end
 	-- Keep up to `slack` of earned time, so a late packet doesn't make the next on-time one look early.
 	state.nextActAt = math.max(state.nextActAt, now - slack) + act
+	publishAct(player, kind)
 	task.delay(act, function()
 		if states[player] ~= state or run.phase ~= "playing" or run.stage ~= stageIndex or not state.equipped then
 			return
@@ -477,7 +595,7 @@ end
 
 function Run.start(stages: Folder)
 	stagesFolder = stages
-	for _, name in { "Buy", "Card", "Results", "Equip", "Act" } do
+	for _, name in { "Buy", "Card", "Results", "Equip", "Act", "Look", "Admin" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Stage", 0)
@@ -491,6 +609,8 @@ function Run.start(stages: Folder)
 	remotes.Buy.OnServerEvent:Connect(onBuy)
 	remotes.Equip.OnServerEvent:Connect(onEquip)
 	remotes.Act.OnServerEvent:Connect(onAct)
+	remotes.Look.OnServerEvent:Connect(onLook)
+	remotes.Admin.OnServerEvent:Connect(onAdmin)
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do
 		onPlayerAdded(player)

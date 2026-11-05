@@ -101,6 +101,16 @@ function tests.every_surface_has_step_sounds(t)
 	end
 end
 
+function tests.dust_and_drips_are_named(t)
+	t.expectEq(type(Cues.steps.dust), "string")
+	t.expectEq(Cues.steps.dustSurfaces.sand, true)
+	t.expectEq(Cues.steps.dustSurfaces.grass, nil, "grass doesn't puff")
+	if not (Cues.steps.landDust > 1) then
+		error("a landing should puff more dust than a step")
+	end
+	t.expectEq(type(Cues.carry.drips), "string")
+end
+
 function tests.every_stage_has_an_ambience_bed(t)
 	for _, stage in { "Pool", "Lake", "Ocean" } do
 		t.expectEq(type(Cues.ambience.beds[stage]), "string", stage)

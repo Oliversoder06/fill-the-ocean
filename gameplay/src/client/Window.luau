@@ -4,10 +4,15 @@
 -- swing into place and land together with the last item. Closing is one quick shrink.
 -- Don't put Reveal on a child of a UIListLayout/UIGridLayout: its scale moves its siblings; mark
 -- what is inside it instead. The window's root UIScale (`fit`) also fits it to the screen.
+-- Opening and closing play a whoosh (Cues.window).
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
+local Cues = require(ReplicatedStorage.Shared.Cues)
 local Reveal = require(ReplicatedStorage.Shared.Reveal)
+
+local SOUND_SECONDS = 2
 
 export type Window = {
 	open: (fitScale: number) -> (),
@@ -15,6 +20,23 @@ export type Window = {
 }
 
 local Window = {}
+
+local whoosh: Sound? = nil
+
+local function playWhoosh(volume: number, pitch: number)
+	if not whoosh then
+		local audio = ReplicatedStorage:FindFirstChild("Audio")
+		local found = audio and audio:FindFirstChild(Cues.window.whoosh)
+		assert(found and found:IsA("Sound"), `ReplicatedStorage.Audio is missing {Cues.window.whoosh} (a Sound)`)
+		whoosh = found
+	end
+	local sound = (whoosh :: Sound):Clone()
+	sound.Volume = volume
+	sound.PlaybackSpeed = pitch
+	sound.Parent = SoundService
+	sound:Play()
+	task.delay(SOUND_SECONDS, sound.Destroy, sound)
+end
 
 function Window.new(root: GuiObject, fit: UIScale): Window
 	local parts: { UIScale } = {}
@@ -69,6 +91,7 @@ function Window.new(root: GuiObject, fit: UIScale): Window
 		token += 1
 		stop()
 		root.Visible = true
+		playWhoosh(Cues.window.openVolume, Cues.window.openPitch)
 		fit.Scale = fitScale * Reveal.FRAME_FROM
 		play(TweenService:Create(fit, frameIn, { Scale = fitScale }))
 		for i, scale in parts do
@@ -87,6 +110,7 @@ function Window.new(root: GuiObject, fit: UIScale): Window
 		token += 1
 		stop()
 		local mine = token
+		playWhoosh(Cues.window.closeVolume, Cues.window.closePitch)
 		for _, scale in parts do
 			scale.Scale = 1
 		end

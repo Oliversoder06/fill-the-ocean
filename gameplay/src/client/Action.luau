@@ -1,4 +1,5 @@
--- Scoop and pour. Stand by the well (the stage's Source) or the basin edge (PourPoint), aim at the
+-- Scoop and pour. Stand by the well (the stage's Source) or anywhere next to where the water will
+-- be (shared/Zones.nearFlood), aim at the
 -- water and press E, left mouse, RT or the touch button. A scoop is one sweep (the tool fills over
 -- `Sweeps` of them); each press does one sweep, and holding keeps sweeping only once the player owns
 -- the Hold upgrade. A pour is one quick tip that empties the tool. An action that has started always
@@ -14,7 +15,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
 
-local REACH = 12 -- studs from Source / PourPoint; keep in step with server/Run ACT_REACH
+local REACH = 12 -- studs from Source / from where the water will be; keep in step with server/Run ACT_REACH
 local AIM_DISTANCE = 80
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
 local ACTION_NAME = "FillAct"
@@ -101,28 +102,33 @@ function Action.start()
 	end)
 
 	-- The action this spot offers, whether the aim is on its water, and the visible point aimed at.
+	-- Pouring works anywhere next to where the water will be, aimed at a spot it will cover.
 	local function target(stage: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?)
 		local source = Zones.part(stage, "Source")
 		local pourPoint = Zones.part(stage, "PourPoint")
-		local kind: Kind
-		if (root.Position - source.Position).Magnitude <= REACH then
-			kind = "scoop"
-			aimParams.FilterDescendantsInstances = { source }
-		elseif (root.Position - pourPoint.Position).Magnitude <= REACH then
-			kind = "pour"
-			aimParams.FilterDescendantsInstances = { pourPoint, Zones.part(stage, "Water") }
-		else
-			return nil, nil
-		end
 		local origin, look = camera.CFrame.Position, camera.CFrame.LookVector * AIM_DISTANCE
-		local aim = workspace:Raycast(origin, look, aimParams)
-		if not aim then
-			return kind, nil
-		end
 		-- Splash where the eye lands (the well's water or the basin), not on the invisible zone part.
 		seeParams.FilterDescendantsInstances = { character, camera, source, pourPoint }
+		if (root.Position - source.Position).Magnitude <= REACH then
+			aimParams.FilterDescendantsInstances = { source }
+			local aim = workspace:Raycast(origin, look, aimParams)
+			if not aim then
+				return "scoop", nil
+			end
+			local seen = workspace:Raycast(origin, look, seeParams)
+			return "scoop", if seen then seen.Position else aim.Position
+		end
+		local ignore: { Instance } = { camera }
+		for _, other in Players:GetPlayers() do
+			if other.Character then
+				table.insert(ignore, other.Character)
+			end
+		end
+		if not Zones.nearFlood(stage, root.Position, REACH, ignore) then
+			return nil, nil
+		end
 		local seen = workspace:Raycast(origin, look, seeParams)
-		return kind, if seen then seen.Position else aim.Position
+		return "pour", if seen and Zones.willFlood(stage, seen.Position) then seen.Position else nil
 	end
 
 	local function canStart(kind: Kind): boolean

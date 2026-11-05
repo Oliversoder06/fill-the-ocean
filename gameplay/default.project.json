@@ -35,6 +35,12 @@
         },
         "Act": {
           "$className": "RemoteEvent"
+        },
+        "Look": {
+          "$className": "RemoteEvent"
+        },
+        "Admin": {
+          "$className": "RemoteEvent"
         }
       }
     },

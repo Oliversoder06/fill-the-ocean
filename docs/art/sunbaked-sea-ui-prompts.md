@@ -281,5 +281,23 @@ Add this to every prompt in this group, after the STYLE block:
   - Tool Ladder: a short wooden ladder with a spoon on the bottom rung and a moon on the top rung.
   - Stats: a clipboard with a rising water-level bar.
 
+### E1. Upgrades button (shield badge)
+**Final size:** 256 x 256, transparent. The owner's reference: a shield-shaped badge, a big green
+arrow shooting up and away from the viewer, two leaves at the base and a coin. Drawn in this style so
+it sits with the hotbar and bars. "UPGRADES" and "TAB" are TextLabels added in Roblox (white with a
+navy outline, like the rest of the HUD), so the image has no text; leave room for them.
+
+> A chunky shield-shaped game badge, wider at the top with softly rounded corners and a rounded
+> point at the bottom, in deep water blue (#1F5FA8) with a thick sun rim cream (#FFF1C9) border
+> and the bold navy outline around everything, the solid darker band along its bottom edge so it
+> looks raised like a toy. Bursting out of the badge, a big fat 3D arrow in bright sea green
+> (#2FC7B0) pointing up and away from the viewer in strong perspective: the arrowhead large and
+> close at the top left, the shaft narrowing as it goes back into the badge, with a flat lighter
+> green top face and a darker green side face. The arrowhead breaks out past the top edge of the
+> shield. A small round gold coin (#FFB23F) with a navy outline sits on the badge's lower right,
+> overlapping the arrow's base. Two chunky rounded leaves in leafy green fan out from behind the
+> bottom of the shield, one to each side. Keep the lower third of the shield plain and uncluttered
+> (a label goes over it) and the top-right corner clear (a small key tag goes there).
+
 ## Still to upload
 Every image above. Put each id in `C:\RobloxDev\library\ui\icons.md` once it is uploaded.

@@ -36,15 +36,18 @@ Beating a run unlocks the next difficulty, where the sun is angrier.
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
   - gameplay: `workspace.Stages` (Pool, Lake, Ocean; each with invisible `Source` over its well
-    and `PourPoint` at the basin edge, which the player aims at), `ReplicatedStorage.ToolModels`
+    and `PourPoint` marking the usual pour spot at the basin edge; players pour anywhere next to
+    where the water will be, see `shared/Zones.nearFlood`), `ReplicatedStorage.ToolModels`
     (one Model per hero tool; swap placeholders for real models under the same name),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.
   - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, sign with Title and Status labels; any
     pad hosts a session), `StarterGui.LobbyHud` (Stats, Hint, Toast, SessionSetup window, HostBar).
-- Lake and Ocean are terrain bowls (natural shoreline); their `Basin` part is invisible and only
-  marks the water's base. The Pool is a tiled tank.
+- The Lake is a terrain bowl (natural shoreline); its `Basin` part is invisible and only marks the
+  water's base. The Pool is a tiled tank. The Ocean (around x=5000) is one straight beach facing
+  a seabed that runs to the horizon; its `Water` holds 5 extra `Tile` parts (2048 studs each,
+  the part size cap) that rise with it. The old crater is backed up in `ServerStorage.OceanBackup`.
 - Studio test helpers (gameplay): workspace attributes `WaterScale` (shorter runs),
   `StudioFillStage` (fill the current stage), `StudioDifficulty` (1-5). Teleports and saving
   need the published game / Studio API access.

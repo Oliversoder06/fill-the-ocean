@@ -6,13 +6,14 @@
                         "front":  "-Y in Blender (pour direction); +Z up; GLB exported +Y up",
                         "transforms":  "applied (scale 1, rotation 0)",
                         "materials":  "one per mesh, each tool has its own painted texture",
-                        "water":  "each tool\u0027s \u003cName\u003e_Water mesh is a child of \u003cName\u003e"
+                        "water":  "each tool\u0027s \u003cName\u003e_Water mesh is a child of \u003cName\u003e",
+                        "stages":  "real stud size (no scaling). Sources hold no water (added in Studio); basin water is animated by the game. Lake and Ocean basins are terrain, so only their props are models."
                     },
     "delivered":  [
-                      "tools"
+                      "tools",
+                      "stages"
                   ],
     "pending":  [
-                    "stages",
                     "story"
                 ],
     "models":  [
@@ -238,6 +239,443 @@
                        "target_longest_side_studs":  12.0,
                        "origin":  "grip point (underneath the Moon)",
                        "texture":  "textures/TheMoon.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Pool_Basin",
+                       "file":  "models/stages/Stage_Pool_Basin.glb",
+                       "group":  "stages",
+                       "kind":  "stage",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Pool_Basin",
+                                           "triangles":  4028,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  4028,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  50.0,
+                                          "depth_y":  50.0,
+                                          "height_z":  10.37
+                                      },
+                       "origin":  "basin centre on the ground plane (z 0 = patio level, basin floor at z -8)",
+                       "texture":  "textures/Stage_Pool_Basin.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Pool_Fence",
+                       "file":  "models/stages/Stage_Pool_Fence.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Pool_Fence",
+                                           "triangles":  1424,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  1424,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  8.107,
+                                          "depth_y":  0.707,
+                                          "height_z":  7.025
+                                      },
+                       "origin":  "base centre (one 8-stud fence panel; posts at x = +-3.7)",
+                       "texture":  "textures/Stage_Pool_Fence.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Pool_Lounger",
+                       "file":  "models/stages/Stage_Pool_Lounger.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Pool_Lounger",
+                                           "triangles":  764,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  764,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  2.5,
+                                          "depth_y":  6.384,
+                                          "height_z":  3.335
+                                      },
+                       "origin":  "base centre",
+                       "texture":  "textures/Stage_Pool_Lounger.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Pool_Umbrella",
+                       "file":  "models/stages/Stage_Pool_Umbrella.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Pool_Umbrella",
+                                           "triangles":  824,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  824,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  9.2,
+                                          "depth_y":  9.2,
+                                          "height_z":  8.57
+                                      },
+                       "origin":  "base centre",
+                       "texture":  "textures/Stage_Pool_Umbrella.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Pool_PlantPot",
+                       "file":  "models/stages/Stage_Pool_PlantPot.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Pool_PlantPot",
+                                           "triangles":  2240,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  2240,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  2.981,
+                                          "depth_y":  3.426,
+                                          "height_z":  2.764
+                                      },
+                       "origin":  "base centre",
+                       "texture":  "textures/Stage_Pool_PlantPot.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Lake_Pine",
+                       "file":  "models/stages/Stage_Lake_Pine.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Lake_Pine",
+                                           "triangles":  516,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  516,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  13.011,
+                                          "depth_y":  11.835,
+                                          "height_z":  21.055
+                                      },
+                       "origin":  "base centre (bottom of the trunk)",
+                       "texture":  "textures/Stage_Lake_Pine.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Lake_Cabin",
+                       "file":  "models/stages/Stage_Lake_Cabin.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Lake_Cabin",
+                                           "triangles":  3168,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  3168,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  19.7,
+                                          "depth_y":  15.234,
+                                          "height_z":  15.35
+                                      },
+                       "origin":  "base centre (bottom log at z 0)",
+                       "texture":  "textures/Stage_Lake_Cabin.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Lake_Tent",
+                       "file":  "models/stages/Stage_Lake_Tent.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Lake_Tent",
+                                           "triangles":  456,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  456,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  7.8,
+                                          "depth_y":  11.66,
+                                          "height_z":  5.25
+                                      },
+                       "origin":  "base centre (front opening faces -Y)",
+                       "texture":  "textures/Stage_Lake_Tent.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Lake_Dock",
+                       "file":  "models/stages/Stage_Lake_Dock.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Lake_Dock",
+                                           "triangles":  1860,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  1860,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  8.38,
+                                          "depth_y":  20.56,
+                                          "height_z":  7.733
+                                      },
+                       "origin":  "base centre (bottom of the posts; deck top at z 6.45, lake end at -Y)",
+                       "texture":  "textures/Stage_Lake_Dock.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Lake_Campfire",
+                       "file":  "models/stages/Stage_Lake_Campfire.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Lake_Campfire",
+                                           "triangles":  448,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  448,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  10.567,
+                                          "depth_y":  7.4,
+                                          "height_z":  2.235
+                                      },
+                       "origin":  "base centre (centre of the fire ring)",
+                       "texture":  "textures/Stage_Lake_Campfire.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Ocean_Palm",
+                       "file":  "models/stages/Stage_Ocean_Palm.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Ocean_Palm",
+                                           "triangles":  2592,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  2592,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  15.387,
+                                          "depth_y":  15.387,
+                                          "height_z":  19.699
+                                      },
+                       "origin":  "base centre (bottom of the trunk)",
+                       "texture":  "textures/Stage_Ocean_Palm.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Ocean_Hut",
+                       "file":  "models/stages/Stage_Ocean_Hut.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Ocean_Hut",
+                                           "triangles":  932,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  932,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  14.195,
+                                          "depth_y":  14.18,
+                                          "height_z":  14.525
+                                      },
+                       "origin":  "base centre (serving counter faces -Y)",
+                       "texture":  "textures/Stage_Ocean_Hut.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Ocean_Pier",
+                       "file":  "models/stages/Stage_Ocean_Pier.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Ocean_Pier",
+                                           "triangles":  2320,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  2320,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  10.123,
+                                          "depth_y":  24.0,
+                                          "height_z":  13.875
+                                      },
+                       "origin":  "base centre (bottom of the posts; deck top at z 10.46, sea end at -Y)",
+                       "texture":  "textures/Stage_Ocean_Pier.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Ocean_Boardwalk",
+                       "file":  "models/stages/Stage_Ocean_Boardwalk.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Ocean_Boardwalk",
+                                           "triangles":  1144,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  1144,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  6.082,
+                                          "depth_y":  16.0,
+                                          "height_z":  1.618
+                                      },
+                       "origin":  "base centre (deck top at z 1.6; segments chain along Y every 16 studs)",
+                       "texture":  "textures/Stage_Ocean_Boardwalk.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Stage_Ocean_LifeguardTower",
+                       "file":  "models/stages/Stage_Ocean_LifeguardTower.glb",
+                       "group":  "stages",
+                       "kind":  "prop",
+                       "objects":  [
+                                       {
+                                           "name":  "Stage_Ocean_LifeguardTower",
+                                           "triangles":  2448,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  2448,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  8.3,
+                                          "depth_y":  14.857,
+                                          "height_z":  14.598
+                                      },
+                       "origin":  "centre of the four stilts at ground level (the ramp reaches 11 studs toward -Y)",
+                       "texture":  "textures/Stage_Ocean_LifeguardTower.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Source_Tap",
+                       "file":  "models/stages/Source_Tap.glb",
+                       "group":  "stages",
+                       "kind":  "source",
+                       "objects":  [
+                                       {
+                                           "name":  "Source_Tap",
+                                           "triangles":  1672,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  1672,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  5.57,
+                                          "depth_y":  7.148,
+                                          "height_z":  7.1
+                                      },
+                       "origin":  "base centre (the tap spout is over the empty stone basin at the front)",
+                       "texture":  "textures/Source_Tap.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Source_Well",
+                       "file":  "models/stages/Source_Well.glb",
+                       "group":  "stages",
+                       "kind":  "source",
+                       "objects":  [
+                                       {
+                                           "name":  "Source_Well",
+                                           "triangles":  2930,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  2930,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  8.7,
+                                          "depth_y":  7.15,
+                                          "height_z":  8.15
+                                      },
+                       "origin":  "base centre (the empty shaft is open at the top; add the water in Studio)",
+                       "texture":  "textures/Source_Well.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Source_Pipe",
+                       "file":  "models/stages/Source_Pipe.glb",
+                       "group":  "stages",
+                       "kind":  "source",
+                       "objects":  [
+                                       {
+                                           "name":  "Source_Pipe",
+                                           "triangles":  944,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  944,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  10.0,
+                                          "depth_y":  11.75,
+                                          "height_z":  9.75
+                                      },
+                       "origin":  "base centre (the pipe mouth pours toward -Y into the concrete trough)",
+                       "texture":  "textures/Source_Pipe.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "PourSpot",
+                       "file":  "models/stages/PourSpot.glb",
+                       "group":  "stages",
+                       "kind":  "source",
+                       "objects":  [
+                                       {
+                                           "name":  "PourSpot",
+                                           "triangles":  796,
+                                           "role":  "model"
+                                       }
+                                   ],
+                       "triangles":  796,
+                       "triangle_budget":  10000,
+                       "size_studs":  {
+                                          "width_x":  6.474,
+                                          "depth_y":  7.367,
+                                          "height_z":  2.625
+                                      },
+                       "origin":  "base centre (players stand on the deck; the chute points toward the basin at -Y)",
+                       "texture":  "textures/PourSpot.png (512x512 hand-painted, also embedded in the GLB)",
                        "materials":  1
                    }
                ]
