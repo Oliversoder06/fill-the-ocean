@@ -183,6 +183,7 @@ local function saveRewards(results)
 end
 
 local function endRun()
+	setGlobal("RunEndedAt", workspace:GetServerTimeNow()) -- stops the HUD stopwatch
 	updateShares()
 	local weights = Config.stageWeights()
 	local entries = {}
@@ -260,6 +261,7 @@ local function startRun()
 		return
 	end
 	run.started = true
+	setGlobal("RunStartedAt", workspace:GetServerTimeNow()) -- the HUD stopwatch counts from here
 	local scale = workspace:GetAttribute("WaterScale") -- Studio test shortcut
 	local studioScale = if RunService:IsStudio() and type(scale) == "number" and scale > 0 then scale else 1
 	run.scale = studioScale * Difficulty.waterMultiplier(run.difficulty)

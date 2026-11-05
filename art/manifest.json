@@ -1,0 +1,244 @@
+{
+    "game":  "Fill the Ocean",
+    "generated":  "2026-11-05",
+    "conventions":  {
+                        "units":  "1 Blender unit = 1 stud",
+                        "front":  "-Y in Blender (pour direction); +Z up; GLB exported +Y up",
+                        "transforms":  "applied (scale 1, rotation 0)",
+                        "materials":  "one per mesh, each tool has its own painted texture",
+                        "water":  "each tool\u0027s \u003cName\u003e_Water mesh is a child of \u003cName\u003e"
+                    },
+    "delivered":  [
+                      "tools"
+                  ],
+    "pending":  [
+                    "stages",
+                    "story"
+                ],
+    "models":  [
+                   {
+                       "name":  "Spoon",
+                       "file":  "models/tools/Spoon.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "Spoon",
+                                           "triangles":  1072,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "Spoon_Water",
+                                           "triangles":  224,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  1296,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  0.421,
+                                          "depth_y":  1.2,
+                                          "height_z":  0.307
+                                      },
+                       "target_longest_side_studs":  1.2,
+                       "origin":  "grip point (middle of the wrapped handle)",
+                       "texture":  "textures/Spoon.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Cup",
+                       "file":  "models/tools/Cup.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "Cup",
+                                           "triangles":  1684,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "Cup_Water",
+                                           "triangles":  44,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  1728,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  1.0,
+                                          "depth_y":  0.772,
+                                          "height_z":  0.775
+                                      },
+                       "target_longest_side_studs":  1.0,
+                       "origin":  "grip point (the wooden handle)",
+                       "texture":  "textures/Cup.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Bucket",
+                       "file":  "models/tools/Bucket.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "Bucket",
+                                           "triangles":  2072,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "Bucket_Water",
+                                           "triangles":  52,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  2124,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  1.695,
+                                          "depth_y":  1.615,
+                                          "height_z":  2.0
+                                      },
+                       "target_longest_side_studs":  2.0,
+                       "origin":  "grip point (the wooden handle grip on top)",
+                       "texture":  "textures/Bucket.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "Bathtub",
+                       "file":  "models/tools/Bathtub.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "Bathtub",
+                                           "triangles":  2676,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "Bathtub_Water",
+                                           "triangles":  92,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  2768,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  2.716,
+                                          "depth_y":  5.0,
+                                          "height_z":  3.719
+                                      },
+                       "target_longest_side_studs":  5.0,
+                       "origin":  "grip point (right rim, middle)",
+                       "texture":  "textures/Bathtub.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "KiddiePool",
+                       "file":  "models/tools/KiddiePool.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "KiddiePool",
+                                           "triangles":  1176,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "KiddiePool_Water",
+                                           "triangles":  108,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  1284,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  6.0,
+                                          "depth_y":  5.956,
+                                          "height_z":  1.799
+                                      },
+                       "target_longest_side_studs":  6.0,
+                       "origin":  "grip point (outer ring, right side)",
+                       "texture":  "textures/KiddiePool.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "SwimmingPool",
+                       "file":  "models/tools/SwimmingPool.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "SwimmingPool",
+                                           "triangles":  2684,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "SwimmingPool_Water",
+                                           "triangles":  44,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  2728,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  7.902,
+                                          "depth_y":  10.0,
+                                          "height_z":  3.992
+                                      },
+                       "target_longest_side_studs":  10.0,
+                       "origin":  "grip point (right torn ground edge, middle)",
+                       "texture":  "textures/SwimmingPool.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "CargoShip",
+                       "file":  "models/tools/CargoShip.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "CargoShip",
+                                           "triangles":  2280,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "CargoShip_Water",
+                                           "triangles":  32,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  2312,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  4.496,
+                                          "depth_y":  14.0,
+                                          "height_z":  7.235
+                                      },
+                       "target_longest_side_studs":  14.0,
+                       "origin":  "grip point (under the hull, middle)",
+                       "texture":  "textures/CargoShip.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   },
+                   {
+                       "name":  "TheMoon",
+                       "file":  "models/tools/TheMoon.glb",
+                       "group":  "tools",
+                       "objects":  [
+                                       {
+                                           "name":  "TheMoon",
+                                           "triangles":  2320,
+                                           "role":  "tool body"
+                                       },
+                                       {
+                                           "name":  "TheMoon_Water",
+                                           "triangles":  156,
+                                           "role":  "water surface, shown when the tool is full"
+                                       }
+                                   ],
+                       "triangles":  2476,
+                       "triangle_budget":  3000,
+                       "size_studs":  {
+                                          "width_x":  11.683,
+                                          "depth_y":  12.0,
+                                          "height_z":  10.926
+                                      },
+                       "target_longest_side_studs":  12.0,
+                       "origin":  "grip point (underneath the Moon)",
+                       "texture":  "textures/TheMoon.png (512x512 hand-painted, also embedded in the GLB)",
+                       "materials":  1
+                   }
+               ]
+}

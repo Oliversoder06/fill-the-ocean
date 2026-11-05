@@ -3,7 +3,8 @@
 -- Contract for real models (art prompt):
 --   the Model's pivot is the grip point, the opening faces up, it pours forward (-Z),
 --   an optional child "<Name>_Water" is shown only while the player carries water.
--- Placeholders are baked in; replace each with the real model under the same name.
+-- The baked models are imported from art/models/tools (3D Importer); each MeshPart's texture is a
+-- SurfaceAppearance ColorMap, because the imported TextureID rendered grey.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ToolModels = {}

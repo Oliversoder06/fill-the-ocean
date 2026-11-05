@@ -31,6 +31,11 @@ local Shop = {}
 local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = "unknown", tip = "coin" }
 local PANEL_NAMES = { tool = "Tool", boosts = "Boosts" }
 
+-- Tiles take their panel's tag colour, so the colour says which group an upgrade belongs to.
+local function panelColor(track): Color3
+	return if track.panel == "tool" then colors.toolTag else colors.speedTag
+end
+
 local function scoops(n: number): string
 	return if n == 1 then "1 scoop" else `{n} scoops`
 end
@@ -181,14 +186,14 @@ function Shop.start()
 		buyRemote:FireServer(selected)
 	end)
 
-	-- Shows the tool model (tool track) or the track's icon in an art slot.
+	-- Shows the tool model (tool track) or the track's icon (a lock while locked) in an art slot.
 	local shownModels: { [Instance]: string } = {}
-	local function showArt(holder: Instance, id: string, model: string)
+	local function showArt(holder: Instance, id: string, model: string, locked: boolean?)
 		local icon, view = Hud.find(holder, "Icon"), Hud.find(holder, "View")
 		set(icon, "Visible", id ~= "tool")
 		set(view, "Visible", id == "tool")
 		if id ~= "tool" then
-			set(icon, "Image", images[ICONS[id]])
+			set(icon, "Image", if locked then images.lock else images[ICONS[id]])
 		elseif shownModels[view] ~= model then
 			local template = ToolModels.find(model)
 			if template then -- nil until replicated; try again next frame
@@ -218,9 +223,9 @@ function Shop.start()
 			local have = levels[id]
 			local level, status = Ladder.offer(Config, levels, id, stage)
 			local affordable = status == "buy" and money + 1e-6 >= level.cost
-			set(button, "ImageColor3", if status == "locked" then colors.locked elseif status == "max" then colors.toolTag else colors.shallowWater)
+			set(button, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 			set(Hud.find(button, "Ring"), "Visible", id == selected)
-			showArt(button, id, now.toolModel)
+			showArt(button, id, now.toolModel, status == "locked")
 			set(Hud.find(button, "ItemName"), "Text", if id == "tool" then now.toolName else track.name)
 
 			-- Level pips (short tracks) or a level label (the long tool ladder, the one-time Hold)
@@ -261,6 +266,7 @@ function Shop.start()
 		local have = levels[selected]
 		local level, status = Ladder.offer(Config, levels, selected, stage)
 		set(Hud.find(detail, "Category"), "Text", PANEL_NAMES[track.panel])
+		set(detailArt, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 		set(Hud.find(detail, "About"), "Text", track.about)
 		set(Hud.find(detail, "MoneyRow.Money"), "Text", Hud.money(money))
 		if level then

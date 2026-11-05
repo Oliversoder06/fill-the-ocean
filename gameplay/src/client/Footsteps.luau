@@ -33,11 +33,14 @@ function Footsteps.start()
 		end
 	end
 	local rng = Random.new()
+	local lastName: string? = nil
 
 	local function step(material: Enum.Material, parent: Instance, volume: number, pitch: number)
 		local list = cue.surfaces[Steps.surface(material.Name)]
-		local sound = sounds[Cues.pick(list, rng:NextNumber())]:Clone()
-		sound.Volume = volume
+		local name = Cues.pickNext(list, rng:NextNumber(), lastName)
+		lastName = name
+		local sound = sounds[name]:Clone()
+		sound.Volume = volume * sounds[name].Volume -- the template's Volume evens out its set
 		sound.PlaybackSpeed = Cues.between(cue.pitchMin, cue.pitchMax, rng:NextNumber()) * pitch
 		sound.Parent = parent
 		sound:Play()

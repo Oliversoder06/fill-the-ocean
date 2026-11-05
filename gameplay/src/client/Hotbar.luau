@@ -1,6 +1,7 @@
 -- The hotbar (StarterGui.Hud.Hotbar, built in Studio): one slot showing the current tool. Press 1,
 -- gamepad X or click the slot to put the tool away or take it out (the server decides). The fill
--- bar above the slot shows how full the tool is, only while it is out.
+-- bar above the slot shows the tool at its left end and "carried / capacity" litres, only while
+-- the tool is out.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,6 +24,15 @@ local FILL_POP_SCALE = 1.08 -- the bar swells a little each time water lands (sh
 
 local Hotbar = {}
 
+-- Litres for the fill label: whole numbers when whole (sweeps can leave thirds), 1.2K above 1000.
+local function litres(n: number): string
+	if n >= 1000 then
+		return Hud.short(n)
+	end
+	local rounded = math.floor(n * 10 + 0.5) / 10
+	return if rounded % 1 == 0 then tostring(math.floor(rounded)) else string.format("%.1f", rounded)
+end
+
 function Hotbar.start()
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local equipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Equip") :: RemoteEvent
@@ -31,6 +41,7 @@ function Hotbar.start()
 	local fill = Hud.find(fillBar, "Fill")
 	local fillLabel = Hud.find(fillBar, "Label")
 	local fillPop = Hud.find(fillBar, "Pop")
+	local fillTool = Hud.find(fillBar, "Tool") -- the tool's model at the bar's left end
 	local slot = Hud.find(bar, "Slot")
 	local ring = Hud.find(slot, "Ring")
 	local view = Hud.find(slot, "View")
@@ -69,12 +80,13 @@ function Hotbar.start()
 			local template = ToolModels.find(modelName)
 			if template then -- nil until replicated; try again next frame
 				ToolModels.showIn(view, template)
+				ToolModels.showIn(fillTool, template)
 				shownModel = modelName
 			end
 		end
 
 		local equipped = player:GetAttribute("Equipped") ~= false
-		set(slot, "ImageColor3", if equipped then colors.shallowWater else colors.locked)
+		set(slot, "ImageColor3", if equipped then colors.toolTag else colors.locked)
 		set(ring, "Visible", equipped)
 		set(fillBar, "Visible", equipped)
 		if equipped then
@@ -92,7 +104,7 @@ function Hotbar.start()
 			shown = math.clamp(Ease.pop(from, to, now - changedAt), 0, 1)
 			set(fill, "Size", UDim2.fromScale(shown, 1))
 			set(fill, "Visible", shown > 0)
-			set(fillLabel, "Text", `{math.floor(ratio * 100 + 0.5)}% Full`)
+			set(fillLabel, "Text", `{litres(carried)} / {litres(capacity)}`)
 		end
 	end)
 end

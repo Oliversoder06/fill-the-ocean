@@ -30,9 +30,9 @@ Two terms used below:
 > dried-up oceans. Chunky, thick, toy-like shapes with soft rounded forms. Every shape has a bold,
 > uniform dark navy outline (#1B2A3A), the same thickness all the way around, drawn like confident
 > hand inking: clean, with a very slight organic wobble, never perfectly vector-geometric and never
-> sketchy. Cel-shaded painting: a flat base colour with a soft vertical gradient, a darker shadow band
-> along the bottom edge (about 15% of the height) so it looks raised and chunky, a lighter highlight
-> band along the top edge, and one small glossy white shine spot near the top-left. Light always comes
+> sketchy. Flat cel-shaded painting: one flat base colour and a solid darker shadow band along the
+> bottom edge (about 15% of the height) so it looks raised and chunky. No gradient, no highlight
+> band, no shine spots, no sparkles. Light always comes
 > from the top. Saturated, warm, cheerful colours. Front-facing, centred, fully inside the canvas
 > with even empty margin around it, nothing cropped. Isolated on a flat solid magenta (#FF00FF)
 > background with no shadow, glow, scenery or floor. No text, no letters, no numbers, no watermark,

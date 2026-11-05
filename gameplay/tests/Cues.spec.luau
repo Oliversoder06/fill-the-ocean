@@ -27,6 +27,16 @@ function tests.between_blends(t)
 	t.expectNear(Cues.between(0.92, 1.08, 0.5), 1.0, 1e-9)
 end
 
+function tests.pick_next_never_repeats_the_last_variant(t)
+	local list = { "a", "b", "c" }
+	t.expectEq(Cues.pickNext(list, 0, "a"), "b")
+	t.expectEq(Cues.pickNext(list, 0.99, "a"), "c")
+	t.expectEq(Cues.pickNext(list, 0, "b"), "a")
+	t.expectEq(Cues.pickNext(list, 0.99, "c"), "b")
+	t.expectEq(Cues.pickNext(list, 0.5, nil), "b")
+	t.expectEq(Cues.pickNext({ "only" }, 0.5, "only"), "only")
+end
+
 function tests.scoop_cue_is_sane(t)
 	local cue = Cues.scoop
 	t.expectEq(#cue.splashSounds, 3)
@@ -109,6 +119,35 @@ function tests.filling_brings_life_back_and_quiets_the_heat(t)
 	t.expectNear(heat, 0.5, 1e-9)
 	life, heat = Cues.ambienceMix(2)
 	t.expectNear(heat, 0, 1e-9)
+end
+
+function tests.each_stage_plays_its_own_track(t)
+	t.expectEq(Cues.musicTrack("playing", "Pool", false, 0.5), "Pool")
+	t.expectEq(Cues.musicTrack("playing", "Lake", false, 0.99), "Lake", "the final push is only the last stage")
+	t.expectEq(Cues.musicTrack("card", "Ocean", true, 0), "Ocean")
+end
+
+function tests.the_final_push_speeds_up(t)
+	t.expectEq(Cues.musicTrack("playing", "Ocean", true, 0.94), "Ocean")
+	t.expectEq(Cues.musicTrack("playing", "Ocean", true, 0.95), "finale")
+	t.expectEq(Cues.musicTrack("card", "Ocean", true, 1), "finale", "stays on through the FULL! card")
+end
+
+function tests.waiting_and_results_are_calm(t)
+	t.expectEq(Cues.musicTrack("waiting", nil, false, 0), "calm")
+	t.expectEq(Cues.musicTrack("saving", nil, false, 0), "calm")
+	t.expectEq(Cues.musicTrack("results", nil, false, 0), "calm")
+	t.expectEq(Cues.musicTrack(nil, nil, false, 0), "calm")
+	t.expectEq(Cues.musicTrack("playing", nil, false, 0), "calm", "no stage yet")
+end
+
+function tests.every_music_track_is_named(t)
+	for _, key in { "Pool", "Lake", "Ocean", "finale", "calm" } do
+		t.expectEq(type(Cues.music.tracks[key]), "string", key)
+	end
+	if not (Cues.music.duck > 0 and Cues.music.duck < 1) then
+		error("music duck must be between 0 and 1")
+	end
 end
 
 return tests

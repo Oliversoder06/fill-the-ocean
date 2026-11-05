@@ -1,6 +1,8 @@
--- First-person copy of the player's current tool, lower right of the view. It grows a little with
--- each tool tier, shows its water while carrying, sweeps through the water on each scoop, tips
--- over on a pour (poses from shared/ToolView, timing from client/Action) and springs back up after.
+-- First-person copy of the player's current tool, lower right of the view, held by a copy of the
+-- player's own right hand and forearm. It grows a little with each tool tier, shows its water while
+-- carrying, sweeps through the water on each scoop, tips over on a pour (poses from shared/ToolView,
+-- timing from client/Action) and springs back up after. The hand wobbles with each step (walk cycle
+-- from client/CameraFeel) and trails a little behind camera turns.
 -- A newly bought tool waits below the screen while the shop is open, then swings up into the hand.
 -- Runs after CameraFeel, so it follows the camera's bob and tilt.
 local Players = game:GetService("Players")
@@ -11,17 +13,121 @@ local Ease = require(ReplicatedStorage.Shared.Ease)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local ToolView = require(ReplicatedStorage.Shared.ToolView)
 local Action = require(script.Parent.Action)
+local CameraFeel = require(script.Parent.CameraFeel)
 
 local BLEND_SECONDS = 0.08 -- eases into each new action's pose, so back-to-back sweeps don't snap
+
+local ARM_HAND_SIZE = 0.4 -- studs, longest side of the hand on screen, whatever the tool's size
+local ARM_SHOULDER = Vector3.new(1.7, -1.5, -1) -- camera space, just off the lower right of the view
+local ARM_LENGTH = 3 -- studs, forearm stretched so it always runs from the wrist off the screen
+local ARM_KEEP = { Attachment = true, SurfaceAppearance = true } -- what a copied body part keeps
+
+local SWAY_PER_RATE = 0.03 -- studs the hand trails per radian/s of camera turn
+local SWAY_MAX = 0.15
+local SWAY_EASE = 12
 
 local player = Players.LocalPlayer
 local Viewmodel = {}
 
 local revealListeners: { (Model) -> () } = {}
 
+type Arm = {
+	model: Model,
+	hand: BasePart,
+	lower: BasePart,
+	grip: CFrame, -- the hand's grip attachment, in hand space
+	wrist: CFrame, -- the hand's wrist attachment, in hand space
+	source: BasePart, -- the character's RightHand it was copied from
+	color: Color3,
+	shirt: string,
+}
+
 -- Called with the viewmodel when a new tool starts swinging into the hand (client/Purchase).
 function Viewmodel.onReveal(fn: (Model) -> ())
 	table.insert(revealListeners, fn)
+end
+
+local function shirtOf(character: Model): string
+	local shirt = character:FindFirstChildOfClass("Shirt")
+	return if shirt then shirt.ShirtTemplate else ""
+end
+
+local function copyPart(part: BasePart): BasePart
+	local copy = part:Clone()
+	assert(copy, `Viewmodel can't copy {part:GetFullName()} (Archivable is off)`)
+	for _, child in copy:GetChildren() do
+		if not ARM_KEEP[child.ClassName] then
+			child:Destroy()
+		end
+	end
+	copy.Anchored = true
+	copy.CanCollide = false
+	copy.CanQuery = false
+	copy.CanTouch = false
+	copy.CastShadow = false
+	copy.Massless = true
+	return copy
+end
+
+-- A copy of the player's own right hand and forearm (mesh, skin and shirt sleeve) at viewmodel
+-- scale. Nil for avatars without R15 wrist and grip attachments.
+local function buildArm(character: Model, hand: BasePart, lower: BasePart): Arm?
+	local wrist = hand:FindFirstChild("RightWristRigAttachment")
+	local grip = hand:FindFirstChild("RightGripAttachment")
+	if not (wrist and wrist:IsA("Attachment") and grip and grip:IsA("Attachment")) then
+		return nil
+	end
+	local model = Instance.new("Model")
+	model.Name = "ViewArm"
+	local h, l = copyPart(hand), copyPart(lower)
+	h.Parent, l.Parent = model, model
+	model.PrimaryPart = h
+	-- A Humanoid makes Roblox draw the classic shirt onto the copied forearm.
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType.R15
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	humanoid.Parent = model
+	local shirt = character:FindFirstChildOfClass("Shirt")
+	if shirt then
+		shirt:Clone().Parent = model
+	end
+	model:ScaleTo(ARM_HAND_SIZE / math.max(hand.Size.X, hand.Size.Y, hand.Size.Z))
+	l.Size = Vector3.new(l.Size.X, ARM_LENGTH, l.Size.Z)
+	return {
+		model = model,
+		hand = h,
+		lower = l,
+		grip = (h:FindFirstChild("RightGripAttachment") :: Attachment).CFrame,
+		wrist = (h:FindFirstChild("RightWristRigAttachment") :: Attachment).CFrame,
+		source = hand,
+		color = hand.Color,
+		shirt = shirtOf(character),
+	}
+end
+
+-- Smallest rotation that turns unit vector a onto unit vector b.
+local function turnTo(a: Vector3, b: Vector3): CFrame
+	local axis = a:Cross(b)
+	if axis.Magnitude < 1e-5 then
+		return CFrame.identity
+	end
+	return CFrame.fromAxisAngle(axis.Unit, math.acos(math.clamp(a:Dot(b), -1, 1)))
+end
+
+-- The hand grips the tool, turned so that at rest it points at the shoulder, and then moves rigidly
+-- with the tool; the forearm runs from the wrist to the shoulder, so the wrist bends on a pour.
+local function placeArm(arm: Arm, grip: CFrame, restGrip: CFrame, shoulder: Vector3)
+	local handUp = arm.grip:VectorToObjectSpace(Vector3.yAxis) -- the hand's wrist direction, in grip space
+	local hand = grip * turnTo(handUp, restGrip:PointToObjectSpace(shoulder).Unit) * arm.grip:Inverse()
+	local wrist = (hand * arm.wrist).Position
+	local along = (shoulder - wrist).Unit
+	local right = hand.RightVector - along * hand.RightVector:Dot(along)
+	if right.Magnitude < 1e-3 then
+		right = along:Cross(hand.LookVector)
+	end
+	arm.hand.CFrame = hand
+	arm.lower.CFrame = CFrame.fromMatrix(wrist + along * (ARM_LENGTH / 2 - 0.05), right.Unit, along)
 end
 
 local function shopOpen(): boolean
@@ -36,6 +142,7 @@ function Viewmodel.start()
 	local currentName: string? = nil
 	local currentTier = 0
 	local viewSize = ToolView.VIEW_START
+	local centerOffset = Vector3.zero -- bounding-box centre seen from the grip (pivot), after scaling
 	local shownWater: boolean? = nil
 	local pose = { 0, 0, 0 } -- down, side, tilt (see ToolView)
 	local from = { 0, 0, 0 } -- pose when the last action started or ended
@@ -43,6 +150,9 @@ function Viewmodel.start()
 	local actionId: number? = nil
 	local revealPending = false
 	local revealAt = -math.huge
+	local arm: Arm? = nil
+	local sway = Vector2.zero -- (side, down) the hand trails behind camera turns
+	local lastLook: CFrame? = nil
 
 	local function load(modelName: string, tier: number): boolean
 		local template = ToolModels.find(modelName)
@@ -56,7 +166,10 @@ function Viewmodel.start()
 		local extents = template:GetExtentsSize()
 		local longest = math.max(extents.X, extents.Y, extents.Z)
 		viewSize = ToolView.viewSize(tier) -- every rung (levels too) shows a slightly bigger tool
-		model:ScaleTo(viewSize / math.max(longest, 0.01))
+		local scale = viewSize / math.max(longest, 0.01)
+		model:ScaleTo(scale)
+		local center = template:GetBoundingBox()
+		centerOffset = template:GetPivot():PointToObjectSpace(center.Position) * scale
 		for _, d in model:GetDescendants() do
 			if d:IsA("BasePart") then
 				d.Anchored = true
@@ -73,17 +186,22 @@ function Viewmodel.start()
 		return true
 	end
 
-	RunService:BindToRenderStep("Viewmodel", Enum.RenderPriority.Camera.Value + 2, function()
+	RunService:BindToRenderStep("Viewmodel", Enum.RenderPriority.Camera.Value + 2, function(dt: number)
 		local camera = workspace.CurrentCamera
 		local modelName = player:GetAttribute("ToolModel")
 		local tier = player:GetAttribute("ToolTier")
-		local alive = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		local character = player.Character
+		local alive = character and character:FindFirstChildOfClass("Humanoid")
 		local equipped = player:GetAttribute("Equipped") ~= false
 		if type(modelName) ~= "string" or type(tier) ~= "number" or not alive or not equipped or camera.CameraType ~= Enum.CameraType.Custom then
 			if current then
 				current:Destroy()
 				current, currentName = nil, nil
 			end
+			if arm and arm.model.Parent then
+				arm.model.Parent = nil
+			end
+			lastLook = nil
 			return
 		end
 		local changed = modelName ~= currentName or tier ~= currentTier
@@ -95,6 +213,23 @@ function Viewmodel.start()
 		end
 		local model = current :: Model
 
+		-- Rebuild the arm when the avatar changes (respawn, new body colours or shirt).
+		local hand = (character :: Model):FindFirstChild("RightHand")
+		local lower = (character :: Model):FindFirstChild("RightLowerArm")
+		if hand and lower and hand:IsA("BasePart") and lower:IsA("BasePart") then
+			if not arm or arm.source ~= hand or arm.color ~= hand.Color or arm.shirt ~= shirtOf(character :: Model) then
+				if arm then
+					arm.model:Destroy()
+				end
+				arm = buildArm(character :: Model, hand, lower)
+			end
+		elseif arm then
+			arm.model:Destroy()
+			arm = nil
+		end
+		if arm and arm.model.Parent ~= camera then
+			arm.model.Parent = camera
+		end
 		local now = os.clock()
 		if revealPending and not shopOpen() then
 			revealPending, revealAt = false, now
@@ -124,8 +259,35 @@ function Viewmodel.start()
 		end
 
 		local revealDown, revealTilt = ToolView.revealPose(if revealPending then 0 else (now - revealAt) / ToolView.REVEAL_SECONDS)
-		local offset = CFrame.new(0.9 + viewSize * 0.25 + pose[2], -0.9 - viewSize * 0.35 - pose[1] - revealDown, -1.8 - viewSize * 0.6)
-		model:PivotTo(camera.CFrame * offset * CFrame.Angles(pose[3] + revealTilt, math.rad(-8), 0))
+		local walkDown, walkSide, walkRoll = ToolView.walkBob(CameraFeel.walk())
+
+		-- Turn sway: the hand drifts against the turn for a moment, as if it lags behind the view.
+		local look = camera.CFrame.Rotation
+		local swayTarget = Vector2.zero
+		if lastLook and dt > 0 then
+			local pitchTurn, yawTurn = lastLook:ToObjectSpace(look):ToEulerAnglesYXZ()
+			swayTarget = Vector2.new(
+				math.clamp(yawTurn / dt * SWAY_PER_RATE, -SWAY_MAX, SWAY_MAX),
+				math.clamp(pitchTurn / dt * SWAY_PER_RATE, -SWAY_MAX, SWAY_MAX)
+			)
+		end
+		lastLook = look
+		sway += (swayTarget - sway) * (1 - math.exp(-SWAY_EASE * dt))
+
+		local down = pose[1] + revealDown + walkDown + sway.Y
+		local side = pose[2] + walkSide + sway.X
+		local tilt = pose[3] + revealTilt
+		-- Frame the tool by its centre (grips sit anywhere: a bucket's bail, a tub's rim), but tilt it
+		-- from the grip. The centre lands where the old box placeholders' centres sat.
+		local yaw = CFrame.Angles(0, math.rad(-8), 0)
+		local centre = Vector3.new(0.9 + viewSize * 0.25 + side, -0.9 - viewSize * 0.09 - down, -1.8 - viewSize * 0.72)
+		local base = camera.CFrame * CFrame.new(centre - yaw:VectorToWorldSpace(centerOffset))
+		local grip = base * CFrame.Angles(tilt, math.rad(-8), walkRoll)
+		model:PivotTo(grip)
+		if arm then
+			local restGrip = base * CFrame.Angles(0, math.rad(-8), walkRoll)
+			placeArm(arm, grip, restGrip, camera.CFrame * ARM_SHOULDER)
+		end
 		local water = (player:GetAttribute("Carried") or 0) > 0
 		if water ~= shownWater then
 			shownWater = water

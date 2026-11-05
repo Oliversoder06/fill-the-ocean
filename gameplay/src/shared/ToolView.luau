@@ -68,4 +68,16 @@ function ToolView.heldScale(longestSide: number): number
 	return math.min(1, ToolView.HELD_MAX / longestSide)
 end
 
+-- The hand's own wobble while walking, on top of the camera bob, as (down, side, roll). Phase is
+-- the camera bob's walk cycle (one step every half turn); the hand dips a little after each step.
+ToolView.WALK_DOWN = 0.06 -- studs at full intensity
+ToolView.WALK_SIDE = 0.05
+ToolView.WALK_ROLL = math.rad(2.5)
+ToolView.WALK_LAG = 0.6 -- radians of the walk cycle the hand trails the camera by
+
+function ToolView.walkBob(phase: number, intensity: number): (number, number, number)
+	local s = math.sin(phase - ToolView.WALK_LAG)
+	return math.abs(s) * ToolView.WALK_DOWN * intensity, s * ToolView.WALK_SIDE * intensity, s * ToolView.WALK_ROLL * intensity
+end
+
 return ToolView

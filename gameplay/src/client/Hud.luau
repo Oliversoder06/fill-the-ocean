@@ -1,5 +1,7 @@
--- Fills in the HUD that lives in StarterGui ("Hud", built in Studio) from server attributes.
--- Results rows are clones of the hidden RowTemplate.
+-- Fills in the HUD that lives in StarterGui ("Hud", built in Studio) from server attributes:
+-- wallet, waiting text, card, results, and the run panel at the top right (stopwatch from
+-- RunStartedAt/RunEndedAt, the stage's name, how full its basin is). Results rows are clones of
+-- the hidden RowTemplate.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -7,12 +9,24 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Ease = require(ReplicatedStorage.Shared.Ease)
 
 local player = Players.LocalPlayer
 local Hud = {}
 
 local SUFFIXES = { "K", "M", "B", "T" }
 local COIN_BOUNCE = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local PROGRESS_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+-- Stopwatch text: 4:05, then 1:04:05 past an hour.
+function Hud.clock(seconds: number): string
+	local s = math.max(0, math.floor(seconds))
+	local h, m = s // 3600, (s // 60) % 60
+	if h > 0 then
+		return string.format("%d:%02d:%02d", h, m, s % 60)
+	end
+	return string.format("%d:%02d", m, s % 60)
+end
 
 function Hud.short(n: number): string
 	if n < 10 then
@@ -88,6 +102,14 @@ function Hud.start()
 	local resultsRow = find(gui, "Results.RowTemplate")
 	local resultsSub = find(gui, "Results.Sub")
 	local footer = find(gui, "Results.Footer")
+	local progress = find(gui, "Progress")
+	local timeText = find(progress, "TimeRow.Time")
+	local placeText = find(progress, "PlaceRow.Place")
+	local stageTag = find(progress, "StageTag")
+	local progressFill = find(progress, "Bar.Fill")
+	local progressLabel = find(progress, "Bar.Label")
+	local progressPop = find(progress, "Bar.Pop")
+	local shownFill, fillFrom, fillTo, fillChangedAt = 0, 0, 0, -math.huge
 
 	local cardToken = 0
 	cardEvent.OnClientEvent:Connect(function(text: string, seconds: number)
@@ -155,6 +177,35 @@ function Hud.start()
 		local returnAt = ReplicatedStorage:GetAttribute("ReturnAt")
 		if results.Visible and type(returnAt) == "number" then
 			set(footer, "Text", `Back to the lobby in {math.max(0, returnAt - os.time())}s`)
+		end
+
+		-- Run panel: stopwatch, where you are, how full this stage's basin is
+		local startedAt = ReplicatedStorage:GetAttribute("RunStartedAt")
+		set(progress, "Visible", type(startedAt) == "number")
+		if type(startedAt) == "number" then
+			local endedAt = ReplicatedStorage:GetAttribute("RunEndedAt")
+			local now = if type(endedAt) == "number" then endedAt else workspace:GetServerTimeNow()
+			set(timeText, "Text", Hud.clock(now - startedAt))
+			local index = ReplicatedStorage:GetAttribute("Stage")
+			local stage = if type(index) == "number" then Config.stages[math.min(index, #Config.stages)] else nil
+			if stage then
+				set(placeText, "Text", `The {stage.name}`)
+				set(stageTag, "Text", `STAGE {math.min(index, #Config.stages)}/{#Config.stages}`)
+			end
+			local fill = ReplicatedStorage:GetAttribute("Fill")
+			local target = if type(fill) == "number" then math.clamp(fill, 0, 1) else 0
+			local clock = os.clock()
+			if target ~= fillTo then
+				if target > fillTo then
+					progressPop.Scale = 1.06
+					TweenService:Create(progressPop, PROGRESS_POP, { Scale = 1 }):Play()
+				end
+				fillFrom, fillTo, fillChangedAt = shownFill, target, clock
+			end
+			shownFill = math.clamp(Ease.pop(fillFrom, fillTo, clock - fillChangedAt), 0, 1)
+			set(progressFill, "Size", UDim2.fromScale(shownFill, 1))
+			set(progressFill, "Visible", shownFill > 0)
+			set(progressLabel, "Text", string.format("%.1f%% filled", math.floor(target * 1000) / 10))
 		end
 
 	end)

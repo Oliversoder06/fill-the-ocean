@@ -48,7 +48,10 @@ function Ambience.start()
 		local k = 1 - math.exp(-dt * 3 / cue.fadeSeconds) -- about 95% of the way in fadeSeconds
 		local function ease(sound: Sound, target: number)
 			local v = sound.Volume + (target - sound.Volume) * k
-			if math.abs(v - sound.Volume) > 1e-4 then
+			if math.abs(target - v) < 0.002 then
+				v = target -- snap, or the tail of the fade never quite arrives
+			end
+			if v ~= sound.Volume then
 				sound.Volume = v
 			end
 		end

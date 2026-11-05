@@ -41,7 +41,8 @@ Server (`src/server/`):
 - `Map.luau`: checks the baked stages and moves the water.
 
 Client (`src/client/`, all started from `init.client.luau`):
-- `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, results), frees the cursor while
+- `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, results, the top-right
+  `Progress` panel: stopwatch, stage name, fill bar), frees the cursor while
   a window is open. Exposes helpers `Hud.find` (asserting path lookup), `Hud.set` (write only on
   change), `Hud.short` (1.2K), `Hud.money` (12,480), `Hud.currentStage`, and `Hud.walletHold`
   (money still flying in as coins; the wallet shows Money minus it).
@@ -60,12 +61,16 @@ Client (`src/client/`, all started from `init.client.luau`):
   default "Running" sound (`Cues.steps`).
 - `Ambience.luau`: a looping bed per stage plus a cicada heat layer; filling the basin fades the
   heat out and the bed up (`Cues.ambience`, `Cues.ambienceMix`).
+- `Music.luau`: a track per stage, a faster final-push track (last 5% of the last stage) and a
+  calm track for waiting/results (`Cues.musicTrack`); crossfades, ducks under stage cards and
+  purchases (`Music.duck`), plays through `SoundService.Music`.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
 - `Hotbar.luau`: the one tool slot (1 / gamepad X / click to equip or unequip) and the fill bar
   (springs with `Ease.pop`).
-- `Viewmodel.luau`: first-person tool (sweep / pour poses). `CameraFeel.luau`: first-person camera
-  bob and tilt. `Mood.luau`: lighting.
+- `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
+  hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
+  tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
 
 Shared (`src/shared/`, pure unless noted):
 - `Config.luau`: every run number: stages and the six upgrade tracks (`Config.tracks`: tool,
@@ -83,7 +88,8 @@ Shared (`src/shared/`, pure unless noted):
 ## Server ↔ client contract
 The server publishes state as attributes; the client only reads them.
 - `ReplicatedStorage` attributes: `Phase` (`waiting`, `playing`, `card`, `saving`, `results`),
-  `Stage` (1-3), `Current`, `Target`, `Fill`, `Waiting`, `ReturnAt`, `Difficulty`.
+  `Stage` (1-3), `Current`, `Target`, `Fill`, `Waiting`, `ReturnAt`, `Difficulty`,
+  `RunStartedAt` / `RunEndedAt` (server time, for the stopwatch).
 - Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
   `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, `Share`, and
   `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...).
@@ -104,8 +110,10 @@ The server publishes state as attributes; the client only reads them.
   fonts, image ids, 9-slice settings and motion come from the theme module
   `ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"]` (`C:\RobloxDev\shared\UI\Themes\sunbaked-sea.luau`).
   Never hard-code a colour or image id in game code; read it from the theme.
-- The look: a dry cracked-sand frame, wet deep-blue panels, chunky raised pieces with navy outlines,
-  Luckiest Guy titles, Fredoka One body text, white text with a navy outline. Tintable images
+- The look: a dry cracked-sand frame, quiet flat dark-sea panels (built in Studio, not images),
+  tiles coloured by category (Tool orange, Boosts teal, locked slate), navy outlines,
+  Montserrat Heavy titles, Nunito Heavy body text, white text with a navy outline (thin on small
+  text). No corner stickers or sparkles; the angry sun is the one decoration. Tintable images
   (tile, tag, tab, big button) are white; colour them with `ImageColor3` from the theme.
 - Windows (anything the player clicks in) must be listed in `Hud.luau`'s `windows` table, so the
   first-person cursor is freed while they are open.

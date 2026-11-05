@@ -71,6 +71,25 @@ function tests.pour_tips_then_holds(t)
 	expectPose(t, "p=2", d, s, r, -0.1, -0.2, math.rad(-65))
 end
 
+function tests.walk_bob_rests_when_standing(t)
+	local d, s, r = ToolView.walkBob(1.234, 0)
+	expectPose(t, "standing", d, s, r, 0, 0, 0)
+end
+
+function tests.walk_bob_lags_the_step(t)
+	local d, s, r = ToolView.walkBob(ToolView.WALK_LAG, 1)
+	expectPose(t, "at lag", d, s, r, 0, 0, 0)
+	d, s, r = ToolView.walkBob(ToolView.WALK_LAG + math.pi / 2, 1)
+	expectPose(t, "lowest", d, s, r, ToolView.WALK_DOWN, ToolView.WALK_SIDE, ToolView.WALK_ROLL)
+	d, s, r = ToolView.walkBob(ToolView.WALK_LAG + 3 * math.pi / 2, 1)
+	expectPose(t, "other foot", d, s, r, ToolView.WALK_DOWN, -ToolView.WALK_SIDE, -ToolView.WALK_ROLL)
+end
+
+function tests.walk_bob_scales_with_intensity(t)
+	local d, s, r = ToolView.walkBob(ToolView.WALK_LAG + math.pi / 2, 0.5)
+	expectPose(t, "half", d, s, r, ToolView.WALK_DOWN / 2, ToolView.WALK_SIDE / 2, ToolView.WALK_ROLL / 2)
+end
+
 function tests.new_tool_swings_up_from_below(t)
 	local down, tilt = ToolView.revealPose(0)
 	t.expectNear(down, ToolView.REVEAL_DOWN, 1e-9)

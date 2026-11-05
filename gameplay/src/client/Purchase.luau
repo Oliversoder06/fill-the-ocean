@@ -15,6 +15,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local Hud = require(script.Parent.Hud)
+local Music = require(script.Parent.Music)
 local Viewmodel = require(script.Parent.Viewmodel)
 
 local MAX_FLY_COINS = 6
@@ -170,6 +171,7 @@ function Purchase.start()
 		local track = Config.track(id)
 		local cost = track and track.levels[level] and track.levels[level].cost or 0
 		play(cue.sting, cue.stingVolume, 1)
+		Music.duck(Cues.music.duckSeconds)
 		if shop.Visible then
 			payInto(buttons[id], cost)
 		end

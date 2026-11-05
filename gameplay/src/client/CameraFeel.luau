@@ -31,10 +31,16 @@ local player = Players.LocalPlayer
 local CameraFeel = {}
 
 local stepListeners: { (Humanoid) -> () } = {}
+local phase, intensity = 0, 0 -- walk cycle of the head bob, also read by the viewmodel
 
 -- Called on each footstep (each dip of the head bob) with the local humanoid.
 function CameraFeel.onStep(fn: (Humanoid) -> ())
 	table.insert(stepListeners, fn)
+end
+
+-- The head bob's walk cycle (radians, one step every half turn) and its intensity (0 standing).
+function CameraFeel.walk(): (number, number)
+	return phase, intensity
 end
 
 local function ease(rate: number, dt: number): number
@@ -52,7 +58,6 @@ function CameraFeel.start()
 	local untilted: CFrame? = nil
 	local lastYaw: number? = nil
 	local roll, pitch = 0, 0
-	local phase, intensity = 0, 0
 	local dip, dipVelocity = 0, 0
 	local airSpeed = 0 -- fastest downward speed during the current fall
 
