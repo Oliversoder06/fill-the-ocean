@@ -1,96 +1,71 @@
 --!strict
--- The upgrade ladder: which item is next and what buying it changes. Pure: config is passed in.
+-- Upgrades: what a player's levels add up to, and what each track offers next. Pure: config is
+-- passed in. `levels` maps a track id to how many of its levels are bought (missing = 0).
 
 export type Stats = {
 	capacity: number,
 	walkSpeed: number,
 	actSeconds: number,
-	toolName: string?,
-	toolModel: string?,
+	sweeps: number, -- scoop sweeps to fill the tool
+	toolName: string,
+	toolModel: string,
+	toolTier: number, -- 1 for the starting tool, +1 per tool level
+	coinBonus: number,
+	hold: boolean, -- holding the button keeps scooping
 }
+
+export type Status = "buy" | "locked" | "max"
 
 local Ladder = {}
 
--- The item after `boughtInStage` in that stage's list, or nil when the list is used up.
-function Ladder.nextItem(config, stageIndex: number, boughtInStage: number)
-	local stage = config.stages[stageIndex]
-	return stage and stage.items[boughtInStage + 1]
+-- Sweeps a tool needs before Pickup: 1 for the Spoon, +1 every few tool levels, capped.
+function Ladder.baseSweeps(config, toolTier: number): number
+	local s = config.sweeps
+	return math.min(s.maxSweeps, 1 + math.ceil((toolTier - 1) / s.toolsPerSweep))
 end
 
-function Ladder.apply(stats: Stats, item): Stats
+-- The bought level of a track, or nil when none is bought.
+local function owned(config, levels: { [string]: number }, id: string)
+	local track = config.track(id)
+	local n = levels[id] or 0
+	return if track and n > 0 then track.levels[math.min(n, #track.levels)] else nil
+end
+
+function Ladder.stats(config, levels: { [string]: number }): Stats
+	local start = config.start
+	local tool = owned(config, levels, "tool")
+	local toolTier = 1 + (levels.tool or 0)
+	local walk, quick, tip = owned(config, levels, "walk"), owned(config, levels, "quick"), owned(config, levels, "tip")
 	return {
-		capacity = item.capacity or stats.capacity,
-		walkSpeed = item.walkSpeed or stats.walkSpeed,
-		actSeconds = item.actSeconds or stats.actSeconds,
-		toolName = if item.kind == "tool" then item.name else stats.toolName,
-		toolModel = if item.kind == "tool" then item.model else stats.toolModel,
+		capacity = if tool then tool.capacity else start.capacity,
+		walkSpeed = if walk then walk.walkSpeed else start.walkSpeed,
+		actSeconds = if quick then quick.actSeconds else start.actSeconds,
+		sweeps = math.max(1, Ladder.baseSweeps(config, toolTier) - (levels.pickup or 0)),
+		toolName = if tool then tool.name else start.toolName,
+		toolModel = if tool then tool.model else start.toolModel,
+		toolTier = toolTier,
+		coinBonus = if tip then tip.coinBonus else 1,
+		hold = (levels.hold or 0) > 0,
 	}
 end
 
--- Position of a tool in the whole ladder: 1 for the starting tool, then one per tool rung.
--- Unknown names count as the starting tool.
-function Ladder.toolTier(config, toolName: string): number
-	local tier = 1
-	for _, stage in config.stages do
-		for _, item in stage.items do
-			if item.kind == "tool" then
-				tier += 1
-				if item.name == toolName then
-					return tier
-				end
-			end
-		end
+-- The next level of a track and whether it can be bought in this stage. A locked level is still
+-- returned so the shop can show it. Unknown track: nil, nil.
+function Ladder.offer(config, levels: { [string]: number }, id: string, stageIndex: number)
+	local track = config.track(id)
+	if not track then
+		return nil, nil
 	end
-	return 1
+	local level = track.levels[(levels[id] or 0) + 1]
+	if not level then
+		return nil, "max" :: Status
+	end
+	return level, (if level.stage <= stageIndex then "buy" else "locked") :: Status
 end
 
+-- Walk there and back, the scoop sweeps, then one quick pour.
 function Ladder.tripSeconds(config, stats: Stats): number
-	return 2 * config.tripDistance / stats.walkSpeed + 2 * stats.actSeconds
-end
-
--- Items left unbought in stages before `stageIndex`, earliest stage first (catch-up buys).
-function Ladder.missedFromEarlierStages(config, stageIndex: number, boughtPerStage: { number })
-	local missed = {}
-	for s = 1, stageIndex - 1 do
-		local items = config.stages[s].items
-		for i = (boughtPerStage[s] or 0) + 1, #items do
-			table.insert(missed, { stage = s, item = items[i] })
-		end
-	end
-	return missed
-end
-
--- The next `count` items a player will be offered, in buy order: catch-up items from earlier
--- stages first, then the rest of this stage's list. Each entry is { stage, item }.
-function Ladder.upcoming(config, stageIndex: number, boughtPerStage: { number }, count: number)
-	local list = Ladder.missedFromEarlierStages(config, stageIndex, boughtPerStage)
-	local stage = config.stages[stageIndex]
-	if stage then
-		for i = (boughtPerStage[stageIndex] or 0) + 1, #stage.items do
-			table.insert(list, { stage = stageIndex, item = stage.items[i] })
-		end
-	end
-	local result = {}
-	for i = 1, math.min(count, #list) do
-		result[i] = list[i]
-	end
-	return result
-end
-
--- How many items of one kind ("walk", "hands", "tool") are bought, out of how many in the run.
-function Ladder.kindProgress(config, boughtPerStage: { number }, kind: string): (number, number)
-	local bought, total = 0, 0
-	for s, stage in config.stages do
-		for i, item in stage.items do
-			if item.kind == kind then
-				total += 1
-				if i <= (boughtPerStage[s] or 0) then
-					bought += 1
-				end
-			end
-		end
-	end
-	return bought, total
+	return 2 * config.tripDistance / stats.walkSpeed + stats.sweeps * stats.actSeconds + config.pourSeconds
 end
 
 return Ladder

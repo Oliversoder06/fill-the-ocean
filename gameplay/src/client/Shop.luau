@@ -1,6 +1,8 @@
 -- The shop menu (StarterGui.Hud.Shop, built in Studio in the sunbaked-sea style). Tab, gamepad Y or
--- the on-screen Shop button opens and closes it during a run. Shows the next item to buy, the
--- three after it, and the player's gear. Buying still fires the one Buy remote; the server checks it.
+-- the on-screen Shop button opens and closes it during a run (client/Window: the frame pops in,
+-- then its parts appear layer by layer). One tile per upgrade track (Tool and
+-- Boosts panels, from Config.tracks); clicking a tile shows it in the detail panel, whose Buy button
+-- sends Buy(trackId). The server checks every buy.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,35 +12,63 @@ local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
+local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 local Hud = require(script.Parent.Hud)
+local Purchase = require(script.Parent.Purchase)
+local Window = require(script.Parent.Window)
 
 local player = Players.LocalPlayer
 local colors, images, motion = Theme.colors, Theme.images, Theme.motion
 local short, set = Hud.short, Hud.set
 
 local DESIGN_SIZE = Vector2.new(1000, 660) -- the shop plus room for its decorations
-local POP = TweenInfo.new(motion.openSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local SHRINK = TweenInfo.new(motion.closeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local Shop = {}
 
-local function effectText(item, capacity: number, walkSpeed: number, act: number): string
-	if item.kind == "tool" then
-		return `{short(item.capacity)} L per trip (now {short(capacity)} L)`
-	elseif item.kind == "walk" then
-		return `Walk speed {short(item.walkSpeed)} (now {short(walkSpeed)})`
-	end
-	return `Scoop and pour in {item.actSeconds}s (now {act}s)`
+-- Art for each track until real upgrade icons are drawn (the tool shows its 3D model instead).
+local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = "unknown", tip = "coin" }
+local PANEL_NAMES = { tool = "Tool", boosts = "Boosts" }
+
+local function scoops(n: number): string
+	return if n == 1 then "1 scoop" else `{n} scoops`
 end
 
-local function boughtPerStage(): { number }
-	local bought = {}
-	for s = 1, #Config.stages do
-		bought[s] = player:GetAttribute(`Bought{s}`) or 0
+local function percent(bonus: number): string
+	return `+{math.floor((bonus - 1) * 100 + 0.5)}%`
+end
+
+-- What the next level changes, from the stats now and after buying it.
+local function effectText(id: string, now: Ladder.Stats, after: Ladder.Stats): string
+	if id == "tool" then
+		return `{short(after.capacity)} L per trip, {scoops(after.sweeps)} to fill (now {short(now.capacity)} L)`
+	elseif id == "pickup" then
+		return `Fill your tool in {scoops(after.sweeps)} (now {scoops(now.sweeps)})`
+	elseif id == "hold" then
+		return "One-time buy"
+	elseif id == "quick" then
+		return `{after.actSeconds}s per scoop (now {now.actSeconds}s)`
+	elseif id == "walk" then
+		return `Walk speed {after.walkSpeed} (now {now.walkSpeed})`
 	end
-	return bought
+	return `{percent(after.coinBonus)} coins per litre (now {percent(now.coinBonus)})`
+end
+
+local function levelsOf(): { [string]: number }
+	local levels = {}
+	for _, track in Config.tracks do
+		levels[track.id] = player:GetAttribute(`Level_{track.id}`) or 0
+	end
+	return levels
+end
+
+-- The next level's display name: tools have their own, the rest are "<track> <n>".
+local function levelName(track, n: number, level): string
+	if track.id == "tool" then
+		return level.name
+	end
+	return if #track.levels == 1 then track.name else `{track.name} {n}`
 end
 
 -- Grows on hover, shrinks while pressed (motion values from the style).
@@ -73,19 +103,20 @@ function Shop.start()
 	local buyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Buy") :: RemoteEvent
 	local shop = Hud.find(gui, "Shop")
 	local fit = Hud.find(gui, "Shop.Scale")
-	local nextPanel = Hud.find(gui, "Shop.Body.Content.Next")
-	local itemName = Hud.find(nextPanel, "ItemName")
-	local itemIcon = Hud.find(nextPanel, "Tile.ItemIcon")
-	local effect = Hud.find(nextPanel, "Effect")
-	local buyButton = Hud.find(nextPanel, "BuyButton")
+	local content = Hud.find(gui, "Shop.Body.Content")
+	local detail = Hud.find(content, "Detail")
+	local detailArt = Hud.find(detail, "Art")
+	local buyButton = Hud.find(detail, "BuyButton")
 	local buyText = Hud.find(buyButton, "Row.BuyText")
 	local buyCoin = Hud.find(buyButton, "Row.Coin")
 	local buyPrice = Hud.find(buyButton, "Row.Price")
-	local moneyLabel = Hud.find(nextPanel, "MoneyRow.Money")
-	local slots = Hud.find(gui, "Shop.Body.Content.Upcoming.Slots")
-	local gear = Hud.find(gui, "Shop.Body.Content.Gear")
-	local toolValue = Hud.find(gear, "ToolRow.Value")
 	local closeButton = Hud.find(shop, "CloseButton")
+	local tiles = {}
+	for _, track in Config.tracks do
+		local panel = if track.panel == "tool" then "ToolPanel" else "BoostPanel"
+		tiles[track.id] = Hud.find(content, `{panel}.Tiles.{track.id}`)
+	end
+	local selected = "tool"
 
 	-- Tab would also toggle Roblox's player list; the game has its own Board, so hide that list.
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
@@ -102,25 +133,16 @@ function Shop.start()
 	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
 	refit()
 
-	local closeToken = 0
+	local window = Window.new(shop, fit)
 	local function setOpen(value: boolean)
 		if value == open then
 			return
 		end
 		open = value
-		closeToken += 1
 		if value then
-			shop.Visible = true
-			fit.Scale = fitScale * 0.85
-			TweenService:Create(fit, POP, { Scale = fitScale }):Play()
+			window.open(fitScale)
 		else
-			local token = closeToken
-			TweenService:Create(fit, SHRINK, { Scale = fitScale * 0.85 }):Play()
-			task.delay(motion.closeSeconds, function()
-				if token == closeToken then
-					shop.Visible = false
-				end
-			end)
+			window.close(fitScale)
 		end
 	end
 
@@ -142,34 +164,41 @@ function Shop.start()
 	closeButton.Activated:Connect(function()
 		setOpen(false)
 	end)
+	for id, holder in tiles do
+		local button = Hud.find(holder, "Button")
+		pressable(button, button.Press)
+		button.Activated:Connect(function()
+			selected = id
+		end)
+	end
 	buyButton.Activated:Connect(function()
-		local cost = player:GetAttribute("NextItemCost") or -1
-		if cost >= 0 and (player:GetAttribute("Money") or 0) + 1e-6 >= cost then
+		local level, status = Ladder.offer(Config, levelsOf(), selected, ReplicatedStorage:GetAttribute("Stage") or 0)
+		if status == "buy" and (player:GetAttribute("Money") or 0) + 1e-6 >= level.cost then
 			bounce(buyButton.Press)
+		else
+			Purchase.deny(buyButton)
 		end
-		buyRemote:FireServer()
+		buyRemote:FireServer(selected)
 	end)
 
-	local shownBought = { walk = -1, hands = -1 }
-	local function renderPips(row: Instance, kind: string, bought: { number })
-		local have, total = Ladder.kindProgress(Config, bought, kind)
-		local pips = Hud.find(row, "Pips")
-		for _, pip in pips:GetChildren() do
-			if pip:IsA("ImageLabel") then
-				local n = pip.LayoutOrder
-				set(pip, "Visible", n <= total)
-				set(pip, "Image", if n <= have then images.pipFull else images.pipEmpty)
+	-- Shows the tool model (tool track) or the track's icon in an art slot.
+	local shownModels: { [Instance]: string } = {}
+	local function showArt(holder: Instance, id: string, model: string)
+		local icon, view = Hud.find(holder, "Icon"), Hud.find(holder, "View")
+		set(icon, "Visible", id ~= "tool")
+		set(view, "Visible", id == "tool")
+		if id ~= "tool" then
+			set(icon, "Image", images[ICONS[id]])
+		elseif shownModels[view] ~= model then
+			local template = ToolModels.find(model)
+			if template then -- nil until replicated; try again next frame
+				ToolModels.showIn(view, template)
+				shownModels[view] = model
 			end
 		end
-		if shownBought[kind] >= 0 and have > shownBought[kind] then
-			local pip = pips:FindFirstChild(`Pip{have}`)
-			if pip then
-				bounce(pip.Pop)
-			end
-		end
-		shownBought[kind] = have
 	end
 
+	local shownLevels: { [string]: number } = {}
 	RunService.RenderStepped:Connect(function()
 		if open and not inRun() then
 			setOpen(false)
@@ -178,54 +207,81 @@ function Shop.start()
 			return
 		end
 		local money = player:GetAttribute("Money") or 0
-		local capacity = player:GetAttribute("Capacity") or Config.start.capacity
-		local walkSpeed = player:GetAttribute("WalkSpeed") or Config.start.walkSpeed
-		local act = player:GetAttribute("ActSeconds") or Config.start.actSeconds
 		local stage = ReplicatedStorage:GetAttribute("Stage") or 0
-		local bought = boughtPerStage()
-		local list = Ladder.upcoming(Config, stage, bought, 4)
+		local levels = levelsOf()
+		local now = Ladder.stats(Config, levels)
 
-		-- Next up
-		local nextItem = list[1] and list[1].item
-		set(moneyLabel, "Text", Hud.money(money))
-		set(itemIcon, "Image", images.unknown) -- upgrade icons are not drawn yet
-		if nextItem then
-			local canBuy = money + 1e-6 >= nextItem.cost
-			set(itemName, "Text", nextItem.name)
-			set(effect, "Text", effectText(nextItem, capacity, walkSpeed, act))
-			set(buyText, "Text", "BUY")
-			set(buyPrice, "Text", Hud.money(nextItem.cost))
-			set(buyCoin, "Visible", true)
-			set(buyPrice, "Visible", true)
-			set(buyButton, "ImageColor3", if canBuy then colors.buyCoral else colors.locked)
-		else
-			set(itemName, "Text", "Everything bought!")
-			set(effect, "Text", "")
-			set(buyText, "Text", "MAXED")
-			set(buyCoin, "Visible", false)
-			set(buyPrice, "Visible", false)
-			set(buyButton, "ImageColor3", colors.locked)
-		end
+		for _, track in Config.tracks do
+			local id = track.id
+			local holder = tiles[id]
+			local button = Hud.find(holder, "Button")
+			local have = levels[id]
+			local level, status = Ladder.offer(Config, levels, id, stage)
+			local affordable = status == "buy" and money + 1e-6 >= level.cost
+			set(button, "ImageColor3", if status == "locked" then colors.locked elseif status == "max" then colors.toolTag else colors.shallowWater)
+			set(Hud.find(button, "Ring"), "Visible", id == selected)
+			showArt(button, id, now.toolModel)
+			set(Hud.find(button, "ItemName"), "Text", if id == "tool" then now.toolName else track.name)
 
-		-- Coming up: tools with a new model stay a surprise until they are next
-		local model = player:GetAttribute("ToolModel") or Config.start.toolModel
-		for i = 1, 3 do
-			local slot = Hud.find(slots, `Slot{i}`)
-			local entry = list[i + 1]
-			set(slot, "Visible", entry ~= nil)
-			if entry then
-				local item = entry.item
-				local secret = item.kind == "tool" and item.model ~= model
-				set(slot.ItemName, "Text", if secret then "???" else item.name)
-				set(slot.Tile.Icon, "Image", if secret then images.unknown else images.lock)
-				set(slot.PriceRow.Price, "Text", Hud.money(item.cost))
+			-- Level pips (short tracks) or a level label (the long tool ladder, the one-time Hold)
+			local pips = Hud.find(button, "Pips")
+			local label = Hud.find(button, "Level")
+			local usePips = id ~= "tool" and #track.levels > 1
+			set(pips, "Visible", usePips)
+			set(label, "Visible", not usePips)
+			if usePips then
+				for _, pip in pips:GetChildren() do
+					if pip:IsA("ImageLabel") then
+						set(pip, "Visible", pip.LayoutOrder <= #track.levels)
+						set(pip, "Image", if pip.LayoutOrder <= have then images.pipFull else images.pipEmpty)
+					end
+				end
+				if shownLevels[id] and have > shownLevels[id] then
+					local pip = pips:FindFirstChild(`Pip{have}`)
+					if pip then
+						bounce(pip.Pop)
+					end
+				end
+			elseif id == "tool" then
+				set(label, "Text", `Lv {now.toolTier}`)
+			else
+				set(label, "Text", if have > 0 then "OWNED" else "")
 			end
+			shownLevels[id] = have
+
+			-- Price row: the price (red when you can't afford it), MAX, or the stage that unlocks it
+			local priceText = Hud.find(holder, "PriceRow.Price")
+			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
+			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) elseif status == "max" then "MAX" else Config.stages[level.stage].name:upper())
+			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
 		end
 
-		-- Your gear
-		set(toolValue, "Text", `{player:GetAttribute("ToolName") or Config.start.toolName} · {short(capacity)} L`)
-		renderPips(Hud.find(gear, "WalkRow"), "walk", bought)
-		renderPips(Hud.find(gear, "HandsRow"), "hands", bought)
+		-- Detail panel: the selected track's next level
+		local track = Config.track(selected) :: Config.Track
+		local have = levels[selected]
+		local level, status = Ladder.offer(Config, levels, selected, stage)
+		set(Hud.find(detail, "Category"), "Text", PANEL_NAMES[track.panel])
+		set(Hud.find(detail, "About"), "Text", track.about)
+		set(Hud.find(detail, "MoneyRow.Money"), "Text", Hud.money(money))
+		if level then
+			local nextLevels = table.clone(levels)
+			nextLevels[selected] = have + 1
+			showArt(detailArt, selected, if selected == "tool" then level.model else now.toolModel)
+			set(Hud.find(detail, "ItemName"), "Text", levelName(track, have + 1, level))
+			set(Hud.find(detail, "Effect"), "Text", effectText(selected, now, Ladder.stats(Config, nextLevels)))
+		else
+			showArt(detailArt, selected, now.toolModel)
+			set(Hud.find(detail, "ItemName"), "Text", if selected == "tool" then now.toolName else track.name)
+			set(Hud.find(detail, "Effect"), "Text", "All levels bought!")
+		end
+		local canBuy = status == "buy" and money + 1e-6 >= level.cost
+		set(buyCoin, "Visible", status == "buy")
+		set(buyPrice, "Visible", status == "buy")
+		set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else `IN THE {Config.stages[level.stage].name:upper()}`)
+		if status == "buy" then
+			set(buyPrice, "Text", Hud.money(level.cost))
+		end
+		set(buyButton, "ImageColor3", if canBuy then colors.buyCoral else colors.locked)
 	end)
 end
 

@@ -40,17 +40,33 @@ hook.
 
 ## Core action (settled)
 
-- Trip: scoop at a water source -> carry -> pour into the basin. Scoop and pour are each **one hold
-  prompt** that fills or empties the whole tool at once, with no meter climbing (owner, 2026-11-04). The
-  hold starts at 0.5 s; Quick Hands upgrades shorten it to 0.2 s. The path is 80 studs. Owner accepted
-  the shorter run this gives: trips 11 s down to 5.4 s, and a perfect solo player fills pool / lake /
-  ocean in about 4:50 / 9:10 / 18:45 (about 33 min). The tables below still show the original 45 min
-  targets the prices were built from.
-- Upgrade types, each felt differently:
-  1. **Tool size** (the joke ladder): visible tool, more litres per trip.
-  2. **Move speed**: felt most in the hands.
-  3. **Scoop and pour hold time**: big tools must not take forever; pour should look bigger with
-     bigger tools (polish phase).
+- Trip: scoop at a water source -> carry -> pour into the basin. **Changed by the owner on
+  2026-11-05:** no prompts. Aim at the well and hold E / left mouse / RT / the touch button: each
+  scoop is one full sweep (ActSeconds) and adds capacity / sweeps; each new tool adds one sweep to
+  fill it, and each Quick Hands upgrade brings it back to one sweep and makes sweeps faster. Pour is
+  one full tip that empties the tool. An action that starts always plays to the end; letting go
+  only stops the next one. (Before: one hold prompt filled or emptied the whole tool, owner
+  2026-11-04.) The hold starts at 0.5 s; Quick Hands upgrades shorten it to 0.2 s. The path is 80
+  studs. A perfect solo player now fills pool / lake / ocean in about 5:01 / 9:39 / 20:31 (about
+  35 min; it was 33 min before sweeps). The tables below still show the original 45 min targets
+  the prices were built from.
+- **Changed by the owner on 2026-11-05: free-choice upgrades.** Players pick what to buy instead
+  of one forced list. Each scoop sweep is one press; holding only repeats sweeps once the player
+  owns Hold. Pouring is always instant (a 0.25 s tip that empties the tool). Six tracks, each
+  bought level by level (Config.tracks); a level can be bought once its stage has started, so each
+  stage opens a few more levels of every track (Claude's call, keeps the pacing):
+  1. **Tool** (the joke ladder, in order): more litres per trip. A tool needs 1 sweep for the Spoon,
+     then one more every 4 tool levels, at most 5 (Claude's call).
+  2. **Pickup**: each level takes one sweep off (never below 1); 4 levels.
+  3. **Hold**: one-time buy (40); hold the button to keep sweeping until full.
+  4. **Quick Scoop**: faster sweeps, 0.5 s down to 0.2 s; 7 levels.
+  5. **Sneakers**: walk speed; 7 levels.
+  6. **Tip Jar**: +5 / 10 / 15 / 20 % coins per litre; 4 levels.
+  Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price is split
+  between Quick Scoop and Pickup. A perfect solo player who buys the cheapest affordable upgrade
+  fills pool / lake / ocean in about 6:01 / 10:46 / 18:30 (35:18, `lune run tools/simulate`).
+- Before 2026-11-05 the upgrade types were Tool size, Move speed and Quick Hands (back to one sweep
+  and faster), bought in one fixed order.
 - Later (not prototype): closer or better sources unlocking mid-stage; late tools that change *how*
   you collect (drive the fire truck, a rain cloud follows you), still hold-to-act.
 
@@ -164,8 +180,8 @@ art, sound, VFX, closer sources, Robux, saving, lobby, difficulties, reward spen
 ## Claude's calls (owner to check)
 
 - Money, tools and upgrades are per player, not shared by the team.
-- One ordered buy list per stage in table order, unlocked when the stage starts. Each "trip" row
-  becomes move-speed and scoop/pour-speed items in that slot.
+- (Replaced 2026-11-05 by free-choice tracks, see Core action.) One ordered buy list per stage in
+  table order, unlocked when the stage starts.
 - A stage ends only when the basin is full: no timer and no way to lose.
 - Rewards use the players still there at the end (leavers forfeit). A stage share is a player's
   litres divided by all litres poured in that stage, leavers' litres included.
@@ -198,5 +214,12 @@ art, sound, VFX, closer sources, Robux, saving, lobby, difficulties, reward spen
   sandy shore in a pine valley (camp, pump, dock, cabin, tents). Ocean = a natural bay in a palm
   beach cove (boardwalk, pier, huts, lifeguard tower). Water is a flat surface rising inside each
   basin. All maps are enclosed (cliffs/walls plus invisible walls).
-- **No runtime generation:** stages, prompts, tool templates, HUDs and lighting are baked into the
-  places; code only checks they exist and fails with a clear message if not.
+- **No runtime generation:** stages, tool templates, sounds, effects, HUDs and lighting are baked
+  into the places; code only checks they exist and fails with a clear message if not.
+
+## Lobby sessions (2026-11-05, owner decisions)
+Replaces "one pad per difficulty". Any pad hosts a session: the first player to step on gets the
+setup window (sunbaked-sea style, one column) and picks max players (1-10), a difficulty they have
+unlocked, and friends-only (friends of the host). Others join by stepping on; anyone may join a
+difficulty the host unlocked. The run starts when the session is full or the host presses Start.
+If the host steps off or leaves, the earliest remaining member hosts. Rules: `common/SessionRules`.

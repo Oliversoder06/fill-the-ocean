@@ -9,11 +9,13 @@ This file overrides the library, and the library overrides the LihFolk plugin.
 ## What the game is
 The evil sun has evaporated all the water on Earth, and up to 10 friends refill it, starting with a
 spoon. Core loop: scoop water at a source, carry it, and pour it in. Every litre poured earns money,
-which buys bigger tools and faster trips until the body of water is full. Filling is always manual: one
-hold prompt fills the tool, one empties it. Hook: the upgrade ladder is the joke. It runs from spoon to cup to bucket to
+which buys bigger tools and faster trips until the body of water is full. Filling is always manual: aim
+at the well and hold E (or click / RT / the touch button) to scoop in sweeps, then aim at the basin
+and hold to pour. Each new tool takes one more sweep to fill; Quick Hands upgrades bring it back to
+one sweep. Hook: the upgrade ladder is the joke. It runs from spoon to cup to bucket to
 bathtub to cargo ship, all the way up to scooping with the Moon, and every purchase makes the next
-trip noticeably faster. A run: about 33 minutes in a private server, pool (5 min), then lake
-(9 min), then ocean (19 min), with a cutscene of the sun draining each one. Tools and money carry
+trip noticeably faster. A run: about 35 minutes in a private server, pool (5 min), then lake
+(10 min), then ocean (20 min), with a cutscene of the sun draining each one. Tools and money carry
 over between stages, each stage adds new tools, and each stage pays more per litre. The water needed
 scales with player count, so a run lasts the same at any group size. Nothing carries over between
 runs except unlocked difficulties and the reward currency. Rewards: paid only at the end of the run,
@@ -33,11 +35,14 @@ Beating a run unlocks the next difficulty, where the sun is angrier.
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
-  - gameplay: `workspace.Stages` (Pool, Lake, Ocean, with ScoopPrompt/PourPrompt),
-    `ReplicatedStorage.ToolModels` (one Model per hero tool; swap placeholders for real models
-    under the same name), `StarterGui.Hud`, Lighting effects and Terrain Clouds.
-  - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, Difficulty attribute, sign with Title
-    and Status labels), `StarterGui.LobbyHud`.
+  - gameplay: `workspace.Stages` (Pool, Lake, Ocean; each with invisible `Source` over its well
+    and `PourPoint` at the basin edge, which the player aims at), `ReplicatedStorage.ToolModels`
+    (one Model per hero tool; swap placeholders for real models under the same name),
+    `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
+    `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
+    Clouds.
+  - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, sign with Title and Status labels; any
+    pad hosts a session), `StarterGui.LobbyHud` (Stats, Hint, Toast, SessionSetup window, HostBar).
 - Lake and Ocean are terrain bowls (natural shoreline); their `Basin` part is invisible and only
   marks the water's base. The Pool is a tiled tank.
 - Studio test helpers (gameplay): workspace attributes `WaterScale` (shorter runs),

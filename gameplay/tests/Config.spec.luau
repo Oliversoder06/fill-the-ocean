@@ -19,87 +19,85 @@ function tests.weights_sum_to_one(t)
 	t.expectNear(weights[1], 7 / 45, 1e-12, "pool weight")
 end
 
-function tests.start_trip_is_11s(t)
-	local s = Config.start
-	t.expectNear(2 * Config.tripDistance / s.walkSpeed + 2 * s.actSeconds, 11, 1e-9, "start trip")
+function tests.six_tracks_in_shop_order(t)
+	local ids = {}
+	for _, track in Config.tracks do
+		table.insert(ids, track.id)
+	end
+	t.expectEq(table.concat(ids, ","), "tool,pickup,hold,quick,walk,tip")
+	t.expectEq(Config.track("walk").name, "Sneakers")
+	t.expectEq(Config.track("nope"), nil)
 end
 
-function tests.trip_times_match_spec(t)
-	-- 0.5 s holds (owner, 2026-11-04): trips are shorter than the original 16..7 s plan
-	local expected = { 8.9, 7.61, 7.1, 6.4, 5.74, 5.56, 5.4 }
-	local walk, act = Config.start.walkSpeed, Config.start.actSeconds
-	local found = {}
-	for _, stage in Config.stages do
-		for _, item in stage.items do
-			if item.kind == "walk" then
-				walk = item.walkSpeed
-			elseif item.kind == "hands" then
-				act = item.actSeconds
-				table.insert(found, 2 * Config.tripDistance / walk + 2 * act)
+function tests.every_level_has_cost_and_unlock_stage(t)
+	for _, track in Config.tracks do
+		t.expectEq(#track.levels > 0, true, `{track.id} has levels`)
+		local lastStage, lastCost = 1, 0
+		for i, level in track.levels do
+			t.expectEq(type(level.cost), "number", `{track.id} {i} cost`)
+			if level.cost <= lastCost then
+				error(`{track.id} level {i} cost {level.cost} is not above {lastCost}`)
 			end
+			if level.stage < lastStage or level.stage > #Config.stages then
+				error(`{track.id} level {i} unlocks in stage {level.stage}`)
+			end
+			lastStage, lastCost = level.stage, level.cost
 		end
 	end
-	t.expectEq(#found, #expected, "speed pairs")
-	for i, trip in expected do
-		t.expectNear(found[i], trip, 0.05, `trip {i}`)
-	end
 end
 
-function tests.tools_grow(t)
+function tests.tools_grow_to_the_moon(t)
 	local last = Config.start.capacity
-	local lastName
-	for _, stage in Config.stages do
-		for _, item in stage.items do
-			if item.kind == "tool" then
-				if item.capacity <= last then
-					error(`{item.name} capacity {item.capacity} is not above {last}`)
-				end
-				last = item.capacity
-				lastName = item.name
-			end
+	local levels = Config.track("tool").levels
+	for _, level in levels do
+		if level.capacity <= last then
+			error(`{level.name} capacity {level.capacity} is not above {last}`)
 		end
+		last = level.capacity
 	end
-	t.expectEq(lastName, "The Moon Lv4")
+	t.expectEq(#levels, 19)
+	t.expectEq(levels[#levels].name, "The Moon Lv4")
 	t.expectEq(last, 10e6)
 end
 
-function tests.hold_starts_at_half_second_and_ends_at_02(t)
-	t.expectEq(Config.start.actSeconds, 0.5)
-	local last = Config.start.actSeconds
-	for _, stage in Config.stages do
-		for _, item in stage.items do
-			if item.kind == "hands" then
-				if item.actSeconds >= last then
-					error(`{item.name} hold {item.actSeconds} is not shorter than {last}`)
-				end
-				last = item.actSeconds
-			end
-		end
-	end
-	t.expectEq(last, 0.2)
-end
-
 function tests.eight_hero_models(t)
-	local seen, order = {}, { Config.start.toolModel }
-	seen[Config.start.toolModel] = true
-	for _, stage in Config.stages do
-		for _, item in stage.items do
-			if item.kind == "tool" then
-				t.expectEq(type(item.model), "string", `{item.name} model`)
-				if not seen[item.model] then
-					seen[item.model] = true
-					table.insert(order, item.model)
-				end
-			end
+	local seen, order = { [Config.start.toolModel] = true }, { Config.start.toolModel }
+	for _, level in Config.track("tool").levels do
+		t.expectEq(type(level.model), "string", `{level.name} model`)
+		if not seen[level.model] then
+			seen[level.model] = true
+			table.insert(order, level.model)
 		end
 	end
 	t.expectEq(table.concat(order, ","), "Spoon,Cup,Bucket,Bathtub,KiddiePool,SwimmingPool,CargoShip,TheMoon")
 end
 
+function tests.scoops_get_faster_to_02(t)
+	local last = Config.start.actSeconds
+	t.expectEq(last, 0.5)
+	for _, level in Config.track("quick").levels do
+		if level.actSeconds >= last then
+			error(`quick {level.actSeconds} is not faster than {last}`)
+		end
+		last = level.actSeconds
+	end
+	t.expectEq(last, 0.2)
+end
+
+function tests.hold_is_one_purchase_in_the_pool(t)
+	local levels = Config.track("hold").levels
+	t.expectEq(#levels, 1)
+	t.expectEq(levels[1].stage, 1)
+end
+
 function tests.cup_costs_two_spoon_trips(t)
-	local cup = Config.stages[1].items[1]
+	local cup = Config.track("tool").levels[1]
 	t.expectEq(cup.name, "Cup")
 	t.expectEq(cup.cost, 2 * Config.start.capacity * Config.stages[1].coinsPerLitre)
+end
+
+function tests.pour_is_quick(t)
+	t.expectEq(Config.pourSeconds <= 0.3, true, "pour plays fast")
 end
 
 return tests

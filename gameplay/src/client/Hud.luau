@@ -1,5 +1,4 @@
--- Fills in the HUD that lives in StarterGui ("Hud", built in Studio) from server attributes, and
--- sets this player's scoop/pour prompt hold time and on/off state locally (the server re-checks).
+-- Fills in the HUD that lives in StarterGui ("Hud", built in Studio) from server attributes.
 -- Results rows are clones of the hidden RowTemplate.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -60,17 +59,21 @@ function Hud.set(obj: Instance, prop: string, value: any)
 	end
 end
 
-local function currentStage(stages: Instance): Model?
+-- The current stage's model in workspace.Stages, or nil between stages. Non-yielding.
+function Hud.currentStage(): Model?
+	local stages = workspace:FindFirstChild("Stages")
 	local index = ReplicatedStorage:GetAttribute("Stage")
 	local config = type(index) == "number" and Config.stages[index]
-	local model = config and stages:FindFirstChild(config.name)
+	local model = stages and config and stages:FindFirstChild(config.name)
 	return if model and model:IsA("Model") then model else nil
 end
+-- Money still flying in as coins (client/Payout): the wallet shows Money minus this, so it counts
+-- up coin by coin instead of jumping when the server pays.
+Hud.walletHold = 0
 
 local find, set = Hud.find, Hud.set
 
 function Hud.start()
-	local stagesFolder = workspace:WaitForChild("Stages")
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local cardEvent = remotes:WaitForChild("Card") :: RemoteEvent
 	local resultsEvent = remotes:WaitForChild("Results") :: RemoteEvent
@@ -78,7 +81,7 @@ function Hud.start()
 
 	local coins = find(gui, "Wallet.Pill.Coins")
 	local coinPop = find(gui, "Wallet.Coin.Pop")
-	local shownMoney = player:GetAttribute("Money") or 0
+	local shownMoney = math.max(0, (player:GetAttribute("Money") or 0) - Hud.walletHold)
 	local cardLabel = find(gui, "Card")
 	local waiting = find(gui, "Waiting")
 	local results = find(gui, "Results")
@@ -135,31 +138,11 @@ function Hud.start()
 
 	RunService.RenderStepped:Connect(function()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
-		local playing = phase == "playing"
-
-		-- This player's prompts: hold time from ActSeconds, only with the tool out, scoop only with
-		-- room, pour only with water
-		local stage = currentStage(stagesFolder)
-		local carried = player:GetAttribute("Carried") or 0
-		local capacity = player:GetAttribute("Capacity") or 0
-		local act = player:GetAttribute("ActSeconds") or Config.start.actSeconds
-		local equipped = player:GetAttribute("Equipped") ~= false
-		for _, prompt in stagesFolder:GetDescendants() do
-			if prompt:IsA("ProximityPrompt") then
-				local here = stage ~= nil and prompt:IsDescendantOf(stage)
-				local enabled = playing
-					and here
-					and equipped
-					and (if prompt.Name == "ScoopPrompt" then carried < capacity - 1e-6 else carried > 1e-6)
-				set(prompt, "HoldDuration", act)
-				set(prompt, "Enabled", enabled)
-			end
-		end
 
 		-- Wallet
-		local money = player:GetAttribute("Money") or 0
+		local money = math.max(0, (player:GetAttribute("Money") or 0) - Hud.walletHold)
 		set(coins, "Text", Hud.money(money))
-		if money > shownMoney + 1e-6 then -- earned: the coin bounces
+		if money > shownMoney + 1e-6 then -- earned (each landing coin): the coin bounces
 			coinPop.Scale = 1.25
 			TweenService:Create(coinPop, COIN_BOUNCE, { Scale = 1 }):Play()
 		end

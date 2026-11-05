@@ -1,6 +1,9 @@
--- Client entry point. Fills in the lobby HUD (StarterGui.LobbyHud, built in Studio).
+-- Client entry point. Fills in the lobby HUD (StarterGui.LobbyHud, built in Studio) and starts
+-- the session pad UI.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Session = require(script.Session)
 
 local player = Players.LocalPlayer
 local gui = player:WaitForChild("PlayerGui"):WaitForChild("LobbyHud")
@@ -47,3 +50,5 @@ notice.OnClientEvent:Connect(function(text: string)
 		end
 	end)
 end)
+
+Session.start()

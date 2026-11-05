@@ -1,4 +1,4 @@
--- Lighting mood: a bright, vibrant sunny day. As the current basin fills it lifts to a slightly
+-- Lighting mood: a bright, vibrant, cinematic late afternoon. As the current basin fills it lifts to a slightly
 -- more saturated, cloudier look. Each stage starts dry again (the sun drained it).
 -- Runs on the client only, so changes are local and smooth. All effects are baked into the place.
 local Lighting = game:GetService("Lighting")
@@ -8,44 +8,47 @@ local RunService = game:GetService("RunService")
 local EASE = 1.5 -- how quickly the mood follows the fill (slow, so it reads as weather)
 
 -- Two looks; everything in between is a blend by wetness (0 = dry, 1 = full).
--- Owner direction (2026-11-04): vibrant, happy and alive (reference: bright stylized sim
--- lighting): deep blue sky, strong warm sun, crisp shadows, no grey haze, punchy colour.
--- Filling a basin lifts it a little more (more saturation, puffier clouds).
+-- Owner direction (2026-11-05): vibrant and happy (bright stylized sim lighting) AND cinematic:
+-- late-afternoon sun with long shadows, distance fog that keeps the play area clear (Atmosphere
+-- Offset pushes it out), glare around the sun, sun rays, soft bloom, a light lens blur far away.
+-- Filling a basin clears the air a little and adds saturation.
 local DRY = {
-	clockTime = 13.8,
-	brightness = 3.2,
-	ambient = Color3.fromRGB(130, 126, 140),
-	outdoorAmbient = Color3.fromRGB(165, 160, 170),
-	tint = Color3.fromRGB(255, 250, 240),
+	clockTime = 16.4,
+	brightness = 3.1,
+	ambient = Color3.fromRGB(140, 128, 122),
+	outdoorAmbient = Color3.fromRGB(176, 162, 150),
+	tint = Color3.fromRGB(255, 244, 228),
 	saturation = 0.3,
-	contrast = 0.12,
-	atmosphereColor = Color3.fromRGB(199, 226, 255),
-	atmosphereDecay = Color3.fromRGB(92, 140, 200),
-	density = 0.22,
-	haze = 0,
-	glare = 0,
-	bloom = 0.35,
-	sunRays = 0.05,
-	cloudCover = 0.45,
+	contrast = 0.16,
+	atmosphereColor = Color3.fromRGB(214, 228, 246),
+	atmosphereDecay = Color3.fromRGB(120, 160, 214),
+	density = 0.36,
+	offset = 0.3,
+	haze = 1.4,
+	glare = 0.45,
+	bloom = 0.55,
+	sunRays = 0.12,
+	cloudCover = 0.48,
 	cloudDensity = 0.55,
-	cloudColor = Color3.fromRGB(255, 255, 255),
+	cloudColor = Color3.fromRGB(255, 250, 244),
 }
 local WET = {
-	clockTime = 14.2,
-	brightness = 3.2,
-	ambient = Color3.fromRGB(128, 130, 145),
-	outdoorAmbient = Color3.fromRGB(160, 165, 175),
-	tint = Color3.fromRGB(252, 252, 255),
+	clockTime = 16.8,
+	brightness = 3.1,
+	ambient = Color3.fromRGB(136, 130, 128),
+	outdoorAmbient = Color3.fromRGB(170, 164, 158),
+	tint = Color3.fromRGB(255, 246, 236),
 	saturation = 0.38,
-	contrast = 0.14,
-	atmosphereColor = Color3.fromRGB(195, 225, 255),
-	atmosphereDecay = Color3.fromRGB(85, 140, 205),
-	density = 0.2,
-	haze = 0,
-	glare = 0,
-	bloom = 0.35,
-	sunRays = 0.05,
-	cloudCover = 0.55,
+	contrast = 0.17,
+	atmosphereColor = Color3.fromRGB(206, 228, 250),
+	atmosphereDecay = Color3.fromRGB(108, 156, 216),
+	density = 0.3,
+	offset = 0.35,
+	haze = 1.0,
+	glare = 0.35,
+	bloom = 0.5,
+	sunRays = 0.1,
+	cloudCover = 0.56,
 	cloudDensity = 0.6,
 	cloudColor = Color3.fromRGB(255, 255, 255),
 }
@@ -76,13 +79,13 @@ function Mood.start()
 	sky.CelestialBodiesShown = true
 
 	-- Fixed settings that don't change with wetness
-	bloom.Size = 28
-	bloom.Threshold = 1.1
-	sunRays.Spread = 0.6
-	depth.FocusDistance = 40
-	depth.InFocusRadius = 70
+	bloom.Size = 36
+	bloom.Threshold = 0.95
+	sunRays.Spread = 0.85
+	depth.FocusDistance = 60
+	depth.InFocusRadius = 90
 	depth.NearIntensity = 0
-	depth.FarIntensity = 0.06
+	depth.FarIntensity = 0.22
 	Lighting.GlobalShadows = true
 	Lighting.EnvironmentDiffuseScale = 1
 	Lighting.EnvironmentSpecularScale = 0.6
@@ -108,6 +111,7 @@ function Mood.start()
 		atmosphere.Color = DRY.atmosphereColor:Lerp(WET.atmosphereColor, t)
 		atmosphere.Decay = DRY.atmosphereDecay:Lerp(WET.atmosphereDecay, t)
 		atmosphere.Density = lerp(DRY.density, WET.density, t)
+		atmosphere.Offset = lerp(DRY.offset, WET.offset, t)
 		atmosphere.Haze = lerp(DRY.haze, WET.haze, t)
 		atmosphere.Glare = lerp(DRY.glare, WET.glare, t)
 		bloom.Intensity = lerp(DRY.bloom, WET.bloom, t)

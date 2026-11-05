@@ -2,8 +2,9 @@
 -- Stages live in the Studio place (workspace.Stages). This module checks them and moves the water.
 -- Contract, one Model per stage named after config.stages[i].name:
 --   Spawn     where players are moved at stage start
---   Source    holds ScoopPrompt (a ProximityPrompt)
---   PourPoint at the basin rim, holds PourPrompt; tripDistance from Source
+--   Source    invisible zone over the well; players aim at it to scoop (client/Action)
+--   PourPoint at the basin rim; players stand near it and aim at it or the Water to pour;
+--             tripDistance from Source
 --   Basin     the floor of the sunken basin; Water rises from it to ground level
 --   Water     with a number attribute "Depth"; rises with the fill fraction
 

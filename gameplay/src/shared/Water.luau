@@ -17,4 +17,11 @@ function Water.pourAmount(carried: number, current: number, target: number): num
 	return math.max(0, math.min(carried, target - current))
 end
 
+-- One scoop sweep adds capacity / sweeps; the last sweep tops up exactly to capacity.
+function Water.scoopAmount(carried: number, capacity: number, sweeps: number): number
+	local room = math.max(0, capacity - carried)
+	local per = capacity / math.max(1, sweeps)
+	return if per >= room - capacity * 1e-9 then room else per
+end
+
 return Water

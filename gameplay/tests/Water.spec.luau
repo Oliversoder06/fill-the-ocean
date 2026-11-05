@@ -32,4 +32,31 @@ function tests.pour_never_negative_when_full(t)
 	t.expectEq(Water.pourAmount(10, 1001, 1000), 0)
 end
 
+function tests.scoop_one_sweep_fills(t)
+	t.expectEq(Water.scoopAmount(0, 10, 1), 10)
+end
+
+function tests.scoop_splits_into_sweeps(t)
+	t.expectEq(Water.scoopAmount(0, 10, 4), 2.5)
+	t.expectEq(Water.scoopAmount(5, 10, 4), 2.5)
+end
+
+function tests.scoop_last_sweep_tops_up(t)
+	t.expectEq(Water.scoopAmount(9, 10, 4), 1)
+	local carried = 0
+	for _ = 1, 3 do
+		carried += Water.scoopAmount(carried, 1, 3)
+	end
+	t.expectEq(carried, 1, "three thirds fill exactly")
+end
+
+function tests.scoop_full_is_zero(t)
+	t.expectEq(Water.scoopAmount(10, 10, 3), 0)
+	t.expectEq(Water.scoopAmount(11, 10, 3), 0)
+end
+
+function tests.scoop_zero_sweeps_counts_as_one(t)
+	t.expectEq(Water.scoopAmount(0, 10, 0), 10)
+end
+
 return tests

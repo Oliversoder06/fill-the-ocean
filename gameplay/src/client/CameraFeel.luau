@@ -1,13 +1,18 @@
 -- First person only, with a soft head bob, a landing dip and a small tilt that reacts to movement.
 -- The tilt never delays the aim: before Roblox's default camera runs we hand it back the untilted
 -- camera, and after it runs we add the tilt on top for this frame only.
--- Bob and landing dip go through Humanoid.CameraOffset.
+-- Bob and landing dip go through Humanoid.CameraOffset. Each dip of the bob is a footstep
+-- (CameraFeel.onStep, used by client/Footsteps).
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
+local Steps = require(ReplicatedStorage.Shared.Steps)
 
 local BOB_UP = 0.18 -- studs of vertical sway at full intensity
 local BOB_SIDE = 0.1 -- studs of sideways sway at full intensity
-local STEPS_PER_STUD = 0.09 -- bob cycles per stud walked, so faster walking bobs faster
+local STEPS_PER_STUD = Steps.BOB_CYCLES_PER_STUD -- bob cycles per stud walked, so faster walking bobs faster
+local STEP_MIN_INTENSITY = 0.3 -- below this the bob is too faint to count as a step
 local BOB_EASE = 8 -- how quickly the bob fades in and out
 local MOVING_SPEED = 1 -- studs/s below which the player counts as standing
 local LAND_DIP_PER_SPEED = 0.012 -- studs of dip per stud/s of fall speed
@@ -24,6 +29,13 @@ local TILT_EASE = 10 -- how quickly the tilt follows (the aim itself is never de
 
 local player = Players.LocalPlayer
 local CameraFeel = {}
+
+local stepListeners: { (Humanoid) -> () } = {}
+
+-- Called on each footstep (each dip of the head bob) with the local humanoid.
+function CameraFeel.onStep(fn: (Humanoid) -> ())
+	table.insert(stepListeners, fn)
+end
 
 local function ease(rate: number, dt: number): number
 	return 1 - math.exp(-rate * dt)
@@ -90,7 +102,13 @@ function CameraFeel.start()
 		local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
 		local wanted = if speed > MOVING_SPEED and grounded then math.min(speed / 16, 1.5) else 0
 		intensity += (wanted - intensity) * ease(BOB_EASE, dt)
+		local stepBefore = Steps.stepIndex(phase)
 		phase += speed * STEPS_PER_STUD * dt * 2 * math.pi
+		if Steps.stepIndex(phase) > stepBefore and grounded and intensity > STEP_MIN_INTENSITY then
+			for _, fn in stepListeners do
+				fn(humanoid)
+			end
+		end
 		humanoid.CameraOffset = Vector3.new(
 			math.sin(phase) * BOB_SIDE * intensity,
 			math.abs(math.cos(phase)) * BOB_UP * intensity - BOB_UP * intensity * 0.5 + dip,

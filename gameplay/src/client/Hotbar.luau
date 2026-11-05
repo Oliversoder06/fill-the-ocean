@@ -8,6 +8,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Ease = require(ReplicatedStorage.Shared.Ease)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Hud = require(script.Parent.Hud)
 
@@ -17,25 +18,10 @@ local set = Hud.set
 
 local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local POP = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local FILL_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local FILL_POP_SCALE = 1.08 -- the bar swells a little each time water lands (shows even at 100%)
 
 local Hotbar = {}
-
--- Puts a copy of the tool model in the slot's ViewportFrame, framed to fit.
-local function showModel(view: ViewportFrame, template: Model)
-	view:ClearAllChildren()
-	local model = template:Clone()
-	model:PivotTo(CFrame.new())
-	model.Parent = view
-	ToolModels.setWater(model, false)
-	local camera = Instance.new("Camera")
-	local center, size = model:GetBoundingBox()
-	local radius = size.Magnitude / 2
-	local direction = Vector3.new(1, 0.6, 1).Unit
-	camera.FieldOfView = 40
-	camera.CFrame = CFrame.lookAt(center.Position + direction * radius / math.tan(math.rad(20)) * 1.05, center.Position)
-	camera.Parent = view
-	view.CurrentCamera = camera
-end
 
 function Hotbar.start()
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
@@ -44,6 +30,7 @@ function Hotbar.start()
 	local fillBar = Hud.find(bar, "FillBar")
 	local fill = Hud.find(fillBar, "Fill")
 	local fillLabel = Hud.find(fillBar, "Label")
+	local fillPop = Hud.find(fillBar, "Pop")
 	local slot = Hud.find(bar, "Slot")
 	local ring = Hud.find(slot, "Ring")
 	local view = Hud.find(slot, "View")
@@ -70,6 +57,8 @@ function Hotbar.start()
 	end)
 
 	local shownModel: string? = nil
+	-- The bar springs to each new fill (Ease.pop) instead of jumping.
+	local shown, from, to, changedAt = 0, 0, 0, -math.huge
 	RunService.RenderStepped:Connect(function()
 		local modelName = player:GetAttribute("ToolModel")
 		set(bar, "Visible", type(modelName) == "string")
@@ -79,7 +68,7 @@ function Hotbar.start()
 		if modelName ~= shownModel then
 			local template = ToolModels.find(modelName)
 			if template then -- nil until replicated; try again next frame
-				showModel(view, template)
+				ToolModels.showIn(view, template)
 				shownModel = modelName
 			end
 		end
@@ -92,8 +81,17 @@ function Hotbar.start()
 			local carried = player:GetAttribute("Carried") or 0
 			local capacity = player:GetAttribute("Capacity") or 0
 			local ratio = if capacity > 0 then math.clamp(carried / capacity, 0, 1) else 0
-			set(fill, "Size", UDim2.fromScale(ratio, 1))
-			set(fill, "Visible", ratio > 0)
+			local now = os.clock()
+			if ratio ~= to then
+				if ratio > to then
+					fillPop.Scale = FILL_POP_SCALE
+					TweenService:Create(fillPop, FILL_POP, { Scale = 1 }):Play()
+				end
+				from, to, changedAt = shown, ratio, now
+			end
+			shown = math.clamp(Ease.pop(from, to, now - changedAt), 0, 1)
+			set(fill, "Size", UDim2.fromScale(shown, 1))
+			set(fill, "Visible", shown > 0)
 			set(fillLabel, "Text", `{math.floor(ratio * 100 + 0.5)}% Full`)
 		end
 	end)

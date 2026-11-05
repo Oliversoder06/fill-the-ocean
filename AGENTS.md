@@ -35,36 +35,61 @@ small change directly (see "Small tasks without a plan"). These rules apply to e
 ## Code map (gameplay/)
 Server (`src/server/`):
 - `Run.luau`: the whole run. Phases, per-player state (money, carried, stats, bought items,
-  equipped), scoop/pour validation, buying, rewards, publishing attributes. Most gameplay
-  changes land here.
+  equipped), scoop/pour validation (`Act` remote), buying, rewards, publishing attributes. Most
+  gameplay changes land here.
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it.
 - `Map.luau`: checks the baked stages and moves the water.
 
 Client (`src/client/`, all started from `init.client.luau`):
-- `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, results), enables this
-  player's prompts, frees the cursor while a window is open. Exposes helpers `Hud.find` (asserting
-  path lookup), `Hud.set` (write only on change), `Hud.short` (1.2K), `Hud.money` (12,480).
-- `Shop.luau`: the shop window (Tab / gamepad Y / mobile button), next item, coming up, gear.
-- `Hotbar.luau`: the one tool slot (1 / gamepad X / click to equip or unequip) and the fill bar.
-- `Viewmodel.luau`: first-person tool. `CameraFeel.luau`: first-person camera bob and tilt.
-  `Mood.luau`: lighting.
+- `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, results), frees the cursor while
+  a window is open. Exposes helpers `Hud.find` (asserting path lookup), `Hud.set` (write only on
+  change), `Hud.short` (1.2K), `Hud.money` (12,480), `Hud.currentStage`, and `Hud.walletHold`
+  (money still flying in as coins; the wallet shows Money minus it).
+- `Action.luau`: scoop and pour input (aim at the water + hold E / LMB / RT / touch button), one
+  full sweep or pour per action, the `ActHint` text. Viewmodel and Feel read `Action.current()`.
+- `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`.
+- `Payout.luau`: when Money goes up, coins burst from the pour, land around you and fly into the
+  wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
+- `Shop.luau`: the shop window (Tab / gamepad Y / mobile button): one tile per upgrade track in
+  the Tool and Boosts panels, and a detail panel with the Buy button. Opens through `Window`.
+- `Purchase.luau`: the purchase moment: sting, coins fly from your money into the tile, a "BOUGHT!"
+  stamp (`StarterGui.Hud.Templates`), Buy-button shake when you can't buy, new-tool swing-up
+  sparkles and speed-upgrade whoosh/FOV kick when the shop closes (`Cues.purchase`).
+- `Footsteps.luau`: your steps on each dip of the camera bob (`CameraFeel.onStep`), others' every
+  `Steps.STRIDE` studs; sound by floor (`shared/Steps`), heavier while carrying; mutes Roblox's
+  default "Running" sound (`Cues.steps`).
+- `Ambience.luau`: a looping bed per stage plus a cicada heat layer; filling the basin fades the
+  heat out and the bed up (`Cues.ambience`, `Cues.ambienceMix`).
+- `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
+  layer by layer; timing in `shared/Reveal.luau`).
+- `Hotbar.luau`: the one tool slot (1 / gamepad X / click to equip or unequip) and the fill bar
+  (springs with `Ease.pop`).
+- `Viewmodel.luau`: first-person tool (sweep / pour poses). `CameraFeel.luau`: first-person camera
+  bob and tilt. `Mood.luau`: lighting.
 
 Shared (`src/shared/`, pure unless noted):
-- `Config.luau`: every run number (stages, items, prices). Balance changes go here.
-- `Ladder.luau`: next item, `upcoming` (what the shop previews; the server's next offer uses it
-  too), `kindProgress`, applying an item to stats.
-- `Water.luau`, `Rewards.luau`, `ToolView.luau`, `Session.luau`: maths, all Lune-tested.
+- `Config.luau`: every run number: stages and the six upgrade tracks (`Config.tracks`: tool,
+  pickup, hold, quick, walk, tip), each level with its price and unlock stage. Balance changes go
+  here; check them with `lune run tools/simulate`.
+- `Ladder.luau`: `stats(config, levels)` (what a player's levels add up to, including `sweeps`),
+  `offer(config, levels, trackId, stage)` (next level and `"buy"` / `"locked"` / `"max"`),
+  `baseSweeps`, `tripSeconds`.
+- `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
+- `Water.luau`, `Rewards.luau`, `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
+  `Reveal.luau`, `Steps.luau`:
+  maths, all Lune-tested (`Cues` too).
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
 
 ## Server ↔ client contract
 The server publishes state as attributes; the client only reads them.
 - `ReplicatedStorage` attributes: `Phase` (`waiting`, `playing`, `card`, `saving`, `results`),
   `Stage` (1-3), `Current`, `Target`, `Fill`, `Waiting`, `ReturnAt`, `Difficulty`.
-- Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `ToolName`,
-  `ToolModel`, `ToolTier`, `Equipped`, `NextItemName`, `NextItemCost`, `Bought1`..`Bought3`,
-  `Share`.
-- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (no args),
-  `Equip` (boolean), `Card` and `Results` (server to client).
+- Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
+  `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, `Share`, and
+  `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...).
+- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id),
+  `Equip` (boolean), `Act` (`"scoop"` or `"pour"`, sent when an action starts; the server credits
+  a scoop ActSeconds later and a pour at once), `Card` and `Results` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish`. A new remote: add it to
   `default.project.json` AND to the `remote(...)` list in `Run.start`, validate its arguments, and
   tell the owner to restart `rojo serve` (a running Rojo does not reload the project file; the
@@ -84,6 +109,11 @@ The server publishes state as attributes; the client only reads them.
   (tile, tag, tab, big button) are white; colour them with `ImageColor3` from the theme.
 - Windows (anything the player clicks in) must be listed in `Hud.luau`'s `windows` table, so the
   first-person cursor is freed while they are open.
+- Windows open and close through `client/Window.luau`. To make a part pop in, give it a number
+  attribute `Reveal` (whole part = layer: 1 panels, 2 tags, 3 items, 4 decorations; fraction =
+  place in the layer; equal values appear together) and exactly one UIScale child. Decorations
+  (4 and up) also swing in by `Reveal.SPIN` degrees and finish with the last item. Never mark a
+  child of a UIListLayout/UIGridLayout (its scale moves its siblings); mark what is inside it.
 - Tool icons are not drawn yet; slots use the `unknown` image or the tool's 3D model.
 
 ## Gotchas (each one has cost time)
@@ -98,7 +128,7 @@ The server publishes state as attributes; the client only reads them.
   `GuiButton.Modal` left `MouseBehavior` at `LockCenter` in testing, so don't rely on it.
 - Tab opens the shop, so Roblox's player list is disabled in `Shop.luau`. The Board that used to
   show shares is gone.
-- Never trust the client: `Equip`, `Buy` and the prompts are all re-checked on the server.
+- Never trust the client: `Equip`, `Buy` and `Act` are all re-checked on the server.
 
 ## Hard rules (never break these)
 - **Never edit, delete, skip, weaken or special-case a test** to make it pass. If a test looks wrong,
@@ -130,7 +160,8 @@ needs a Studio play test).
 - `FindFirstChild` results must be nil-checked before use (or use `Zones.part`, which asserts).
 - Never yield (`WaitForChild`, `task.wait`) inside `RenderStepped` / `BindToRenderStep` callbacks.
 - Write Roblox properties only when the value changes in per-frame code.
-- Filling is never automatic: water only moves when the player completes a hold prompt.
+- Filling is never automatic: water only moves while the player holds the act input aimed at the
+  water; each sweep or pour, once started, always plays out in full.
 - For Roblox API facts, check the LihFolk vault:
   `C:\Users\lexru\.claude\plugins\cache\lihfolk\lihfolk\2.5.0\LihFolk Vault V2\` (search it by keyword).
 - The owner's taste and numbers: `C:\RobloxDev\library` (rules in `LIBRARY-RULES.md`).

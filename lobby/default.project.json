@@ -23,6 +23,12 @@
         "$className": "Folder",
         "Notice": {
           "$className": "RemoteEvent"
+        },
+        "SessionState": {
+          "$className": "RemoteEvent"
+        },
+        "SessionAction": {
+          "$className": "RemoteEvent"
         }
       }
     },

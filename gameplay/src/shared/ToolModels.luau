@@ -11,12 +11,10 @@ local ToolModels = {}
 -- Hero model names in ladder order, each once: the starting tool, then each new model.
 function ToolModels.order(config): { string }
 	local names, seen = { config.start.toolModel }, { [config.start.toolModel] = true }
-	for _, stage in config.stages do
-		for _, item in stage.items do
-			if item.kind == "tool" and not seen[item.model] then
-				seen[item.model] = true
-				table.insert(names, item.model)
-			end
+	for _, level in config.track("tool").levels do
+		if not seen[level.model] then
+			seen[level.model] = true
+			table.insert(names, level.model)
 		end
 	end
 	return names
@@ -44,6 +42,23 @@ function ToolModels.get(name: string): Model
 	local model = folder:WaitForChild(name, 10)
 	assert(model and model:IsA("Model"), `ToolModels is missing {name}`)
 	return model
+end
+
+-- Client UI: puts a copy of the tool model in a ViewportFrame, framed to fit (hotbar, shop).
+function ToolModels.showIn(view: ViewportFrame, template: Model)
+	view:ClearAllChildren()
+	local model = template:Clone()
+	model:PivotTo(CFrame.new())
+	model.Parent = view
+	ToolModels.setWater(model, false)
+	local camera = Instance.new("Camera")
+	local center, size = model:GetBoundingBox()
+	local radius = size.Magnitude / 2
+	local direction = Vector3.new(1, 0.6, 1).Unit
+	camera.FieldOfView = 40
+	camera.CFrame = CFrame.lookAt(center.Position + direction * radius / math.tan(math.rad(20)) * 1.05, center.Position)
+	camera.Parent = view
+	view.CurrentCamera = camera
 end
 
 -- Show or hide the "<Name>_Water" piece if the model has one.

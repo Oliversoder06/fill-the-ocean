@@ -1,7 +1,8 @@
 -- The run: pool -> lake -> ocean. Owns money, carried water, purchases and the water level.
--- Clients trigger the scoop/pour hold prompts (baked into the stages) and send Buy(); state goes
--- out as attributes. Each player's prompt hold time is set on their client from ActSeconds; the
--- server checks distance when the hold starts and the hold length when it triggers.
+-- Clients send Act("scoop" | "pour") when they start a scoop sweep or a pour (aimed at the well or
+-- the basin, see client/Action) and Buy(trackId); state goes out as attributes. The server checks
+-- the distance and, for scoops, the pace (one per ActSeconds) when an action starts. A scoop is
+-- credited when it ends, ActSeconds later; a pour is instant.
 -- Session: in a reserved server the lobby's ticket gives the difficulty and the party; in Studio
 -- or a normal server, workspace attribute StudioDifficulty (default 1) and no party wait.
 local Players = game:GetService("Players")
@@ -28,9 +29,9 @@ local CARD_SECONDS = 3
 local RETURN_SECONDS = 15 -- results screen time before everyone goes back to the lobby
 local MAX_BUYS_PER_SECOND = 5
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
-local PROMPT_DISTANCE = 10
+local ACT_REACH = 12 -- studs from Source / PourPoint; keep in step with client/Action REACH
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
-local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's hold-time check (mobile lag spikes)
+local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action pace check (mobile lag spikes)
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 
 local Run = {}
@@ -69,34 +70,23 @@ local function remote(name: string): RemoteEvent
 	return r
 end
 
-local function nextOffer(state)
-	if run.stage < 1 or run.stage > #Config.stages then
-		return nil, nil
-	end
-	local offer = Ladder.upcoming(Config, run.stage, state.boughtPerStage, 1)[1]
-	if offer then
-		return offer.stage, offer.item
-	end
-	return nil, nil
-end
-
 local function publish(player: Player)
 	local state = states[player]
-	local _, item = nextOffer(state)
 	player:SetAttribute("Money", state.money)
 	player:SetAttribute("Carried", state.carried)
 	player:SetAttribute("Capacity", state.stats.capacity)
 	player:SetAttribute("WalkSpeed", state.stats.walkSpeed)
 	player:SetAttribute("ActSeconds", state.stats.actSeconds)
+	player:SetAttribute("Sweeps", state.stats.sweeps)
 	player:SetAttribute("ToolName", state.stats.toolName)
 	player:SetAttribute("ToolModel", state.stats.toolModel)
-	player:SetAttribute("ToolTier", Ladder.toolTier(Config, state.stats.toolName))
+	player:SetAttribute("ToolTier", state.stats.toolTier)
+	player:SetAttribute("Hold", state.stats.hold)
+	player:SetAttribute("CoinBonus", state.stats.coinBonus)
 	player:SetAttribute("Equipped", state.equipped)
-	player:SetAttribute("NextItemName", if item then item.name else "")
-	player:SetAttribute("NextItemCost", if item then item.cost else -1)
-	-- Items bought per stage ("Bought1".."Bought3"): the shop previews what comes next from these.
-	for s = 1, #Config.stages do
-		player:SetAttribute(`Bought{s}`, state.boughtPerStage[s] or 0)
+	-- Levels bought per track ("Level_tool", "Level_walk", ...): the shop reads these.
+	for _, track in Config.tracks do
+		player:SetAttribute(`Level_{track.id}`, state.levels[track.id] or 0)
 	end
 end
 
@@ -323,10 +313,10 @@ local function onPlayerAdded(player: Player)
 	states[player] = {
 		money = 0,
 		carried = 0,
-		stats = table.clone(Config.start),
-		boughtPerStage = {},
+		levels = {} :: { [string]: number },
+		stats = Ladder.stats(Config, {}),
 		litres = {},
-		holds = {} :: { [ProximityPrompt]: { began: number, ended: number? } },
+		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
 		buyWindowStart = 0,
 		buysInWindow = 0,
 		equipped = true,
@@ -346,9 +336,10 @@ local function onPlayerAdded(player: Player)
 	onPlayerCount(#Players:GetPlayers())
 end
 
-local function onBuy(player: Player)
+-- Buy the next level of one upgrade track. Only levels unlocked by the current stage can be bought.
+local function onBuy(player: Player, trackId: unknown)
 	local state = states[player]
-	if not state or (run.phase ~= "playing" and run.phase ~= "card") then
+	if not state or type(trackId) ~= "string" or (run.phase ~= "playing" and run.phase ~= "card") then
 		return
 	end
 	local now = os.clock()
@@ -359,13 +350,13 @@ local function onBuy(player: Player)
 		return
 	end
 	state.buysInWindow += 1
-	local stage, item = nextOffer(state)
-	if not item or state.money + MONEY_EPSILON < item.cost then
+	local level, status = Ladder.offer(Config, state.levels, trackId, run.stage)
+	if status ~= "buy" or state.money + MONEY_EPSILON < level.cost then
 		return
 	end
-	state.money = math.max(0, state.money - item.cost)
-	state.boughtPerStage[stage] = (state.boughtPerStage[stage] or 0) + 1
-	state.stats = Ladder.apply(state.stats, item)
+	state.money = math.max(0, state.money - level.cost)
+	state.levels[trackId] = (state.levels[trackId] or 0) + 1
+	state.stats = Ladder.stats(Config, state.levels)
 	applyWalkSpeed(player)
 	publish(player)
 end
@@ -387,80 +378,68 @@ local function checkFull()
 	end
 end
 
-local function nearPrompt(player: Player, prompt: ProximityPrompt): boolean
+local function nearPart(player: Player, part: BasePart): boolean
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	local part = prompt.Parent
-	return root ~= nil
-		and part ~= nil
-		and part:IsA("BasePart")
-		and ((root :: BasePart).Position - part.Position).Magnitude <= PROMPT_DISTANCE + DISTANCE_SLACK
+	return root ~= nil and ((root :: BasePart).Position - part.Position).Magnitude <= ACT_REACH + DISTANCE_SLACK
 end
 
--- A trigger counts only in the current stage, close to the prompt, after a full hold that began
--- close to the prompt (so a hold can't be started while still walking over).
-local function validTrigger(player: Player, prompt: ProximityPrompt, stageIndex: number): boolean
-	local state = states[player]
-	local hold = state and state.holds[prompt]
-	if state then
-		state.holds[prompt] = nil
-	end
-	if not (state and hold and state.equipped) or run.phase ~= "playing" or run.stage ~= stageIndex then
-		return false
-	end
-	if not nearPrompt(player, prompt) then
-		return false
-	end
-	-- HoldEnded can reach the server before Triggered, so measure the hold that actually happened
-	local act = state.stats.actSeconds
-	return (hold.ended or os.clock()) - hold.began >= act - math.min(HOLD_SLACK, act / 2)
+local function creditScoop(state)
+	state.carried += Water.scoopAmount(state.carried, state.stats.capacity, state.stats.sweeps)
 end
 
-local function onScoop(player: Player, prompt: ProximityPrompt, stageIndex: number)
-	if not validTrigger(player, prompt, stageIndex) then
-		return
-	end
-	local state = states[player]
-	state.carried = state.stats.capacity
-	publish(player)
-end
-
-local function onPour(player: Player, prompt: ProximityPrompt, stageIndex: number)
-	if not validTrigger(player, prompt, stageIndex) then
-		return
-	end
-	local state = states[player]
+local function creditPour(state, stageIndex: number): boolean
 	local litres = Water.pourAmount(state.carried, run.current, run.target)
 	if litres <= 0 then
-		return
+		return false
 	end
 	state.carried -= litres
-	state.money += litres * Config.stages[stageIndex].coinsPerLitre
+	state.money += litres * Config.stages[stageIndex].coinsPerLitre * state.stats.coinBonus
 	state.litres[stageIndex] = (state.litres[stageIndex] or 0) + litres
 	run.allLitres[stageIndex] += litres
 	setWater(run.current + litres, run.target)
-	publish(player)
-	updateShares()
-	checkFull()
+	return true
 end
 
--- Prompts are baked into each stage (Source.ScoopPrompt, PourPoint.PourPrompt); this wires them.
-local function connectPrompt(part: BasePart, name: string, handler, stageIndex: number)
-	local prompt = part:FindFirstChild(name)
-	assert(prompt and prompt:IsA("ProximityPrompt"), `{part:GetFullName()} is missing {name}`)
-	prompt.PromptButtonHoldBegan:Connect(function(player)
-		local state = states[player]
-		if state and nearPrompt(player, prompt) then
-			state.holds[prompt] = { began = os.clock() }
+-- A scoop sweep or a pour. Checked when it starts (stage, distance, room or water). A scoop is
+-- credited when it ends (it always plays out in full on the client) and is paced: on average one
+-- per actSeconds, with slack for latency. A pour is instant and needs no pacing: it empties the tool.
+local function onAct(player: Player, kind: unknown)
+	local state = states[player]
+	if not state or (kind ~= "scoop" and kind ~= "pour") or not state.equipped or run.phase ~= "playing" then
+		return
+	end
+	local stageIndex = run.stage
+	local act = state.stats.actSeconds
+	local slack = math.min(HOLD_SLACK, act / 2)
+	local now = os.clock()
+	if kind == "scoop" and now < state.nextActAt - slack then
+		return
+	end
+	local part = Zones.part(stageModel(stageIndex), if kind == "scoop" then "Source" else "PourPoint")
+	if not nearPart(player, part) then
+		return
+	end
+	if kind == "scoop" and state.carried >= state.stats.capacity - 1e-9 then
+		return
+	elseif kind == "pour" and state.carried <= 0 then
+		return
+	end
+	if kind == "pour" then
+		if creditPour(state, stageIndex) then
+			publish(player)
+			updateShares()
+			checkFull()
 		end
-	end)
-	prompt.PromptButtonHoldEnded:Connect(function(player)
-		local hold = states[player] and states[player].holds[prompt]
-		if hold then
-			hold.ended = os.clock()
+		return
+	end
+	-- Keep up to `slack` of earned time, so a late packet doesn't make the next on-time one look early.
+	state.nextActAt = math.max(state.nextActAt, now - slack) + act
+	task.delay(act, function()
+		if states[player] ~= state or run.phase ~= "playing" or run.stage ~= stageIndex or not state.equipped then
+			return
 		end
-	end)
-	prompt.Triggered:Connect(function(player)
-		handler(player, prompt, stageIndex)
+		creditScoop(state)
+		publish(player)
 	end)
 end
 
@@ -496,7 +475,7 @@ end
 
 function Run.start(stages: Folder)
 	stagesFolder = stages
-	for _, name in { "Buy", "Card", "Results", "Equip" } do
+	for _, name in { "Buy", "Card", "Results", "Equip", "Act" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Stage", 0)
@@ -509,11 +488,7 @@ function Run.start(stages: Folder)
 
 	remotes.Buy.OnServerEvent:Connect(onBuy)
 	remotes.Equip.OnServerEvent:Connect(onEquip)
-	for i in Config.stages do
-		local model = stageModel(i)
-		connectPrompt(Zones.part(model, "Source"), "ScoopPrompt", onScoop, i)
-		connectPrompt(Zones.part(model, "PourPoint"), "PourPrompt", onPour, i)
-	end
+	remotes.Act.OnServerEvent:Connect(onAct)
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do
 		onPlayerAdded(player)

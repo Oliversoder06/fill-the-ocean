@@ -3,114 +3,104 @@ local Ladder = require("../src/shared/Ladder")
 
 local tests = {}
 
-local function start()
-	return { capacity = 1, walkSpeed = 16, actSeconds = 0.5 }
-end
-
-function tests.first_pool_item_is_cup(t)
-	t.expectEq(Ladder.nextItem(Config, 1, 0).name, "Cup")
-end
-
-function tests.pool_list_ends(t)
-	t.expectEq(Ladder.nextItem(Config, 1, #Config.stages[1].items), nil)
-end
-
-function tests.no_peeking_into_lake(t)
-	local item = Ladder.nextItem(Config, 1, #Config.stages[1].items)
-	t.expectEq(item and item.name, nil, "after last pool item")
-end
-
-function tests.last_item_of_run_is_moon_then_nil(t)
-	t.expectEq(#Config.stages[3].items, 14, "ocean item count")
-	t.expectEq(Ladder.nextItem(Config, 3, 13).name, "The Moon Lv4")
-	t.expectEq(Ladder.nextItem(Config, 3, 14), nil)
-end
-
-function tests.apply_tool_sets_capacity(t)
-	local before = start()
-	local after = Ladder.apply(before, Config.stages[1].items[1])
-	t.expectEq(after.capacity, 4)
-	t.expectEq(before.capacity, 1, "input unchanged")
-	t.expectEq(after.walkSpeed, 16)
-end
-
-function tests.tool_name_follows_tools_only(t)
-	local items = Config.stages[1].items
-	local s = Ladder.apply({ capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spoon", toolModel = "Spoon" }, items[1])
-	t.expectEq(s.toolName, "Cup")
-	t.expectEq(s.toolModel, "Cup")
-	s = Ladder.apply(s, items[2]) -- Sneakers 1
-	t.expectEq(s.toolName, "Cup", "speed items keep the tool")
-	s = Ladder.apply(s, items[4]) -- Cup Lv2
-	t.expectEq(s.toolName, "Cup Lv2")
-	t.expectEq(s.toolModel, "Cup", "levels keep the model")
-	t.expectEq(Config.start.toolName, "Spoon")
-end
-
-function tests.tool_tier_counts_every_tool_rung(t)
-	t.expectEq(Ladder.toolTier(Config, "Spoon"), 1)
-	t.expectEq(Ladder.toolTier(Config, "Cup"), 2)
-	t.expectEq(Ladder.toolTier(Config, "Cup Lv2"), 3)
-	t.expectEq(Ladder.toolTier(Config, "The Moon Lv4"), 20)
-	t.expectEq(Ladder.toolTier(Config, "Nope"), 1)
-end
-
-function tests.apply_walk_and_hands(t)
-	local items = Config.stages[1].items
-	local s = Ladder.apply(start(), items[2])
-	t.expectEq(s.walkSpeed, 20)
-	t.expectEq(s.actSeconds, 0.5)
-	s = Ladder.apply(s, items[3])
-	t.expectEq(s.actSeconds, 0.45)
-	t.expectEq(s.walkSpeed, 20)
+function tests.no_levels_is_the_starting_kit(t)
+	local s = Ladder.stats(Config, {})
 	t.expectEq(s.capacity, 1)
+	t.expectEq(s.walkSpeed, 16)
+	t.expectEq(s.actSeconds, 0.5)
+	t.expectEq(s.sweeps, 1)
+	t.expectEq(s.toolName, "Spoon")
+	t.expectEq(s.toolModel, "Spoon")
+	t.expectEq(s.toolTier, 1)
+	t.expectEq(s.coinBonus, 1)
+	t.expectEq(s.hold, false)
+end
+
+function tests.each_track_sets_its_own_stat(t)
+	local s = Ladder.stats(Config, { tool = 2, walk = 1, quick = 1, tip = 1, hold = 1 })
+	t.expectEq(s.toolName, "Cup Lv2")
+	t.expectEq(s.toolModel, "Cup", "levels keep the hero model")
+	t.expectEq(s.toolTier, 3)
+	t.expectEq(s.capacity, 10)
+	t.expectEq(s.walkSpeed, 20)
+	t.expectEq(s.actSeconds, 0.45)
+	t.expectEq(s.coinBonus, 1.05)
+	t.expectEq(s.hold, true)
+end
+
+function tests.cup_takes_two_sweeps_and_pickup_takes_one_off(t)
+	t.expectEq(Ladder.stats(Config, { tool = 1 }).sweeps, 2, "cup")
+	t.expectEq(Ladder.stats(Config, { tool = 1, pickup = 1 }).sweeps, 1, "cup + pickup")
+	t.expectEq(Ladder.stats(Config, { pickup = 1 }).sweeps, 1, "never below one")
+end
+
+function tests.base_sweeps_grow_every_four_tools_up_to_five(t)
+	t.expectEq(Ladder.baseSweeps(Config, 1), 1, "spoon")
+	t.expectEq(Ladder.baseSweeps(Config, 2), 2, "cup")
+	t.expectEq(Ladder.baseSweeps(Config, 5), 2)
+	t.expectEq(Ladder.baseSweeps(Config, 6), 3)
+	t.expectEq(Ladder.baseSweeps(Config, 20), 5, "moon is capped")
+end
+
+function tests.all_pickups_bring_every_stage_end_back_to_one_sweep(t)
+	local function lastIn(trackId, stage)
+		local n = 0
+		for i, level in Config.track(trackId).levels do
+			if level.stage <= stage then
+				n = i
+			end
+		end
+		return n
+	end
+	for stage = 1, #Config.stages do
+		local s = Ladder.stats(Config, { tool = lastIn("tool", stage), pickup = lastIn("pickup", stage) })
+		t.expectEq(s.sweeps, 1, `end of stage {stage}`)
+	end
+end
+
+function tests.offer_is_the_next_level(t)
+	local level, status = Ladder.offer(Config, {}, "tool", 1)
+	t.expectEq(status, "buy")
+	t.expectEq(level.name, "Cup")
+	level = Ladder.offer(Config, { tool = 1 }, "tool", 1)
+	t.expectEq(level.name, "Cup Lv2")
+end
+
+function tests.offer_is_locked_until_its_stage(t)
+	local tools = Config.track("tool").levels
+	local poolTools = 0
+	for _, level in tools do
+		if level.stage == 1 then
+			poolTools += 1
+		end
+	end
+	local level, status = Ladder.offer(Config, { tool = poolTools }, "tool", 1)
+	t.expectEq(status, "locked")
+	t.expectEq(level.stage, 2, "the locked level is still returned for the shop")
+	local _, laterStatus = Ladder.offer(Config, { tool = poolTools }, "tool", 2)
+	t.expectEq(laterStatus, "buy")
+end
+
+function tests.offer_is_max_after_the_last_level(t)
+	local level, status = Ladder.offer(Config, { hold = 1 }, "hold", 3)
+	t.expectEq(status, "max")
+	t.expectEq(level, nil)
+end
+
+function tests.offer_rejects_unknown_tracks(t)
+	local level, status = Ladder.offer(Config, {}, "nope", 1)
+	t.expectEq(level, nil)
+	t.expectEq(status, nil)
 end
 
 function tests.trip_seconds(t)
-	t.expectNear(Ladder.tripSeconds(Config, start()), 11, 1e-9)
+	-- 80 studs there and back at 16, one 0.5 s sweep, then the quick pour
+	t.expectNear(Ladder.tripSeconds(Config, Ladder.stats(Config, {})), 10.5 + Config.pourSeconds, 1e-9)
 end
 
-function tests.missed_items_listed(t)
-	local missed = Ladder.missedFromEarlierStages(Config, 2, { 3, 0 })
-	t.expectEq(#missed, 7)
-	t.expectEq(missed[1].stage, 1)
-	t.expectEq(missed[1].item.name, "Cup Lv2")
-	t.expectEq(missed[7].item.name, "Quick Hands 3")
-end
-
-function tests.nothing_missed_in_first_stage(t)
-	t.expectEq(#Ladder.missedFromEarlierStages(Config, 1, { 0 }), 0)
-end
-
-function tests.upcoming_starts_with_next_item(t)
-	local list = Ladder.upcoming(Config, 1, { 0 }, 3)
-	t.expectEq(#list, 3)
-	t.expectEq(list[1].item.name, "Cup")
-	t.expectEq(list[3].item.name, "Quick Hands 1")
-end
-
-function tests.upcoming_puts_catch_up_first(t)
-	local list = Ladder.upcoming(Config, 2, { 9, 0 }, 3)
-	t.expectEq(list[1].item.name, "Quick Hands 3", "missed pool item first")
-	t.expectEq(list[1].stage, 1)
-	t.expectEq(list[2].item.name, "Bucket Lv3")
-	t.expectEq(list[2].stage, 2)
-end
-
-function tests.upcoming_shrinks_at_end_of_list(t)
-	t.expectEq(#Ladder.upcoming(Config, 3, { 10, 9, 13 }, 3), 1)
-	t.expectEq(#Ladder.upcoming(Config, 3, { 10, 9, 14 }, 3), 0)
-	t.expectEq(#Ladder.upcoming(Config, 4, { 10, 9, 14 }, 3), 0, "after the last stage")
-end
-
-function tests.kind_progress_counts_bought_of_total(t)
-	local bought, total = Ladder.kindProgress(Config, { 0 }, "walk")
-	t.expectEq(bought, 0)
-	t.expectEq(total, 7)
-	bought = Ladder.kindProgress(Config, { 6, 2 }, "walk") -- Sneakers 1, 2, then 4
-	t.expectEq(bought, 3)
-	bought, total = Ladder.kindProgress(Config, { 10, 9, 14 }, "hands")
-	t.expectEq(bought, total)
+function tests.trip_seconds_counts_sweeps(t)
+	local s = Ladder.stats(Config, { tool = 1 })
+	t.expectNear(Ladder.tripSeconds(Config, s), 10 + 2 * 0.5 + Config.pourSeconds, 1e-9)
 end
 
 return tests

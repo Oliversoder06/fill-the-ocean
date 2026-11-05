@@ -32,6 +32,9 @@
         },
         "Equip": {
           "$className": "RemoteEvent"
+        },
+        "Act": {
+          "$className": "RemoteEvent"
         }
       }
     },
