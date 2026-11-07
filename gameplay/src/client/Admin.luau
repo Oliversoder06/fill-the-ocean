@@ -1,16 +1,18 @@
--- Admin window (F2), only for the user ids in shared/Admins: jump the run to any stage. Built in
--- Studio as StarterGui.Hud.Admin. The server re-checks the id and only jumps mid-stage.
+-- Admin window (F2), only for the user ids in shared/Admins: jump the ocean's fill (0%, 50%, 95%,
+-- 100%). Built in Studio as StarterGui.Hud.Admin. The server re-checks the id and only jumps while
+-- playing.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Admins = require(ReplicatedStorage.Shared.Admins)
-local Config = require(ReplicatedStorage.Shared.Config)
 local Hud = require(script.Parent.Hud)
 local Window = require(script.Parent.Window)
 
 local player = Players.LocalPlayer
 local Admin = {}
+
+local FILLS = { 0, 50, 95, 100 } -- percent; button Body.Fills.Fill<percent>
 
 function Admin.start()
 	if not Admins[player.UserId] then
@@ -35,11 +37,9 @@ function Admin.start()
 		end
 	end
 
-	for i, stage in Config.stages do
-		local button = Hud.find(root, `Body.Stages.Stage{i}`)
-		Hud.find(button, "Label").Text = string.upper(stage.name)
-		button.Activated:Connect(function()
-			adminEvent:FireServer(i)
+	for _, percent in FILLS do
+		Hud.find(root, `Body.Fills.Fill{percent}`).Activated:Connect(function()
+			adminEvent:FireServer(percent / 100)
 			setOpen(false)
 		end)
 	end
@@ -48,14 +48,12 @@ function Admin.start()
 	end)
 
 	local function refresh()
-		local index = ReplicatedStorage:GetAttribute("Stage")
-		local stage = type(index) == "number" and Config.stages[index]
+		local fill = ReplicatedStorage:GetAttribute("Fill")
+		local now = if type(fill) == "number" then string.format("%.1f%%", math.floor(fill * 1000) / 10) else "-"
 		local phase = ReplicatedStorage:GetAttribute("Phase")
-		status.Text = if phase == "playing"
-			then `Now: {if stage then stage.name else "-"}`
-			else `Now: {if stage then stage.name else "-"} ({phase}). Jumps work while playing.`
+		status.Text = if phase == "playing" then `Now: {now}` else `Now: {now} ({phase}). Jumps work while playing.`
 	end
-	ReplicatedStorage:GetAttributeChangedSignal("Stage"):Connect(refresh)
+	ReplicatedStorage:GetAttributeChangedSignal("Fill"):Connect(refresh)
 	ReplicatedStorage:GetAttributeChangedSignal("Phase"):Connect(refresh)
 	refresh()
 

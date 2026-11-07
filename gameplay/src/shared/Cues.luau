@@ -98,10 +98,10 @@ Cues.carry = {
 	drips = "Drips",
 }
 
--- Ambience (client/Ambience): one looping bed per stage, plus a heat layer. A dry basin is hot and
--- quiet; as it fills, the heat fades and the life in the bed comes back.
+-- Ambience (client/Ambience): one looping bed (the ocean), plus a heat layer. A dry ocean is hot
+-- and quiet; as it fills, the heat fades and the life in the bed comes back.
 Cues.ambience = {
-	beds = { Pool = "AmbPool", Lake = "AmbLake", Ocean = "AmbOcean" },
+	bed = "AmbOcean",
 	heat = "AmbHeat",
 	bedVolume = 0.45,
 	heatVolume = 0.3,
@@ -116,14 +116,12 @@ function Cues.ambienceMix(fill: number): (number, number)
 	return lifeMin + (1 - lifeMin) * f, 1 - f
 end
 
--- Music (client/Music): one track per stage, a faster one for the final push (the last stage's
--- last 5%) and a calm one for waiting and results. Tracks crossfade; big moments (stage cards,
--- purchases) duck the music so they read.
+-- Music (client/Music): the map's track, a faster one for the final push (the last 5% of the
+-- ocean) and a calm one for waiting. Tracks crossfade; big moments (cards, purchases) duck the
+-- music so they read.
 Cues.music = {
 	tracks = {
-		Pool = "MusicPool",
-		Lake = "MusicLake",
-		Ocean = "MusicOcean",
+		ocean = "MusicMap1",
 		finale = "MusicFinale",
 		calm = "MusicCalm",
 	},
@@ -135,14 +133,14 @@ Cues.music = {
 }
 
 -- Which track should play: a key of Cues.music.tracks.
-function Cues.musicTrack(phase: string?, stageName: string?, isLastStage: boolean, fill: number): string
-	if (phase ~= "playing" and phase ~= "card") or not stageName then
+function Cues.musicTrack(phase: string?, fill: number): string
+	if phase ~= "playing" and phase ~= "ending" then
 		return "calm"
 	end
-	if isLastStage and fill >= Cues.music.finalPushFill then
+	if fill >= Cues.music.finalPushFill then
 		return "finale"
 	end
-	return stageName
+	return "ocean"
 end
 
 function Cues.size(tier: number): number

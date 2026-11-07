@@ -1,4 +1,4 @@
--- Scoop and pour. Stand by the well (the stage's Source) or anywhere next to where the water will
+-- Scoop and pour. Stand by the well (the ocean's Source) or anywhere next to where the water will
 -- be (shared/Zones.nearFlood), aim at the
 -- water and press E, left mouse, RT or the touch button. A scoop is one sweep (the tool fills over
 -- `Sweeps` of them); each press does one sweep, and holding keeps sweeping only once the player owns
@@ -62,7 +62,7 @@ function Action.start()
 	local actRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Act") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local hint = Hud.find(gui, "ActHint")
-	local windows = { Hud.find(gui, "Shop"), Hud.find(gui, "Results") }
+	local shop = Hud.find(gui, "Shop")
 
 	local aimParams = RaycastParams.new()
 	aimParams.FilterType = Enum.RaycastFilterType.Include
@@ -103,9 +103,9 @@ function Action.start()
 
 	-- The action this spot offers, whether the aim is on its water, and the visible point aimed at.
 	-- Pouring works anywhere next to where the water will be, aimed at a spot it will cover.
-	local function target(stage: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?)
-		local source = Zones.part(stage, "Source")
-		local pourPoint = Zones.part(stage, "PourPoint")
+	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?)
+		local source = Zones.part(ocean, "Source")
+		local pourPoint = Zones.part(ocean, "PourPoint")
 		local origin, look = camera.CFrame.Position, camera.CFrame.LookVector * AIM_DISTANCE
 		-- Splash where the eye lands (the well's water or the basin), not on the invisible zone part.
 		seeParams.FilterDescendantsInstances = { character, camera, source, pourPoint }
@@ -124,11 +124,11 @@ function Action.start()
 				table.insert(ignore, other.Character)
 			end
 		end
-		if not Zones.nearFlood(stage, root.Position, REACH, ignore) then
+		if not Zones.nearFlood(ocean, root.Position, REACH, ignore) then
 			return nil, nil
 		end
 		local seen = workspace:Raycast(origin, look, seeParams)
-		return "pour", if seen and Zones.willFlood(stage, seen.Position) then seen.Position else nil
+		return "pour", if seen and Zones.willFlood(ocean, seen.Position) then seen.Position else nil
 	end
 
 	local function canStart(kind: Kind): boolean
@@ -152,14 +152,14 @@ function Action.start()
 		emit(startedListeners, action)
 	end
 
-	local function hintText(kind: Kind?, aimed: boolean, stage: Model?): string?
+	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?): string?
 		if not kind or current then
 			return nil
 		end
 		local carried = player:GetAttribute("Carried") or 0
 		local capacity = player:GetAttribute("Capacity") or 0
 		if kind == "scoop" and carried >= capacity * (1 - 1e-6) then
-			return `Full! Pour it into the {if stage then stage.Name:lower() else "water"}`
+			return `Full! Pour it into the {if ocean then ocean.Name:lower() else "water"}`
 		elseif kind == "pour" and carried <= 0 then
 			return "Empty! Scoop more at the well"
 		elseif not aimed then
@@ -188,13 +188,13 @@ function Action.start()
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local camera = workspace.CurrentCamera
-		local stage = Hud.currentStage()
-		local windowOpen = windows[1].Visible or windows[2].Visible
+		local ocean = Hud.ocean()
+		local windowOpen = shop.Visible
 		local kind, hit = nil, nil
 		if
 			ReplicatedStorage:GetAttribute("Phase") == "playing"
 			and player:GetAttribute("Equipped") ~= false
-			and stage
+			and ocean
 			and character
 			and root
 			and root:IsA("BasePart")
@@ -203,10 +203,10 @@ function Action.start()
 			and camera
 			and not windowOpen
 		then
-			kind, hit = target(stage, root, character, camera)
+			kind, hit = target(ocean, root, character, camera)
 		end
 
-		local text = hintText(kind, hit ~= nil, stage)
+		local text = hintText(kind, hit ~= nil, ocean)
 		Hud.set(hint, "Visible", text ~= nil)
 		if text then
 			Hud.set(hint, "Text", text)

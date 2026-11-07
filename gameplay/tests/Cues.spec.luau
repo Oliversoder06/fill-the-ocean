@@ -111,10 +111,9 @@ function tests.dust_and_drips_are_named(t)
 	t.expectEq(type(Cues.carry.drips), "string")
 end
 
-function tests.every_stage_has_an_ambience_bed(t)
-	for _, stage in { "Pool", "Lake", "Ocean" } do
-		t.expectEq(type(Cues.ambience.beds[stage]), "string", stage)
-	end
+function tests.the_ocean_has_an_ambience_bed(t)
+	t.expectEq(type(Cues.ambience.bed), "string")
+	t.expectEq(Cues.ambience.beds, nil, "one bed, not a table of beds")
 end
 
 function tests.filling_brings_life_back_and_quiets_the_heat(t)
@@ -131,28 +130,23 @@ function tests.filling_brings_life_back_and_quiets_the_heat(t)
 	t.expectNear(heat, 0, 1e-9)
 end
 
-function tests.each_stage_plays_its_own_track(t)
-	t.expectEq(Cues.musicTrack("playing", "Pool", false, 0.5), "Pool")
-	t.expectEq(Cues.musicTrack("playing", "Lake", false, 0.99), "Lake", "the final push is only the last stage")
-	t.expectEq(Cues.musicTrack("card", "Ocean", true, 0), "Ocean")
+function tests.the_ocean_plays_its_track(t)
+	t.expectEq(Cues.musicTrack("playing", 0), "ocean")
+	t.expectEq(Cues.musicTrack("playing", 0.5), "ocean")
+	t.expectEq(Cues.musicTrack("loading", 0), "calm", "waiting for the team")
+	t.expectEq(Cues.musicTrack("intro", 0), "calm")
+	t.expectEq(Cues.musicTrack("done", 1), "calm")
+	t.expectEq(Cues.musicTrack(nil, 0), "calm")
 end
 
 function tests.the_final_push_speeds_up(t)
-	t.expectEq(Cues.musicTrack("playing", "Ocean", true, 0.94), "Ocean")
-	t.expectEq(Cues.musicTrack("playing", "Ocean", true, 0.95), "finale")
-	t.expectEq(Cues.musicTrack("card", "Ocean", true, 1), "finale", "stays on through the FULL! card")
-end
-
-function tests.waiting_and_results_are_calm(t)
-	t.expectEq(Cues.musicTrack("waiting", nil, false, 0), "calm")
-	t.expectEq(Cues.musicTrack("saving", nil, false, 0), "calm")
-	t.expectEq(Cues.musicTrack("results", nil, false, 0), "calm")
-	t.expectEq(Cues.musicTrack(nil, nil, false, 0), "calm")
-	t.expectEq(Cues.musicTrack("playing", nil, false, 0), "calm", "no stage yet")
+	t.expectEq(Cues.musicTrack("playing", 0.94), "ocean")
+	t.expectEq(Cues.musicTrack("playing", 0.95), "finale")
+	t.expectEq(Cues.musicTrack("ending", 1), "finale", "stays on through the ending")
 end
 
 function tests.every_music_track_is_named(t)
-	for _, key in { "Pool", "Lake", "Ocean", "finale", "calm" } do
+	for _, key in { "ocean", "finale", "calm" } do
 		t.expectEq(type(Cues.music.tracks[key]), "string", key)
 	end
 	if not (Cues.music.duck > 0 and Cues.music.duck < 1) then

@@ -1,20 +1,11 @@
 -- Lighting mood: a bright, vibrant, cinematic late afternoon. A drained basin is scorched and
 -- hazy with straw-coloured grass; as it fills, the colour, clear air and green grass come back.
--- Each stage starts dry again (the sun drained it).
--- The villain is in the sky: Roblox draws its own sun disc so bright that a face burns out, so the
--- disc is hidden and the angry sun (ReplicatedStorage.Vfx.SkySun, a BillboardGui) is held far
--- away in the sun's direction every frame. The real sun still lights the world and casts shadows.
 -- Runs on the client only, so changes are local and smooth. All effects are baked into the place.
 local Lighting = game:GetService("Lighting")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EASE = 1.5 -- how quickly the mood follows the fill (slow, so it reads as weather)
-local SUN_DISTANCE = 40 -- studs; close, so the Atmosphere haze barely veils it (far things are handled by the raycast)
-local SUN_DEGREES = 20 -- apparent size of the angry sun
-local SUN_OCCLUDE_RANGE = 2000 -- studs checked for something between you and the sun
-local SUN_FADE = 12 -- how quickly the sun fades behind and out from behind things
 
 -- Two looks; everything in between is a blend by wetness (0 = dry, 1 = full).
 -- Owner direction (2026-11-05): vibrant and happy (bright stylized sim lighting) AND cinematic:
@@ -94,53 +85,7 @@ function Mood.start()
 	local sky = effect("Sky") :: Sky
 	local clouds = workspace.Terrain:FindFirstChildOfClass("Clouds")
 	assert(clouds, "Terrain is missing its Clouds")
-	sky.CelestialBodiesShown = false -- the angry sun billboard replaces the disc (see top)
-
-	local vfx = ReplicatedStorage:WaitForChild("Vfx", 10)
-	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
-	local sunTemplate = vfx:WaitForChild("SkySun", 10)
-	assert(sunTemplate and sunTemplate:IsA("Attachment"), "Vfx is missing SkySun (an Attachment)")
-	local sun = sunTemplate:Clone() :: Attachment
-	local sunGui = sun:FindFirstChildOfClass("BillboardGui")
-	assert(sunGui, "Vfx.SkySun needs a BillboardGui")
-	local face = sunGui:FindFirstChildOfClass("ImageLabel")
-	assert(face, "Vfx.SkySun.Gui needs an ImageLabel")
-	local span = 2 * SUN_DISTANCE * math.tan(math.rad(SUN_DEGREES / 2))
-	sunGui.Size = UDim2.fromScale(span, span)
-	sun.Parent = workspace.Terrain
-	local sunParams = RaycastParams.new()
-	sunParams.FilterType = Enum.RaycastFilterType.Exclude
-	local shown = 1
-	RunService:BindToRenderStep("MoodSun", Enum.RenderPriority.Camera.Value + 4, function(dt)
-		local camera = workspace.CurrentCamera
-		local origin = camera.CFrame.Position
-		local direction = Lighting:GetSunDirection()
-		-- follows the camera, so it sits in the sky like the real sun
-		sun.WorldPosition = origin + direction * SUN_DISTANCE
-		-- hidden behind trees, walls and hills: fade out while something blocks the view of it
-		local character = Players.LocalPlayer.Character
-		local ignore: { Instance } = if character then { camera, character } else { camera }
-		local blocked = direction.Y <= 0
-		for _ = 1, 4 do -- see-through parts (invisible map walls, zones) don't hide the sun
-			if blocked then
-				break
-			end
-			sunParams.FilterDescendantsInstances = ignore
-			local hit = workspace:Raycast(origin, direction * SUN_OCCLUDE_RANGE, sunParams)
-			if not hit then
-				break
-			elseif hit.Instance:IsA("BasePart") and hit.Instance.Transparency >= 0.95 then
-				table.insert(ignore, hit.Instance)
-			else
-				blocked = true
-			end
-		end
-		shown += ((if blocked then 0 else 1) - shown) * (1 - math.exp(-SUN_FADE * dt))
-		local transparency = math.clamp(1 - shown, 0, 1)
-		if math.abs(face.ImageTransparency - transparency) > 0.01 or (transparency >= 0.99) ~= (face.ImageTransparency >= 0.99) then
-			face.ImageTransparency = if transparency > 0.99 then 1 else transparency
-		end
-	end)
+	sky.CelestialBodiesShown = true -- the real sun disc
 
 	-- Fixed settings that don't change with wetness
 	bloom.Size = 36

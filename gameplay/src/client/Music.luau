@@ -1,13 +1,12 @@
--- Music: one looping track per stage, a faster one for the final push and a calm one for waiting
--- and results (which one: Cues.musicTrack). Tracks crossfade over Cues.music.fadeSeconds; a track
--- that fades out pauses and picks up where it left off next time. The music ducks under stage
--- cards and, through Music.duck, under purchases. Sounds are baked into ReplicatedStorage.Audio
+-- Music: the map's looping track, a faster one for the final push (the last 5% of the ocean) and a
+-- calm one for waiting (which one: Cues.musicTrack). Tracks crossfade over Cues.music.fadeSeconds;
+-- a track that fades out pauses and picks up where it left off next time. The music ducks under
+-- purchases (Music.duck). Sounds are baked into ReplicatedStorage.Audio
 -- and play through SoundService.Music.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 
-local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 
 local SILENT = 0.005 -- a fade snaps to its target within this volume; silent tracks pause
@@ -36,24 +35,17 @@ function Music.start()
 		sound.Parent = SoundService
 		tracks[key] = sound
 	end
-	for _, stage in Config.stages do
-		assert(tracks[stage.name], `Cues.music.tracks has no track for {stage.name}`)
-	end
 
 	local duckLevel = 1
 	RunService.Heartbeat:Connect(function(dt)
 		local phase = ReplicatedStorage:GetAttribute("Phase")
-		local index = ReplicatedStorage:GetAttribute("Stage")
-		local stage = type(index) == "number" and Config.stages[index] or nil
 		local fill = ReplicatedStorage:GetAttribute("Fill")
 		local want = Cues.musicTrack(
 			if type(phase) == "string" then phase else nil,
-			if stage then stage.name else nil,
-			index == #Config.stages,
 			if type(fill) == "number" then fill else 0
 		)
 
-		local ducked = phase == "card" or os.clock() < duckUntil
+		local ducked = os.clock() < duckUntil
 		local k = 1 - math.exp(-dt * 3 / cue.fadeSeconds) -- about 95% of the way in fadeSeconds
 		duckLevel += ((if ducked then cue.duck else 1) - duckLevel) * math.min(1, k * 4) -- ducking is quicker than a crossfade
 		for key, sound in tracks do

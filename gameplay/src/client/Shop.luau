@@ -74,6 +74,24 @@ local function levelsOf(): { [string]: number }
 end
 
 -- The next level's display name: tools have their own, the rest are "<track> <n>".
+-- Areas open so far, from the ocean's fill: until Phase 2 builds the gates, areas 2 and 3 open at
+-- their stand-in fill points (the server's openAreas in server/Run does the same).
+local function openAreas(): number
+	local fill = ReplicatedStorage:GetAttribute("Fill")
+	local open = 1
+	for _, at in Config.ocean.standInOpens do
+		if type(fill) == "number" and fill >= at then
+			open += 1
+		end
+	end
+	return open
+end
+
+-- Where a locked level opens: "Opens at 22% full" (its area's stand-in fill point).
+local function opensText(level): string
+	return `Opens at {math.round(Config.ocean.standInOpens[level.area - 1] * 100)}% full`
+end
+
 local function levelName(track, n: number, level): string
 	if track.id == "tool" then
 		return level.name
@@ -158,7 +176,7 @@ function Shop.start()
 
 	local function inRun(): boolean
 		local phase = ReplicatedStorage:GetAttribute("Phase")
-		return phase == "playing" or phase == "card"
+		return phase == "playing"
 	end
 
 	-- The Upgrades button (right edge) shows where the shop is. Holding Tab / Y / the mouse / a
@@ -226,7 +244,7 @@ function Shop.start()
 		end)
 	end
 	buyButton.Activated:Connect(function()
-		local level, status = Ladder.offer(Config, levelsOf(), selected, ReplicatedStorage:GetAttribute("Stage") or 0)
+		local level, status = Ladder.offer(Config, levelsOf(), selected, openAreas())
 		if status == "buy" and (player:GetAttribute("Money") or 0) + 1e-6 >= level.cost then
 			bounce(buyButton.Press)
 		else
@@ -266,7 +284,7 @@ function Shop.start()
 			return
 		end
 		local money = player:GetAttribute("Money") or 0
-		local stage = ReplicatedStorage:GetAttribute("Stage") or 0
+		local areas = openAreas()
 		local levels = levelsOf()
 		local now = Ladder.stats(Config, levels)
 
@@ -275,7 +293,7 @@ function Shop.start()
 			local holder = tiles[id]
 			local button = Hud.find(holder, "Button")
 			local have = levels[id]
-			local level, status = Ladder.offer(Config, levels, id, stage)
+			local level, status = Ladder.offer(Config, levels, id, areas)
 			local affordable = status == "buy" and money + 1e-6 >= level.cost
 			set(button, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 			set(Hud.find(button, "Ring"), "Visible", id == selected)
@@ -308,17 +326,17 @@ function Shop.start()
 			end
 			shownLevels[id] = have
 
-			-- Price row: the price (red when you can't afford it), MAX, or the stage that unlocks it
+			-- Price row: the price (red when you can't afford it), MAX, or the fill that unlocks it
 			local priceText = Hud.find(holder, "PriceRow.Price")
 			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
-			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) elseif status == "max" then "MAX" else Config.stages[level.stage].name:upper())
+			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) elseif status == "max" then "MAX" else opensText(level))
 			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
 		end
 
 		-- Detail panel: the selected track's next level
 		local track = Config.track(selected) :: Config.Track
 		local have = levels[selected]
-		local level, status = Ladder.offer(Config, levels, selected, stage)
+		local level, status = Ladder.offer(Config, levels, selected, areas)
 		set(Hud.find(detail, "Category"), "Text", PANEL_NAMES[track.panel])
 		set(detailArt, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 		set(Hud.find(detail, "About"), "Text", track.about)
@@ -337,7 +355,7 @@ function Shop.start()
 		local canBuy = status == "buy" and money + 1e-6 >= level.cost
 		set(buyCoin, "Visible", status == "buy")
 		set(buyPrice, "Visible", status == "buy")
-		set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else `IN THE {Config.stages[level.stage].name:upper()}`)
+		set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else opensText(level):upper())
 		if status == "buy" then
 			set(buyPrice, "Text", Hud.money(level.cost))
 		end

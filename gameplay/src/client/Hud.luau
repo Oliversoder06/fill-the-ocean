@@ -1,7 +1,6 @@
 -- Fills in the HUD that lives in StarterGui ("Hud", built in Studio) from server attributes:
--- wallet, waiting text, card, results, and the run panel at the top right (stopwatch from
--- RunStartedAt/RunEndedAt, the stage's name, how full its basin is). Results rows are clones of
--- the hidden RowTemplate.
+-- wallet, waiting text, card, and the run panel at the top right (stopwatch from PlaySeconds and
+-- RunStartedAt, the map's name, how full the ocean is, a running boost's countdown).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -74,10 +73,9 @@ function Hud.set(obj: Instance, prop: string, value: any)
 	end
 end
 
--- The current stage's model (every stage plays in workspace.Ocean), or nil between stages. Non-yielding.
-function Hud.currentStage(): Model?
-	local index = ReplicatedStorage:GetAttribute("Stage")
-	local model = type(index) == "number" and Config.stages[index] and workspace:FindFirstChild("Ocean")
+-- The ocean's model (workspace.Ocean), or nil until it has replicated. Non-yielding.
+function Hud.ocean(): Model?
+	local model = workspace:FindFirstChild("Ocean")
 	return if model and model:IsA("Model") then model else nil
 end
 -- Money still flying in as coins (client/Payout): the wallet shows Money minus this, so it counts
@@ -89,7 +87,6 @@ local find, set = Hud.find, Hud.set
 function Hud.start()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	local cardEvent = remotes:WaitForChild("Card") :: RemoteEvent
-	local resultsEvent = remotes:WaitForChild("Results") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 
 	local coins = find(gui, "Wallet.Pill.Coins")
@@ -97,14 +94,10 @@ function Hud.start()
 	local shownMoney = math.max(0, (player:GetAttribute("Money") or 0) - Hud.walletHold)
 	local cardLabel = find(gui, "Card")
 	local waiting = find(gui, "Waiting")
-	local results = find(gui, "Results")
-	local resultsRow = find(gui, "Results.RowTemplate")
-	local resultsSub = find(gui, "Results.Sub")
-	local footer = find(gui, "Results.Footer")
 	local progress = find(gui, "Progress")
 	local timeText = find(progress, "TimeRow.Time")
 	local placeText = find(progress, "PlaceRow.Place")
-	local stageTag = find(progress, "StageTag")
+	local boostTag = find(progress, "BoostTag")
 	local progressFill = find(progress, "Bar.Fill")
 	local progressLabel = find(progress, "Bar.Label")
 	local progressPop = find(progress, "Bar.Pop")
@@ -123,31 +116,10 @@ function Hud.start()
 		end)
 	end)
 
-	resultsEvent.OnClientEvent:Connect(function(list)
-		for _, child in results:GetChildren() do
-			if child.Name == "Row" then
-				child:Destroy()
-			end
-		end
-		for i, r in list do
-			local row = resultsRow:Clone()
-			row.Name = "Row"
-			row.LayoutOrder = 10 + i
-			row.Visible = true
-			row.Rank.Text = tostring(i)
-			row.PlayerName.Text = r.name
-			row.Share.Text = `{math.floor(r.share * 100 + 0.5)}%`
-			row.Reward.Text = if r.saved then `+{r.reward}` else `+{r.reward} (not saved)`
-			row.Parent = results
-		end
-		resultsSub.Text = `Difficulty {ReplicatedStorage:GetAttribute("Difficulty") or 1}`
-		results.Visible = true
-	end)
-
-	-- Windows (shop, results) free the cursor. First person locks it to the centre every frame, so
+	-- Windows (shop, admin) free the cursor. First person locks it to the centre every frame, so
 	-- this runs right after the camera and overrides that while a window is showing. In play the
 	-- mouse icon is hidden and the place's cursor image (StarterGui.Cursor) marks where you aim.
-	local windows = { find(gui, "Shop"), results, find(gui, "Admin") }
+	local windows = { find(gui, "Shop"), find(gui, "Admin") }
 	local crosshair = find(player:WaitForChild("PlayerGui"):WaitForChild("Cursor"), "Cursor")
 	RunService:BindToRenderStep("HudCursor", Enum.RenderPriority.Camera.Value + 3, function()
 		local windowOpen = false
@@ -176,35 +148,26 @@ function Hud.start()
 		end
 		shownMoney = money
 
-		-- Waiting room and results footer
+		-- Waiting room: the server's Waiting text is a party count ("2/3") or a message
 		local waitText = ReplicatedStorage:GetAttribute("Waiting")
-		set(waiting, "Visible", phase == "waiting" or phase == "saving")
-		set(waiting, "Text", if phase == "saving" then "Saving your Raindrops..." elseif waitText and waitText ~= "" then `Waiting for your friends... {waitText}` else "Get ready...")
-		local returnAt = ReplicatedStorage:GetAttribute("ReturnAt")
-		if results.Visible and type(returnAt) == "number" then
-			set(footer, "Text", `Back to the lobby in {math.max(0, returnAt - os.time())}s`)
-		end
+		set(waiting, "Visible", phase == "loading")
+		set(waiting, "Text", if type(waitText) ~= "string" or waitText == "" then "Get ready..." elseif waitText:match("^%d+/%d+$") then `Waiting for your friends... {waitText}` else waitText)
 
-		-- Run panel: stopwatch, where you are, how full this stage's basin is
+		-- Run panel: stopwatch (time played on this save), the map's name, how full the ocean is
 		local startedAt = ReplicatedStorage:GetAttribute("RunStartedAt")
 		set(progress, "Visible", type(startedAt) == "number")
 		if type(startedAt) == "number" then
-			local endedAt = ReplicatedStorage:GetAttribute("RunEndedAt")
-			local now = if type(endedAt) == "number" then endedAt else workspace:GetServerTimeNow()
-			set(timeText, "Text", Hud.clock(now - startedAt))
-			local index = ReplicatedStorage:GetAttribute("Stage")
-			local stage = if type(index) == "number" then Config.stages[math.min(index, #Config.stages)] else nil
-			if stage then
-				set(placeText, "Text", `The {stage.name}`)
-				-- A running fill-milestone boost takes over the stage tag with its countdown.
-				local boost = ReplicatedStorage:GetAttribute("Boost")
-				local endsAt = ReplicatedStorage:GetAttribute("BoostEndsAt")
-				local kind = if type(boost) == "string" and boost ~= "" then Boosts.kind(Config, boost) else nil
-				if kind and type(endsAt) == "number" then
-					set(stageTag, "Text", `{kind.tag} {math.max(0, math.ceil(endsAt - workspace:GetServerTimeNow()))}s`)
-				else
-					set(stageTag, "Text", `STAGE {math.min(index, #Config.stages)}/{#Config.stages}`)
-				end
+			local played = ReplicatedStorage:GetAttribute("PlaySeconds")
+			set(timeText, "Text", Hud.clock((if type(played) == "number" then played else 0) + workspace:GetServerTimeNow() - startedAt))
+			local mapName = ReplicatedStorage:GetAttribute("MapName")
+			set(placeText, "Text", if type(mapName) == "string" then mapName else "")
+			-- A running fill-milestone boost shows its countdown in the boost tag.
+			local boost = ReplicatedStorage:GetAttribute("Boost")
+			local endsAt = ReplicatedStorage:GetAttribute("BoostEndsAt")
+			local kind = if type(boost) == "string" and boost ~= "" then Boosts.kind(Config, boost) else nil
+			set(boostTag, "Visible", kind ~= nil and type(endsAt) == "number")
+			if kind and type(endsAt) == "number" then
+				set(boostTag, "Text", `{kind.tag} {math.max(0, math.ceil(endsAt - workspace:GetServerTimeNow()))}s`)
 			end
 			local fill = ReplicatedStorage:GetAttribute("Fill")
 			local target = if type(fill) == "number" then math.clamp(fill, 0, 1) else 0

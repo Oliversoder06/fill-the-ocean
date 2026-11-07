@@ -123,14 +123,14 @@ function Feel.start()
 		if camera and (camera.CFrame.Position - root.Position).Magnitude > OTHERS_RANGE then
 			return nil
 		end
-		local stage = Hud.currentStage()
+		local ocean = Hud.ocean()
 		local ignore: { Instance } = { character }
 		if camera then
 			table.insert(ignore, camera)
 		end
-		if stage then
+		if ocean then
 			for _, name in { "Source", "PourPoint" } do
-				local part = stage:FindFirstChild(name)
+				local part = ocean:FindFirstChild(name)
 				if part then
 					table.insert(ignore, part)
 				end
