@@ -65,6 +65,15 @@ function tests.level_waits_for_its_area(t)
 	t.expectEq(laterStatus, "buy")
 end
 
+function tests.open_areas_follow_the_stand_in_fill_points(t)
+	local config = { ocean = { standInOpens = { 0.07, 0.22 } } }
+	t.expectEq(Ladder.openAreas(config, 0), 1, "the first area is always open")
+	t.expectEq(Ladder.openAreas(config, 0.0699), 1)
+	t.expectEq(Ladder.openAreas(config, 0.07), 2, "opens exactly at its fill point")
+	t.expectEq(Ladder.openAreas(config, 0.5), 3)
+	t.expectEq(Ladder.openAreas(config, 1), 3)
+end
+
 function tests.offer_is_max_after_the_last_level(t)
 	local level, status = Ladder.offer(Config, { hold = 1 }, "hold", 3)
 	t.expectEq(status, "max")

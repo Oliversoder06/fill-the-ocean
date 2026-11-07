@@ -20,17 +20,6 @@ local levels = {}
 local stats = Ladder.stats(Config, levels)
 local money, carried = 0, 0
 
--- Areas open at this fill: the first, plus each stand-in fill point reached.
-local function openAreas(fill: number): number
-	local n = 1
-	for _, opensAt in ocean.standInOpens do
-		if fill >= opensAt then
-			n += 1
-		end
-	end
-	return n
-end
-
 -- The cheapest track this player can buy right now, or nil.
 local function cheapest(areas: number)
 	local bestTrack, bestLevel = nil, nil
@@ -69,7 +58,7 @@ while current < target - 1e-6 do
 		print(`  {clock(t)}  {#marks * 10}%`)
 	end
 	while true do
-		local track, level = cheapest(openAreas(fill))
+		local track, level = cheapest(Ladder.openAreas(Config, fill))
 		if not track then
 			break
 		end

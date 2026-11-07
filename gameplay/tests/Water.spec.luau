@@ -2,12 +2,6 @@ local Water = require("../src/shared/Water")
 
 local tests = {}
 
-function tests.target_scales_with_players(t)
-	t.expectEq(Water.target(972, 2, 1), 1944)
-	t.expectEq(Water.target(972, 0, 1), 972)
-	t.expectEq(Water.target(1000, 3, 0.5), 1500)
-end
-
 function tests.rescale_keeps_percent(t)
 	t.expectEq(Water.rescale(400, 1000, 500), 200)
 end

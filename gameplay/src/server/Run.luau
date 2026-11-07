@@ -149,15 +149,9 @@ local function litresAt(fraction: number): number
 	return Water.litresAt(fraction, Config.ocean, run.teamSize) * run.waterScale
 end
 
--- Areas open so far. Until Phase 2 builds the gates, areas 2 and 3 open at stand-in fill points.
+-- Areas open so far (Ladder.openAreas: stand-in fill points until Phase 2 builds the gates).
 local function openAreas(): number
-	local fill, open = fillOf(run.current), 1
-	for _, at in Config.ocean.standInOpens do
-		if fill >= at then
-			open += 1
-		end
-	end
-	return open
+	return Ladder.openAreas(Config, fillOf(run.current))
 end
 
 local function setWater(current: number)

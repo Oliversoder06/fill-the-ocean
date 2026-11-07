@@ -16,8 +16,8 @@ the same team. Each map has a fixed difficulty; clearing map 1 unlocks map 2. St
 cutscene (the bacon-hair drinks the ocean) and an ending cutscene (you smack him away). Outside a run:
 an account level (permanent, capped perks) and a 3-month season pass (cosmetics, Raindrops).
 Design: `docs/design/2026-11-04-fill-the-ocean-design.md`. Build plan:
-`docs/plans/2026-11-05-save-the-ocean.md`. Until that plan's Phase 1 is done, the code still runs the
-old short multi-part run; the plan lists every piece it removes.
+`docs/plans/2026-11-05-save-the-ocean.md`. Its Phase 1 is done: the code runs one saved ocean per
+team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
 
 ## Studio
 - Two places, each its own Rojo project folder:
@@ -31,8 +31,9 @@ old short multi-part run; the plan lists every piece it removes.
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
-  - gameplay: the ocean model (invisible `Source` over the water source and `PourPoint` marking
-    the usual pour spot; players pour anywhere next to where the water will be, see
+  - gameplay: the ocean model `workspace.Ocean` (`Spawn`, `Basin`, `Water`, an invisible `Source`
+    over the water source and `PourPoint` marking the usual pour spot; `Map.ensure` checks them;
+    players pour anywhere next to where the water will be, see
     `shared/Zones.nearFlood`), `ReplicatedStorage.ToolModels`
     (one Model per hero tool; swap placeholders for real models under the same name),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
@@ -42,11 +43,11 @@ old short multi-part run; the plan lists every piece it removes.
     pad hosts a party), `StarterGui.LobbyHud`.
 - The ocean is `workspace.Ocean` at the origin: one straight beach (shore along X, sea toward -Z)
   facing a terrain seabed (y -28) that runs to the horizon; its `Water` holds 5 extra `Tile` parts
-  (2048 studs each, the part size cap) that rise with it. Every stage of the current run plays in
-  it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
+  (2048 studs each, the part size cap) that rise with it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
   is kept in `ServerStorage.OldMap_Backup_2026_11_06`.
-- Studio test helper (gameplay): workspace attribute `WaterScale` (less water needed). Teleports
-  and saving need the published game / Studio API access.
+- Studio test helpers (gameplay), workspace attributes: `WaterScale` (less water needed),
+  `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioFill` (a fraction 0-1:
+  jumps the fill). Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.
 

@@ -73,17 +73,10 @@ local function levelsOf(): { [string]: number }
 	return levels
 end
 
--- Areas open so far, from the ocean's fill: until Phase 2 builds the gates, areas 2 and 3 open at
--- their stand-in fill points (the server's openAreas in server/Run does the same).
+-- Areas open so far, from the ocean's published fill (Ladder.openAreas, as the server counts them).
 local function openAreas(): number
 	local fill = ReplicatedStorage:GetAttribute("Fill")
-	local open = 1
-	for _, at in Config.ocean.standInOpens do
-		if type(fill) == "number" and fill >= at then
-			open += 1
-		end
-	end
-	return open
+	return Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
 end
 
 -- Where a locked level opens: "Opens at 22% full" (its area's stand-in fill point).

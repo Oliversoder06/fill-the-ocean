@@ -9,8 +9,8 @@ small change directly (see "Small tasks without a plan"). These rules apply to e
   It overrides everything below except the safety rules.
 - `docs/design/2026-11-04-fill-the-ocean-design.md`: the design (Save the Ocean).
 - `docs/plans/2026-11-05-save-the-ocean.md`: the build plan. Do one task at a time, in order.
-- Until Phase 1 of that plan is done, the code still runs the old short multi-part run. The code
-  map below describes the code as it will be after Phase 1; Phase 1 lists every old piece it removes.
+- Phase 1 of that plan is done: the code map below describes the code as it is (one saved ocean
+  per team).
 
 ## How to execute a plan
 - Follow each task's steps in order. Where a step says "write the failing test", write it, run it,
@@ -84,17 +84,18 @@ Client (`src/client/`, all started from `init.client.luau`):
   tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
 
 Shared (`src/shared/`, pure unless noted):
-- `Config.luau`: every run number: the ocean's pay bands (`Config.ocean.bands`: litres and coins
-  per litre, rising as the ocean fills) and the upgrade tracks (`Config.tracks`: tool, pickup, hold,
-  quick, walk, tip), each level with its price and the band that opens it. Balance changes go
+- `Config.luau`: every run number: the one ocean (`Config.ocean`: flat `coinsPerLitre`, the fill
+  curve `firstPercent` and `growth`, and `standInOpens`, the fill points that open areas 2 and 3
+  until Phase 2 builds the gates) and the upgrade tracks (`Config.tracks`: tool, pickup, hold,
+  quick, walk, tip), each level with its price and the `area` that opens it. Balance changes go
   here; check them with `lune run tools/simulate`.
 - `Ladder.luau`: `stats(config, levels)` (what a player's levels add up to, including `sweeps`),
-  `offer(config, levels, trackId, band)` (next level and `"buy"` / `"locked"` / `"max"`),
-  `baseSweeps`, `tripSeconds`.
+  `openAreas(config, fill)` (areas open at a fill fraction), `offer(config, levels, trackId,
+  openAreas)` (next level and `"buy"` / `"locked"` / `"max"`), `baseSweeps`, `tripSeconds`.
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
-- `Water.luau`, `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
+- `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`):
   maths, all Lune-tested (`Cues` too).
@@ -107,6 +108,8 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps.
 - `RunTicket.luau`: the lobby's ticket for a reserved server (`mapId`, run key, members).
 - `SessionRules.luau` (pure): lobby pad rules (create, join, load only with the same team).
+- `Places.luau`: the two place IDs. `Retry.luau`: retries DataStore, MemoryStore and Teleport
+  calls, warning on every failure.
 
 ## Server ↔ client contract
 The server publishes state as attributes; the client only reads them.

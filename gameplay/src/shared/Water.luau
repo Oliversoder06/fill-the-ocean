@@ -1,5 +1,5 @@
 --!strict
--- Water math: the ocean's fill curve, target, rescaling on player-count change, litres moved per tick.
+-- Water math: the ocean's fill curve, rescaling on player-count change, litres moved per tick.
 
 export type Curve = { firstPercent: number, growth: number }
 
@@ -36,10 +36,6 @@ function Water.litresAt(fraction: number, ocean: Curve, players: number): number
 		litres += need
 	end
 	return litres
-end
-
-function Water.target(waterPerPlayer: number, players: number, scale: number): number
-	return waterPerPlayer * math.max(players, 1) * scale
 end
 
 -- Keeps the fill fraction when the target changes.

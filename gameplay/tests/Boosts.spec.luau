@@ -5,7 +5,7 @@ local Boosts = require("../src/shared/Boosts")
 local tests = {}
 
 function tests.one_boost_per_milestone(t)
-	t.expectEq(#Config.boosts.kinds, #Config.boosts.milestones, "each stage plays every boost once")
+	t.expectEq(#Config.boosts.kinds, #Config.boosts.milestones, "each save plays every boost once")
 	t.expectEq(Config.boosts.seconds > 0, true)
 	for _, kind in Config.boosts.kinds do
 		t.expectEq(type(kind.tag), "string", `{kind.id} tag`)

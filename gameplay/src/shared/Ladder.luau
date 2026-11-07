@@ -49,6 +49,18 @@ function Ladder.stats(config, levels: { [string]: number }): Stats
 	}
 end
 
+-- Areas open at the ocean's `fill` (0..1): the first, plus each stand-in fill point reached. Until
+-- Phase 2 builds the gates, areas 2 and 3 open at config.ocean.standInOpens.
+function Ladder.openAreas(config, fill: number): number
+	local open = 1
+	for _, at in config.ocean.standInOpens do
+		if fill >= at then
+			open += 1
+		end
+	end
+	return open
+end
+
 -- The next level of a track and whether it can be bought with `openAreas` areas open. A locked
 -- level is still returned so the shop can show it. Unknown track: nil, nil.
 function Ladder.offer(config, levels: { [string]: number }, id: string, openAreas: number)
