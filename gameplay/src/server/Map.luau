@@ -1,8 +1,7 @@
 --!strict
 -- The ocean lives in the Studio place (workspace.Ocean). This module checks it and moves the water.
--- Every stage plays in this one ocean until the stages are removed (docs/plans/2026-11-05-save-the-ocean.md).
 -- Contract, one Model workspace.Ocean holding:
---   Spawn     where players are moved at stage start
+--   Spawn     where players appear
 --   Source    invisible zone over the well; players aim at it to scoop (client/Action)
 --   PourPoint marks the usual pour spot at the basin rim (tripDistance from Source); pouring
 --             itself works anywhere next to where the Water will be (shared/Zones.nearFlood)
@@ -21,10 +20,10 @@ local Map = {}
 local baseTransparency: { [BasePart]: number } = {} -- each Water part's look in the place
 
 -- Sets the visible water height for a fill fraction (0-1). An empty basin shows no water at all,
--- so a drained stage looks drained.
-function Map.setFill(stage: Model, fraction: number)
-	local water = Zones.part(stage, "Water")
-	local basin = Zones.part(stage, "Basin")
+-- so a drained ocean looks drained.
+function Map.setFill(ocean: Model, fraction: number)
+	local water = Zones.part(ocean, "Water")
+	local basin = Zones.part(ocean, "Basin")
 	local height = math.max(0.05, (water:GetAttribute("Depth") :: number) * math.clamp(fraction, 0, 1))
 	local y = basin.Position.Y + 0.5 + height / 2
 	local tiles: { BasePart } = { water }

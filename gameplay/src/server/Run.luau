@@ -1,13 +1,19 @@
--- The run: pool -> lake -> ocean. Owns money, carried water, purchases and the water level.
+-- The run: one team's saved ocean. Owns money, carried water, purchases, the water level and the save.
 -- Clients send Act("scoop" | "pour") when they start a scoop sweep or a pour (aimed at the well or
 -- the basin, see client/Action) and Buy(trackId); state goes out as attributes. The server checks
 -- the distance and, for scoops, the pace (one per ActSeconds) when an action starts. A scoop is
 -- credited when it ends, ActSeconds later; a pour is instant. Each accepted action is published as
 -- ActKind + ActAt (server time) so other clients can play it on that player's body (client/Bodies).
 -- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
--- Admins (shared/Admins) send Admin(stage index) to jump the run to a stage (client/Admin).
--- Session: in a reserved server the lobby's ticket gives the difficulty and the party; in Studio
--- or a normal server, workspace attribute StudioDifficulty (default 1) and no party wait.
+-- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
+-- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
+-- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
+-- team, and there is no party wait.
+-- Saving (common/RunStore): the run is locked to this server before its save is loaded, and the lock
+-- is renewed while it plays. A run that can't be locked or loaded, belongs to another team or is
+-- finished is never played (Studio plays it unsaved, with a warning), so a failed load never
+-- overwrites a save. Saves every AUTOSAVE_SECONDS, when a player leaves and when the server closes.
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -18,19 +24,20 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Water = require(ReplicatedStorage.Shared.Water)
-local Rewards = require(ReplicatedStorage.Shared.Rewards)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Session = require(ReplicatedStorage.Shared.Session)
+local Maps = require(ReplicatedStorage.Common.Maps)
 local Places = require(ReplicatedStorage.Common.Places)
 local PlayerData = require(ReplicatedStorage.Common.PlayerData)
 local Retry = require(ReplicatedStorage.Common.Retry)
+local RunSave = require(ReplicatedStorage.Common.RunSave)
+local RunStore = require(ReplicatedStorage.Common.RunStore)
 local RunTicket = require(ReplicatedStorage.Common.RunTicket)
 local Map = require(script.Parent.Map)
 
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
 local PARTY_WAIT = 20 -- party: start when everyone is in, or this long after the first arrival
 local CARD_SECONDS = 3
-local RETURN_SECONDS = 15 -- results screen time before everyone goes back to the lobby
 local MAX_BUYS_PER_SECOND = 5
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 local ACT_REACH = 12 -- studs from Source / from where the water will be; keep in step with client/Action REACH
@@ -39,25 +46,37 @@ local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action p
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
 local LOOK_LIMIT = 80 -- degrees up or down
+local AUTOSAVE_SECONDS = 60
+local CLOSE_SAVE_SECONDS = 25 -- BindToClose waits this long at most for the last save (Roblox allows 30)
+local END_SAVE_SECONDS = 15 -- the ending waits this long at most for the finished run to be stored
+local PROGRESS_SECONDS = 12 -- the ending waits this long at most for every member's Raindrops
+
+-- Studio has no JobId; the lock still needs an id that is this server's alone.
+local serverId = if game.JobId ~= "" then game.JobId else HttpService:GenerateGUID(false)
 
 local Run = {}
 
-local ocean: Model -- every stage plays in the one ocean (server/Map)
+local ocean: Model -- the one ocean (server/Map)
 local remotes: { [string]: RemoteEvent } = {}
 local run = {
-	phase = "waiting",
-	stage = 0,
+	phase = "loading",
 	current = 0,
 	target = 0,
-	scale = 1,
-	difficulty = 1,
+	teamSize = 1, -- the water needed scales with the team; fixed for the save
+	waterScale = 1, -- the map's waterMultiplier, times WaterScale in Studio
 	session = nil :: Session.State?, -- who may play here (see shared/Session)
+	map = nil :: Maps.Map?,
+	ticketKey = nil :: string?, -- the save key the lobby's ticket names
 	firstArrival = nil :: number?,
-	allLitres = {} :: { number }, -- per stage, every player including leavers
-	results = nil :: { any }?, -- kept so a player who joins after the run still sees them
 	started = false,
+	closed = false, -- this run can't be played here: everyone who joins goes to the lobby
+	save = nil :: RunSave.Save?, -- set once the run is open
+	key = nil :: string?, -- the save's key; nil = this run is not saved (a Studio test without storage)
+	lockedAt = 0, -- os.clock() of the last time this server took or renewed the run's lock
+	lockLost = false,
+	playBase = 0, -- seconds played on this save before this session
+	playSince = nil :: number?, -- os.clock() when playing started this session
 	boost = nil :: { id: string, token: number }?, -- the running fill-milestone boost (Config.boosts)
-	boostOrder = {} :: { string }, -- this stage's boost per milestone, shuffled at stage start
 	boostToken = 0,
 }
 local states: { [Player]: any } = {}
@@ -71,10 +90,6 @@ local function boosted(state)
 	return Boosts.apply(Config, state.stats, run.boost and run.boost.id)
 end
 
-local function stageModel(_index: number): Model
-	return ocean
-end
-
 local function remote(name: string): RemoteEvent
 	local folder = ReplicatedStorage:WaitForChild("Remotes")
 	local r = folder:WaitForChild(name, 10)
@@ -82,8 +97,13 @@ local function remote(name: string): RemoteEvent
 	return r
 end
 
+-- Nothing goes out before the save is applied: clients would show the fresh start as the player's
+-- money and levels.
 local function publish(player: Player)
 	local state = states[player]
+	if not run.save then
+		return
+	end
 	player:SetAttribute("Money", state.money)
 	player:SetAttribute("Carried", state.carried)
 	player:SetAttribute("Capacity", state.stats.capacity)
@@ -111,37 +131,42 @@ end
 
 local function moveToSpawn(player: Player)
 	local character = player.Character
-	local index = if run.stage >= 1 and run.stage <= #Config.stages then run.stage else 1
 	if character then
-		character:PivotTo(Zones.part(stageModel(index), "Spawn").CFrame + Vector3.new(0, 3, 0))
+		character:PivotTo(Zones.part(ocean, "Spawn").CFrame + Vector3.new(0, 3, 0))
 	end
 end
 
--- Live share, renormalised over the stages played so far so the board reads 0-100%.
-local function updateShares()
-	local weights = Config.stageWeights()
-	local played = math.min(run.stage, #Config.stages)
-	local total = 0
-	for s = 1, played do
-		total += weights[s]
+-- The fill fraction for `litres` of water: Water.fill's curve for the team, scaled by the map.
+local function fillOf(litres: number): number
+	if run.target > 0 and litres >= run.target - 1e-6 then
+		return 1 -- full as checkFull counts it, whatever the rounding of the scaling and the last pour
 	end
-	local live = {}
-	for s = 1, played do
-		live[s] = weights[s] / total
-	end
-	for player, state in states do
-		player:SetAttribute("Share", Rewards.shares(live, state.litres, run.allLitres))
-	end
+	return Water.fill(litres / run.waterScale, Config.ocean, run.teamSize)
 end
 
-local function setWater(current: number, target: number)
-	run.current, run.target = current, target
+-- The litres that fill the ocean to `fraction`; the inverse of fillOf.
+local function litresAt(fraction: number): number
+	return Water.litresAt(fraction, Config.ocean, run.teamSize) * run.waterScale
+end
+
+-- Areas open so far. Until Phase 2 builds the gates, areas 2 and 3 open at stand-in fill points.
+local function openAreas(): number
+	local fill, open = fillOf(run.current), 1
+	for _, at in Config.ocean.standInOpens do
+		if fill >= at then
+			open += 1
+		end
+	end
+	return open
+end
+
+local function setWater(current: number)
+	run.current = current
+	local fill = fillOf(current)
 	setGlobal("Current", current)
-	setGlobal("Target", target)
-	setGlobal("Fill", if target > 0 then current / target else 0)
-	if run.stage >= 1 and run.stage <= #Config.stages then
-		Map.setFill(stageModel(run.stage), current / target)
-	end
+	setGlobal("Target", run.target)
+	setGlobal("Fill", fill)
+	Map.setFill(ocean, fill)
 end
 
 local function setPhase(phase: string)
@@ -186,12 +211,22 @@ local function startBoost(id: string)
 	end)
 end
 
--- A pour moved the fill from `before` to `after`: crossing a milestone starts its boost, unless
--- the stage just filled.
+-- The fill moved from `before` to `after`: crossing a milestone starts a boost this save hasn't
+-- played yet (each plays once per save), unless the ocean just filled.
 local function checkBoost(before: number, after: number)
-	local index = Boosts.crossed(Config.boosts.milestones, before, after)
-	local id = index and run.boostOrder[index]
-	if id and after < 1 then
+	local save = run.save :: RunSave.Save
+	if not Boosts.crossed(Config.boosts.milestones, before, after) or after >= 1 then
+		return
+	end
+	local left = {}
+	for _, kind in Config.boosts.kinds do
+		if not table.find(save.boostsPlayed, kind.id) then
+			table.insert(left, kind.id)
+		end
+	end
+	if #left > 0 then
+		local id = left[math.random(#left)]
+		table.insert(save.boostsPlayed, id)
 		startBoost(id)
 	end
 end
@@ -215,117 +250,276 @@ local function sendToLobby(players: { Player }, reason: string)
 	end
 end
 
-local function saveRewards(results)
+-- Nobody plays this run here: say why and send everyone, and everyone who joins later, to the lobby.
+local function closeRun(message: string)
+	run.closed = true
+	setGlobal("Waiting", message)
+	sendToLobby(Players:GetPlayers(), message)
+end
+
+local function playSeconds(): number
+	return run.playBase + (if run.playSince then os.clock() - run.playSince else 0)
+end
+
+-- A member's money, levels and litres go into the save (on every save, and when they leave). Each
+-- entry is a new table that is never changed afterwards, so a copy of the players map is a snapshot.
+local function keepPlayer(player: Player, state)
+	local save = run.save
+	if save and table.find(save.members, player.UserId) then
+		save.players[tostring(player.UserId)] = {
+			money = state.money,
+			levels = table.clone(state.levels),
+			litres = state.litres,
+		}
+	end
+end
+
+-- The save to write now. A copy, so play can go on changing the run while the write is in flight.
+local function snapshot(): RunSave.Save
+	local save = run.save :: RunSave.Save
+	for player, state in states do
+		keepPlayer(player, state)
+	end
+	save.current = run.current
+	save.playSeconds = playSeconds()
+	-- always newer than what this run loaded or last wrote, even if this server's clock is behind
+	save.updatedAt = math.max(os.time(), save.updatedAt + 1)
+	local copy = table.clone(save)
+	copy.players = table.clone(save.players)
+	copy.boostsPlayed = table.clone(save.boostsPlayed)
+	return copy
+end
+
+local saving, saveAgain, lastSaveOk = false, false, false
+
+-- Writes the run. One write at a time: a call during a write asks for one more after it, so the
+-- newest state always lands last. Never writes an unsaved run or one whose lock is lost.
+local function saveRun(reason: string)
+	if not run.key or run.lockLost then
+		return
+	end
+	if saving then
+		saveAgain = true
+		return
+	end
+	saving = true
+	repeat
+		saveAgain = false
+		local ok, err = RunStore.save(run.key, snapshot())
+		lastSaveOk = ok
+		if not ok then
+			warn(`[Run] run {run.key} not saved ({reason}): {err}`)
+		end
+	until not saveAgain
+	saving = false
+end
+
+-- Saves now and waits for it, at most `seconds`. True only when the newest state is stored.
+local function saveNow(reason: string, seconds: number): boolean
+	if not run.key or run.lockLost then
+		return false
+	end
+	task.spawn(saveRun, reason)
+	local deadline = os.clock() + seconds
+	while saving and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	return not saving and lastSaveOk
+end
+
+-- Renews the run's lock while it plays. If it can't be renewed in time, another server may take the
+-- run once the lock runs out: stop writing it and send everyone back to the lobby.
+local function keepLock()
+	while not run.lockLost do
+		task.wait(RunStore.RENEW_SECONDS)
+		local ok, err = RunStore.lock(run.key :: string, serverId)
+		if ok then
+			run.lockedAt = os.clock()
+		else
+			warn(`[Run] couldn't renew the lock on run {run.key}: {err}`)
+			if os.clock() - run.lockedAt >= RunStore.LOCK_SECONDS - RunStore.RENEW_SECONDS then
+				run.lockLost = true
+				warn(`[Run] lost the lock on run {run.key}: no more saves; sending everyone to the lobby`)
+				sendToLobby(Players:GetPlayers(), "lost the run's lock")
+			end
+		end
+	end
+end
+
+-- Runs fn(userId) for every member of the team at once and waits for them all, at most `seconds`.
+local function eachMember(seconds: number, fn: (number) -> ())
 	local pending = 0
-	for _, r in results do
+	for _, userId in (run.save :: RunSave.Save).members do
 		pending += 1
 		task.spawn(function()
-			-- "map1" until Task 4 gives the run its mapId.
-			local saved, err = PlayerData.clearMap(r.userId, "map1", r.reward)
-			r.saved = saved ~= nil
-			if saved then
-				r.total = saved.raindrops
-			else
-				warn(`[Run] reward not saved for {r.name}: {err}`)
-			end
+			fn(userId)
 			pending -= 1
 		end)
 	end
-	local deadline = os.clock() + 12
+	local deadline = os.clock() + seconds
 	while pending > 0 and os.clock() < deadline do
 		task.wait(0.2)
 	end
 end
 
+-- Puts the run first in the member's saved runs (the lobby's Saved Runs list).
+local function addRun(userId: number)
+	local saved, err = PlayerData.addRun(userId, run.key :: string)
+	if not saved then
+		warn(`[Run] run {run.key} not added to {userId}'s saved runs: {err}`)
+	end
+end
+
+-- The ocean is full: store the finished run, pay every member the map's Raindrops and send everyone
+-- back to the lobby. Raindrops are paid only once the finished run is stored, so loading it again
+-- can't pay twice; if it can't be stored, the run stays unfinished and ends again on its next load.
 local function endRun()
-	setGlobal("RunEndedAt", workspace:GetServerTimeNow()) -- stops the HUD stopwatch
-	updateShares()
-	local weights = Config.stageWeights()
-	local entries = {}
-	for player, state in states do
-		local everyStage = true
-		for s = 1, #Config.stages do
-			if (state.litres[s] or 0) <= 0 then
-				everyStage = false
-			end
-		end
-		local share = Rewards.shares(weights, state.litres, run.allLitres)
-		table.insert(entries, { id = player, share = share, pouredEveryStage = everyStage })
-	end
-	local rewards = Rewards.split(entries)
-	table.sort(entries, function(a, b)
-		return a.share > b.share
-	end)
-	local results = {}
-	for _, e in entries do
-		table.insert(results, {
-			name = e.id.DisplayName,
-			userId = e.id.UserId,
-			share = e.share,
-			reward = math.floor(rewards[e.id] + 0.5),
-			saved = false,
-		})
-	end
-	run.stage = #Config.stages + 1
-	setGlobal("Stage", run.stage)
-	setPhase("saving")
-	for player in states do
-		publish(player)
-	end
-	saveRewards(results)
-	run.results = results
-	setGlobal("ReturnAt", os.time() + RETURN_SECONDS)
-	setPhase("results")
-	remotes.Results:FireAllClients(results)
-	task.wait(RETURN_SECONDS)
-	sendToLobby(Players:GetPlayers(), "run finished")
-end
-
-local startStage
-
-local function completeStage()
-	setPhase("card")
 	endBoost()
-	card("FULL!")
-	task.wait(CARD_SECONDS)
-	if run.stage < #Config.stages then
-		startStage(run.stage + 1)
-	else
-		endRun()
+	card("The ocean is full!")
+	local shownUntil = os.clock() + CARD_SECONDS
+	run.playBase, run.playSince = playSeconds(), nil
+	local save = run.save :: RunSave.Save
+	local map = run.map :: Maps.Map
+	save.finished = true
+	if run.key then
+		if saveNow("ocean full", END_SAVE_SECONDS) then
+			eachMember(PROGRESS_SECONDS, function(userId)
+				local cleared, err = PlayerData.clearMap(userId, map.id, map.rewardRaindrops)
+				if not cleared then
+					warn(`[Run] {map.id} not cleared for {userId} ({map.rewardRaindrops} Raindrops): {err}`)
+				end
+				addRun(userId)
+			end)
+		else
+			save.finished = false
+			warn(`[Run] the finished run {run.key} wasn't stored, so no Raindrops were paid; it ends again on its next load`)
+		end
+	end
+	task.wait(math.max(0, shownUntil - os.clock()))
+	setPhase("done")
+	sendToLobby(Players:GetPlayers(), "ocean full")
+end
+
+local function checkFull()
+	if run.phase == "playing" and run.current >= run.target - 1e-6 then
+		setPhase("ending") -- stops further pours; endRun stores and ends the run
+		task.spawn(endRun)
 	end
 end
 
-function startStage(index: number)
-	setPhase("card")
-	run.stage = index
-	run.allLitres[index] = 0
-	setGlobal("Stage", index)
-	local order, rng = {}, Random.new()
-	for _, kind in Config.boosts.kinds do
-		table.insert(order, rng:NextInteger(1, #order + 1), kind.id)
+-- Locks the run to this server, then loads its save (a new one if there is none yet). Returns the
+-- save, or nil and what to tell the players. Nothing is loaded without the lock, and a failed load,
+-- another team's save or a finished run is never played, so it can't be overwritten.
+local function openRun(key: string, mapId: string, members: { number }): (RunSave.Save?, string?)
+	local locked, lockErr = RunStore.lock(key, serverId)
+	if not locked then
+		warn(`[Run] couldn't lock run {key}: {lockErr}`)
+		return nil, "This run is already open"
 	end
-	run.boostOrder = order
-	setWater(0, Water.target(Config.stages[index].waterPerPlayer, #Players:GetPlayers(), run.scale))
-	card(`The sun drained the {Config.stages[index].name}!`)
-	for player in states do
-		moveToSpawn(player)
-		publish(player)
+	run.lockedAt = os.clock()
+	local save, loadErr = RunStore.load(key)
+	local problem = nil
+	if loadErr then
+		warn(`[Run] couldn't load run {key}: {loadErr}`)
+		problem = "Couldn't load your run. Please try again."
+	elseif save and (save.mapId ~= mapId or not RunSave.sameTeam(save, members)) then
+		warn(`[Run] run {key} belongs to another team or map; not loaded`)
+		problem = "This run belongs to another team"
+	elseif save and save.finished then
+		problem = "This run is already finished"
 	end
-	updateShares()
-	task.wait(CARD_SECONDS)
-	setPhase("playing")
+	if problem then
+		local unlocked, unlockErr = RunStore.unlock(key, serverId)
+		if not unlocked then
+			warn(`[Run] couldn't unlock run {key}: {unlockErr}; its lock runs out by itself`)
+		end
+		return nil, problem
+	end
+	return save or RunSave.new(mapId, members), nil
 end
 
+-- Gives a player what the save holds for them; a member with nothing saved keeps the fresh start.
+local function applySaved(player: Player)
+	local saved = (run.save :: RunSave.Save).players[tostring(player.UserId)]
+	if saved then
+		local state = states[player]
+		state.money, state.levels, state.litres = saved.money, table.clone(saved.levels), saved.litres
+		state.stats = Ladder.stats(Config, state.levels)
+	end
+end
+
+-- The team is in: open their run, apply it and play.
 local function startRun()
 	if run.started then
 		return
 	end
 	run.started = true
-	setGlobal("RunStartedAt", workspace:GetServerTimeNow()) -- the HUD stopwatch counts from here
+	local session = run.session :: Session.State
+	local map = run.map :: Maps.Map
+	local members = {}
+	if session.mode == "party" then
+		for userId in session.members do
+			table.insert(members, userId)
+		end
+	else
+		for _, player in Players:GetPlayers() do
+			if player.UserId > 0 then -- Studio's test accounts have negative ids and can't save
+				table.insert(members, player.UserId)
+			end
+		end
+	end
+	setGlobal("Waiting", "Loading your run...")
+	local key = RunSave.key(map.id, members)
+	local save, problem = nil, nil
+	if session.mode == "party" and run.ticketKey ~= key then
+		warn(`[Run] the ticket's run {run.ticketKey} doesn't match its team ({key})`)
+		problem = "Couldn't load your run. Please try again."
+	elseif #members == 0 then
+		problem = "no team that can save (Studio test accounts)"
+	else
+		save, problem = openRun(key, map.id, members)
+	end
+	if not save then
+		if session.mode ~= "test" then
+			closeRun(problem :: string)
+			return
+		end
+		warn(`[Run] Studio: playing without saving ({problem}). Saving needs Studio API access.`)
+		save = RunSave.new(map.id, members)
+	else
+		run.key = key
+	end
+	run.save = save
+
 	local scale = workspace:GetAttribute("WaterScale") -- Studio test shortcut
 	local studioScale = if RunService:IsStudio() and type(scale) == "number" and scale > 0 then scale else 1
-	run.scale = studioScale
-	startStage(1)
+	run.waterScale = map.waterMultiplier * studioScale
+	run.teamSize = if session.mode == "party" then #save.members else #Players:GetPlayers()
+	run.target = litresAt(1)
+	setWater(math.min(save.current, run.target))
+	for player in states do
+		applySaved(player)
+	end
+	refreshAll()
+	run.playBase, run.playSince = save.playSeconds, os.clock()
+	setGlobal("PlaySeconds", save.playSeconds)
+	setGlobal("RunStartedAt", workspace:GetServerTimeNow()) -- the HUD stopwatch counts from here
+	setGlobal("Waiting", "")
+	-- The intro (phase "intro", only while save.introSeen is false) comes with the story cutscenes;
+	-- until then it is skipped.
+	setPhase("playing")
+	if run.key then
+		task.spawn(keepLock)
+		task.spawn(saveRun, "run opened")
+		task.spawn(eachMember, PROGRESS_SECONDS, addRun)
+		task.spawn(function()
+			while true do
+				task.wait(AUTOSAVE_SECONDS)
+				saveRun("autosave")
+			end
+		end)
+	end
+	checkFull() -- a save stored full but not finished ends now
 end
 
 local function partyPresent(): number
@@ -342,7 +536,7 @@ end
 -- never starts a run.
 local function tryStart()
 	local session = run.session
-	if run.started or not run.firstArrival or not session or session.mode == "closed" then
+	if run.started or run.closed or not run.firstArrival or not session or session.mode == "closed" then
 		return
 	end
 	setGlobal("Waiting", if session.mode == "party" then `{partyPresent()}/{session.expected}` else "")
@@ -356,19 +550,10 @@ local function tryStart()
 	end
 end
 
--- Player count changed: rescale the target, keep the fill fraction.
-local function onPlayerCount(count: number)
-	if run.stage < 1 or run.stage > #Config.stages or run.target <= 0 then
-		return
-	end
-	local newTarget = Water.target(Config.stages[run.stage].waterPerPlayer, count, run.scale)
-	setWater(Water.rescale(run.current, run.target, newTarget), newTarget)
-end
-
 local function onPlayerAdded(player: Player)
 	-- Default deny: only the lobby's party plays here. Anyone else (a friend who followed in, a
-	-- direct link, a public or VIP server) goes to the lobby.
-	if not (run.session and Session.admits(run.session, player.UserId)) then
+	-- direct link, a public or VIP server) goes to the lobby, as does everyone once the run is closed.
+	if run.closed or not (run.session and Session.admits(run.session, player.UserId)) then
 		sendToLobby({ player }, "not part of a run from the lobby")
 		return
 	end
@@ -377,17 +562,17 @@ local function onPlayerAdded(player: Player)
 		carried = 0,
 		levels = {} :: { [string]: number },
 		stats = Ladder.stats(Config, {}),
-		litres = {},
+		litres = 0,
 		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
 		buyWindowStart = 0,
 		buysInWindow = 0,
 		lastLookAt = 0, -- os.clock() of the last accepted Look
 		equipped = true,
 	}
-	publish(player)
-	if run.results then
-		remotes.Results:FireClient(player, run.results)
+	if run.save then
+		applySaved(player)
 	end
+	publish(player)
 	player.CharacterAdded:Connect(function()
 		applyWalkSpeed(player)
 		task.defer(moveToSpawn, player)
@@ -396,13 +581,12 @@ local function onPlayerAdded(player: Player)
 	if player.Character then
 		run.firstArrival = run.firstArrival or os.clock()
 	end
-	onPlayerCount(#Players:GetPlayers())
 end
 
--- Buy the next level of one upgrade track. Only levels unlocked by the current stage can be bought.
+-- Buy the next level of one upgrade track. Only levels of the open areas can be bought.
 local function onBuy(player: Player, trackId: unknown)
 	local state = states[player]
-	if not state or type(trackId) ~= "string" or (run.phase ~= "playing" and run.phase ~= "card") then
+	if not state or type(trackId) ~= "string" or run.phase ~= "playing" then
 		return
 	end
 	local now = os.clock()
@@ -413,7 +597,7 @@ local function onBuy(player: Player, trackId: unknown)
 		return
 	end
 	state.buysInWindow += 1
-	local level, status = Ladder.offer(Config, state.levels, trackId, run.stage)
+	local level, status = Ladder.offer(Config, state.levels, trackId, openAreas())
 	if status ~= "buy" or state.money + MONEY_EPSILON < level.cost then
 		return
 	end
@@ -449,24 +633,25 @@ local function onLook(player: Player, pitch: unknown)
 	player:SetAttribute("Look", math.round(math.clamp(pitch, -LOOK_LIMIT, LOOK_LIMIT)))
 end
 
--- Admin window (client/Admin): jump the run to a stage. Only mid-stage, so it never races a stage
--- transition (startStage leaves "playing" at once, which also stops repeat clicks).
-local function onAdmin(player: Player, stageIndex: unknown)
+-- Sets the ocean's fill to `fraction` (admin window, Studio shortcut). As with pours, crossing a
+-- milestone starts its boost and 100% ends the run.
+local function jumpFill(fraction: number)
+	local before = fillOf(run.current)
+	setWater(litresAt(fraction))
+	checkBoost(before, fillOf(run.current))
+	checkFull()
+end
+
+-- Admin window (client/Admin): jump the ocean's fill to a fraction 0-1. Only while playing, so it
+-- never races the ending (checkFull leaves "playing" at once, which also stops repeat clicks).
+local function onAdmin(player: Player, fraction: unknown)
 	if not Admins[player.UserId] or run.phase ~= "playing" then
 		return
 	end
-	if type(stageIndex) ~= "number" or stageIndex % 1 ~= 0 or stageIndex < 1 or stageIndex > #Config.stages then
+	if type(fraction) ~= "number" or fraction ~= fraction or fraction < 0 or fraction > 1 then
 		return
 	end
-	endBoost()
-	task.spawn(startStage, stageIndex)
-end
-
-local function checkFull()
-	if run.phase == "playing" and run.current >= run.target - 1e-6 then
-		setPhase("card") -- stop further pours; completeStage runs the transition
-		task.spawn(completeStage)
-	end
+	jumpFill(fraction)
 end
 
 local function nearPart(player: Player, part: BasePart): boolean
@@ -474,8 +659,8 @@ local function nearPart(player: Player, part: BasePart): boolean
 	return root ~= nil and ((root :: BasePart).Position - part.Position).Magnitude <= ACT_REACH + DISTANCE_SLACK
 end
 
--- Pouring works anywhere next to where the stage's water will be (shared/Zones.nearFlood).
-local function nearFlood(player: Player, stage: Model): boolean
+-- Pouring works anywhere next to where the ocean's water will be (shared/Zones.nearFlood).
+local function nearFlood(player: Player): boolean
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	if not root then
 		return false
@@ -486,7 +671,7 @@ local function nearFlood(player: Player, stage: Model): boolean
 			table.insert(characters, other.Character)
 		end
 	end
-	return Zones.nearFlood(stage, (root :: BasePart).Position, ACT_REACH + DISTANCE_SLACK, characters)
+	return Zones.nearFlood(ocean, (root :: BasePart).Position, ACT_REACH + DISTANCE_SLACK, characters)
 end
 
 local function creditScoop(state)
@@ -499,22 +684,21 @@ local function publishAct(player: Player, kind: string)
 	player:SetAttribute("ActAt", workspace:GetServerTimeNow())
 end
 
-local function creditPour(state, stageIndex: number): boolean
+local function creditPour(state): boolean
 	local litres = Water.pourAmount(state.carried, run.current, run.target)
 	if litres <= 0 then
 		return false
 	end
 	state.carried -= litres
-	state.money += litres * Config.stages[stageIndex].coinsPerLitre * boosted(state).coinBonus
-	state.litres[stageIndex] = (state.litres[stageIndex] or 0) + litres
-	run.allLitres[stageIndex] += litres
-	local before = run.current / run.target
-	setWater(run.current + litres, run.target)
-	checkBoost(before, run.current / run.target)
+	state.money += litres * Config.ocean.coinsPerLitre * boosted(state).coinBonus
+	state.litres += litres
+	local before = fillOf(run.current)
+	setWater(run.current + litres)
+	checkBoost(before, fillOf(run.current))
 	return true
 end
 
--- A scoop sweep or a pour. Checked when it starts (stage, distance, room or water). A scoop is
+-- A scoop sweep or a pour. Checked when it starts (distance, room or water). A scoop is
 -- credited when it ends (it always plays out in full on the client) and is paced: on average one
 -- per actSeconds, with slack for latency. A pour is instant and needs no pacing: it empties the tool.
 local function onAct(player: Player, kind: unknown)
@@ -522,15 +706,13 @@ local function onAct(player: Player, kind: unknown)
 	if not state or (kind ~= "scoop" and kind ~= "pour") or not state.equipped or run.phase ~= "playing" then
 		return
 	end
-	local stageIndex = run.stage
 	local act = state.stats.actSeconds
 	local slack = math.min(HOLD_SLACK, act / 2)
 	local now = os.clock()
 	if kind == "scoop" and now < state.nextActAt - slack then
 		return
 	end
-	local stage = stageModel(stageIndex)
-	if not (if kind == "scoop" then nearPart(player, Zones.part(stage, "Source")) else nearFlood(player, stage)) then
+	if not (if kind == "scoop" then nearPart(player, Zones.part(ocean, "Source")) else nearFlood(player)) then
 		return
 	end
 	if kind == "scoop" and state.carried >= state.stats.capacity - 1e-9 then
@@ -539,10 +721,9 @@ local function onAct(player: Player, kind: unknown)
 		return
 	end
 	if kind == "pour" then
-		if creditPour(state, stageIndex) then
+		if creditPour(state) then
 			publishAct(player, kind)
 			publish(player)
-			updateShares()
 			checkFull()
 		end
 		return
@@ -551,7 +732,7 @@ local function onAct(player: Player, kind: unknown)
 	state.nextActAt = math.max(state.nextActAt, now - slack) + act
 	publishAct(player, kind)
 	task.delay(act, function()
-		if states[player] ~= state or run.phase ~= "playing" or run.stage ~= stageIndex or not state.equipped then
+		if states[player] ~= state or run.phase ~= "playing" or not state.equipped then
 			return
 		end
 		creditScoop(state)
@@ -574,36 +755,34 @@ local function loadSession()
 			end
 		until ticket or os.clock() > deadline
 	end
-	-- Difficulty is removed (the map replaces it, Task 4): every run counts as level 1 until then.
 	run.session = Session.decide({
 		isStudio = isStudio,
 		privateServerId = game.PrivateServerId,
 		privateServerOwnerId = game.PrivateServerOwnerId,
 		ticket = ticket,
-		studioDifficulty = workspace:GetAttribute("StudioDifficulty"),
-	}, function()
-		return 1
-	end)
-	run.difficulty = run.session.difficulty
+		studioMap = workspace:GetAttribute("StudioMap"),
+	}, Maps.get)
+	run.map = Maps.get(run.session.mapId) -- Session.decide only returns listed maps
+	run.ticketKey = ticket and ticket.key
 	if run.session.mode == "closed" then
 		warn(`[Run] closed server ({if reserved then `no run ticket: {err or "missing"}` else "not a lobby run"}); sending everyone to the lobby`)
-		setGlobal("Waiting", "Taking you to the lobby...")
-		sendToLobby(Players:GetPlayers(), "closed server")
+		closeRun("Taking you to the lobby...")
 	end
 end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Results", "Equip", "Act", "Look", "Admin" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin" } do
 		remotes[name] = remote(name)
 	end
-	setGlobal("Stage", 0)
 	setGlobal("Fill", 0)
 	setGlobal("Waiting", "")
-	setPhase("waiting")
+	setPhase("loading")
 
 	loadSession()
-	setGlobal("Difficulty", run.difficulty)
+	local map = run.map :: Maps.Map
+	setGlobal("MapId", map.id)
+	setGlobal("MapName", map.name)
 
 	remotes.Buy.OnServerEvent:Connect(onBuy)
 	remotes.Equip.OnServerEvent:Connect(onEquip)
@@ -615,9 +794,26 @@ function Run.start(oceanModel: Model)
 		onPlayerAdded(player)
 	end
 	Players.PlayerRemoving:Connect(function(player)
-		if states[player] then
+		local state = states[player]
+		if state then
+			keepPlayer(player, state)
 			states[player] = nil
-			onPlayerCount(#Players:GetPlayers() - 1) -- the leaver is still listed during PlayerRemoving
+			task.spawn(saveRun, `{player.Name} left`)
+		end
+	end)
+	-- The last save before the server goes (Roblox waits up to 30 s), then the lock is released so the
+	-- team can load the run again at once. A save still in flight keeps the lock until it runs out.
+	game:BindToClose(function()
+		if not run.key or run.lockLost then
+			return
+		end
+		if saveNow("server closing", CLOSE_SAVE_SECONDS) then
+			local ok, err = RunStore.unlock(run.key, serverId)
+			if not ok then
+				warn(`[Run] couldn't unlock run {run.key}: {err}; its lock runs out by itself`)
+			end
+		else
+			warn(`[Run] run {run.key}: the last save didn't finish within {CLOSE_SAVE_SECONDS} s; its lock runs out by itself`)
 		end
 	end)
 	TeleportService.TeleportInitFailed:Connect(function(player, result, message)
@@ -625,19 +821,19 @@ function Run.start(oceanModel: Model)
 		player:Kick("Couldn't return you to the lobby. Please rejoin.")
 	end)
 	task.spawn(function()
-		while not run.started do
+		while not run.started and not run.closed do
 			tryStart()
 			task.wait(0.5)
 		end
 	end)
 
-	-- Studio-only test shortcut: set workspace attribute StudioFillStage = true to fill the current stage.
+	-- Studio-only test shortcut: set workspace attribute StudioFill to a fraction 0-1 to jump the fill.
 	if RunService:IsStudio() then
-		workspace:GetAttributeChangedSignal("StudioFillStage"):Connect(function()
-			if workspace:GetAttribute("StudioFillStage") and run.phase == "playing" then
-				workspace:SetAttribute("StudioFillStage", nil)
-				setWater(run.target, run.target)
-				checkFull()
+		workspace:GetAttributeChangedSignal("StudioFill"):Connect(function()
+			local fraction = workspace:GetAttribute("StudioFill")
+			if type(fraction) == "number" and fraction >= 0 and fraction <= 1 and run.phase == "playing" then
+				workspace:SetAttribute("StudioFill", nil)
+				jumpFill(fraction)
 			end
 		end)
 	end

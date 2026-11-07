@@ -27,9 +27,6 @@
         "Card": {
           "$className": "RemoteEvent"
         },
-        "Results": {
-          "$className": "RemoteEvent"
-        },
         "Equip": {
           "$className": "RemoteEvent"
         },
