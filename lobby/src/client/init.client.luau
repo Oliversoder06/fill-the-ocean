@@ -3,6 +3,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Maps = require(ReplicatedStorage.Common.Maps)
 local Session = require(script.Session)
 
 local player = Players.LocalPlayer
@@ -20,20 +21,21 @@ local function find(path: string): any
 end
 
 local raindrops = find("Stats.Raindrops")
-local unlocked = find("Stats.Unlocked")
+local maps = find("Stats.Maps")
 local toast = find("Toast")
 local toastText = find("Toast.Text")
 
 local function refresh()
 	if player:GetAttribute("DataError") then
 		raindrops.Text = "Raindrops: couldn't load"
+		maps.Text = "Maps: couldn't load"
 	else
 		raindrops.Text = `{player:GetAttribute("Raindrops") or 0} Raindrops`
+		maps.Text = `{player:GetAttribute("MapsCleared") or 0}/{#Maps.list} maps cleared`
 	end
-	unlocked.Text = `Unlocked: Difficulty {player:GetAttribute("Unlocked") or 1}`
 end
 
-for _, name in { "Raindrops", "Unlocked", "DataError" } do
+for _, name in { "Raindrops", "MapsCleared", "DataError" } do
 	player:GetAttributeChangedSignal(name):Connect(refresh)
 end
 refresh()
