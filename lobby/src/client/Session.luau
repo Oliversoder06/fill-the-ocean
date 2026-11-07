@@ -73,6 +73,18 @@ local function deny(button: GuiObject)
 	tween:Play()
 end
 
+-- A window's fit to the screen: built at its DesignSize attribute, shrunk to fit the ScreenGui's
+-- area (which already leaves out the safe-area insets), never grown. 1 for frames without one.
+local function fitOf(frame: GuiObject): number
+	local design = frame:GetAttribute("DesignSize")
+	local gui = frame:FindFirstAncestorWhichIsA("ScreenGui")
+	if typeof(design) ~= "Vector2" or not gui then
+		return 1
+	end
+	local view = gui.AbsoluteSize
+	return math.min(view.X / design.X, view.Y / design.Y, 1)
+end
+
 local function show(frame: GuiObject, visible: boolean)
 	-- lihfolk-ignore: findfirstchild-chain (nil-checked below before use)
 	local scale = frame:FindFirstChild("Scale") :: UIScale?
@@ -83,12 +95,13 @@ local function show(frame: GuiObject, visible: boolean)
 		frame.Visible = visible
 		return
 	end
+	local fit = fitOf(frame)
 	if visible then
-		scale.Scale = 0.6
+		scale.Scale = 0.6 * fit
 		frame.Visible = true
-		TweenService:Create(scale, POP, { Scale = 1 }):Play()
+		TweenService:Create(scale, POP, { Scale = fit }):Play()
 	else
-		local tween = TweenService:Create(scale, SHUT, { Scale = 0.6 })
+		local tween = TweenService:Create(scale, SHUT, { Scale = 0.6 * fit })
 		tween.Completed:Once(function()
 			frame.Visible = false
 		end)
@@ -164,6 +177,18 @@ function Session.start()
 	local startButton = find(bar, "StartButton")
 
 	local windows = { padMenu, create, savedWindow }
+	for _, w in windows do
+		assert(typeof(w:GetAttribute("DesignSize")) == "Vector2", `LobbyHud.{w.Name} needs a Vector2 attribute DesignSize (built in Studio)`)
+	end
+	-- Rotating a phone or resizing the window refits whatever is open.
+	hud:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		for _, w in windows do
+			local scale = w:FindFirstChild("Scale")
+			if w.Visible and scale and scale:IsA("UIScale") then
+				scale.Scale = fitOf(w)
+			end
+		end
+	end)
 	local settings = { maxPlayers = 4, mapId = Maps.list[1].id, friendsOnly = false }
 	local mapIndex = 1
 	local unlocked: { [string]: boolean } = {}
