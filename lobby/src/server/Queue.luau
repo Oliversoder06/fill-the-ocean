@@ -57,6 +57,7 @@ type Pad = {
 	saved: { SavedRun }?, -- the host's saved runs; nil while they load
 	savedError: string?,
 	savedToken: number, -- bumped per load so a stale load is dropped
+	savedLoading: boolean, -- a load for this host is running
 	launching: boolean,
 }
 
@@ -130,6 +131,7 @@ local function reset(pad: Pad)
 	pad.friends = {}
 	pad.saved, pad.savedError = nil, nil
 	pad.savedToken += 1
+	pad.savedLoading = false
 end
 
 local function userIds(players: { Player }): { number }
@@ -198,10 +200,15 @@ local function namesOf(ids: { number }): string
 end
 
 -- Loads the host's saved runs for the Saved Runs panel, in the background (it yields).
+-- Once per host on the pad: reopening the panel reuses the list (leaveRun keeps it current), so
+-- toggling views can't burn the lobby's DataStore read budget.
 local function loadSaved(pad: Pad, host: Player)
+	if pad.saved or pad.savedLoading then
+		return
+	end
 	pad.savedToken += 1
 	local token = pad.savedToken
-	pad.saved, pad.savedError = nil, nil
+	pad.savedLoading = true
 	task.spawn(function()
 		local data = Profiles.get(host)
 		local runs: { SavedRun } = {}
@@ -228,6 +235,7 @@ local function loadSaved(pad: Pad, host: Player)
 		end
 		if pad.savedToken == token then
 			pad.saved, pad.savedError = runs, problem
+			pad.savedLoading = false
 		end
 	end)
 end
@@ -650,6 +658,7 @@ function Queue.start()
 				saved = nil,
 				savedError = nil,
 				savedToken = 0,
+				savedLoading = false,
 				launching = false,
 			})
 		end

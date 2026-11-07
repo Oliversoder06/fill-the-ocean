@@ -208,7 +208,7 @@ function Session.start()
 		local confirm = find(card, "Confirm")
 		find(confirm, "Question").Text = if run.teamSize > 1
 			then "Leave this run? It stays saved for the others, but without you they can't load it any more."
-			else "Leave this run? Only you were in it, so it's gone for good."
+			else "Leave this run? It comes off your list. Starting a solo party on this map again picks it back up."
 		confirm.Visible = confirming == run.key
 		local yes = find(confirm, "YesButton")
 		local no = find(confirm, "NoButton")
