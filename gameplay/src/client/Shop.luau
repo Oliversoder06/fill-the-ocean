@@ -145,13 +145,13 @@ function Shop.start()
 	local open = false
 	local fitScale = 1
 	local function refit()
-		local view = workspace.CurrentCamera.ViewportSize
+		local view = gui.AbsoluteSize -- the Hud's area inside the top bar and safe insets, not the viewport
 		fitScale = math.min(view.X / DESIGN_SIZE.X, view.Y / DESIGN_SIZE.Y, 1)
 		if open then
 			fit.Scale = fitScale
 		end
 	end
-	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refit)
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
 	refit()
 
 	local window = Window.new(shop, fit)

@@ -49,6 +49,12 @@ Cues.coins = {
 	burstVolume = 0.35,
 }
 
+-- The first-minute guide (client/Guide): `beam` is a Beam in ReplicatedStorage.Vfx from the player to
+-- the current goal.
+Cues.guide = {
+	beam = "GuideBeam",
+}
+
 -- Windows opening and closing (client/Window): one whoosh, a little lower on close.
 Cues.window = {
 	whoosh = "WindowWhoosh",

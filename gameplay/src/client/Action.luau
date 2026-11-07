@@ -15,7 +15,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
 
-local REACH = 12 -- studs from Source / from where the water will be; keep in step with server/Run ACT_REACH
+local REACH = Zones.REACH
 local AIM_DISTANCE = 80
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
 local ACTION_NAME = "FillAct"

@@ -10,6 +10,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
@@ -17,8 +18,8 @@ local Hud = require(script.Parent.Hud)
 local player = Players.LocalPlayer
 local set = Hud.set
 
-local REACH = 12 -- studs; keep in step with client/Action REACH
-local BEAM = "GuideBeam" -- in ReplicatedStorage.Vfx
+local REACH = Zones.REACH
+local BEAM = Cues.guide.beam
 local STEPS = 6
 local DONE_SECONDS = 3
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -47,10 +48,14 @@ local function boughtAny(levels: { [string]: number }): boolean
 	return false
 end
 
+local function openAreas(): number
+	local fill = ReplicatedStorage:GetAttribute("Fill")
+	return Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
+end
+
 -- The cheapest upgrade on sale now: its track and price.
 local function cheapest(levels: { [string]: number }): (Config.Track?, number)
-	local fill = ReplicatedStorage:GetAttribute("Fill")
-	local areas = Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
+	local areas = openAreas()
 	local best, bestCost = nil, math.huge
 	for _, track in Config.tracks do
 		local level, status = Ladder.offer(Config, levels, track.id, areas)
@@ -140,6 +145,18 @@ function Guide.start()
 		set(b, "Enabled", true)
 	end
 
+	-- Whether the shop's selected tile (the one whose Ring shows) is on sale and affordable now.
+	local function canBuySelected(levels: { [string]: number }, money: number): boolean
+		local areas = openAreas()
+		for id, ring in tiles do
+			if ring.Visible then
+				local level, status = Ladder.offer(Config, levels, id, areas)
+				return status == "buy" and money + 1e-6 >= level.cost
+			end
+		end
+		return false
+	end
+
 	-- The step (1-6), its text and the beam and marker targets, from live state.
 	local function current(levels: { [string]: number }, ocean: Model): (number, string, Attachment?, Attachment?, string)
 		local well, shore = target(ocean, "Source"), target(ocean, "PourPoint")
@@ -149,8 +166,10 @@ function Guide.start()
 			if not shop.Visible then
 				return 5, openText(), nil, nil, ""
 			end
-			local selected = tiles[track.id].Visible
-			return 6, if selected then "Buy it!" else `Pick {track.name}, then BUY`, nil, nil, ""
+			if canBuySelected(levels, money) then
+				return 6, "Buy it!", nil, nil, ""
+			end
+			return 6, `Pick {track.name}, then BUY`, nil, nil, ""
 		end
 		if shop.Visible then
 			return 4, `Close the shop and pour more water: {Hud.money(money)} / {Hud.money(cost)} coins`, nil, nil, ""
