@@ -3,10 +3,6 @@
 
 local Zones = {}
 
--- Studs from Source / from where the water will be within which a player scoops or pours (client
--- Action and Guide; server/Run adds latency slack).
-Zones.REACH = 12
-
 -- An ocean child the map contract requires; a missing one is a map bug, so fail loudly.
 function Zones.part(ocean: Model, name: string): BasePart
 	local child = ocean:FindFirstChild(name)

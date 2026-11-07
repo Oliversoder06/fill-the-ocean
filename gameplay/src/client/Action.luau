@@ -15,7 +15,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
 
-local REACH = Zones.REACH
+local REACH = Hud.REACH
 local AIM_DISTANCE = 80
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
 local ACTION_NAME = "FillAct"
@@ -118,13 +118,7 @@ function Action.start()
 			local seen = workspace:Raycast(origin, look, seeParams)
 			return "scoop", if seen then seen.Position else aim.Position
 		end
-		local ignore: { Instance } = { camera }
-		for _, other in Players:GetPlayers() do
-			if other.Character then
-				table.insert(ignore, other.Character)
-			end
-		end
-		if not Zones.nearFlood(ocean, root.Position, REACH, ignore) then
+		if not Hud.nearPour(ocean, root.Position) then
 			return nil, nil
 		end
 		local seen = workspace:Raycast(origin, look, seeParams)

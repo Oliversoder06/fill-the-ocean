@@ -11,14 +11,12 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
-local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
 
 local player = Players.LocalPlayer
 local set = Hud.set
 
-local REACH = Zones.REACH
 local BEAM = Cues.guide.beam
 local STEPS = 6
 local DONE_SECONDS = 3
@@ -26,18 +24,6 @@ local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local BOB_PIXELS, BOB_SPEED = 6, 4 -- marker arrow bob height, and radians per second
 
 local Guide = {}
-
-local function levelsOf(): { [string]: number }?
-	local levels = {}
-	for _, track in Config.tracks do
-		local level = player:GetAttribute(`Level_{track.id}`)
-		if type(level) ~= "number" then
-			return nil -- not published yet
-		end
-		levels[track.id] = level
-	end
-	return levels
-end
 
 local function boughtAny(levels: { [string]: number }): boolean
 	for _, level in levels do
@@ -48,22 +34,16 @@ local function boughtAny(levels: { [string]: number }): boolean
 	return false
 end
 
-local function openAreas(): number
-	local fill = ReplicatedStorage:GetAttribute("Fill")
-	return Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
-end
-
--- The cheapest upgrade on sale now: its track and price.
-local function cheapest(levels: { [string]: number }): (Config.Track?, number)
-	local areas = openAreas()
-	local best, bestCost = nil, math.huge
+-- The cheapest upgrade on sale now: its track, price and whether `money` buys it.
+local function cheapest(levels: { [string]: number }, money: number): (Config.Track?, number, boolean)
+	local best, bestCost, bestAffordable = nil, math.huge, false
 	for _, track in Config.tracks do
-		local level, status = Ladder.offer(Config, levels, track.id, areas)
+		local level, status, affordable = Hud.offer(levels, track.id, money)
 		if status == "buy" and level.cost < bestCost then
-			best, bestCost = track, level.cost
+			best, bestCost, bestAffordable = track, level.cost, affordable
 		end
 	end
-	return best, bestCost
+	return best, bestCost, bestAffordable
 end
 
 local function target(ocean: Model, name: string): Attachment
@@ -119,6 +99,7 @@ function Guide.start()
 		finished = true
 		doneUntil = if thanks then os.clock() + DONE_SECONDS else nil
 	end
+	Hud.pressable(skip, Hud.find(skip, "Press"))
 	skip.Activated:Connect(function()
 		finish(false)
 	end)
@@ -147,11 +128,10 @@ function Guide.start()
 
 	-- Whether the shop's selected tile (the one whose Ring shows) is on sale and affordable now.
 	local function canBuySelected(levels: { [string]: number }, money: number): boolean
-		local areas = openAreas()
 		for id, ring in tiles do
 			if ring.Visible then
-				local level, status = Ladder.offer(Config, levels, id, areas)
-				return status == "buy" and money + 1e-6 >= level.cost
+				local _, _, canBuy = Hud.offer(levels, id, money)
+				return canBuy
 			end
 		end
 		return false
@@ -161,8 +141,8 @@ function Guide.start()
 	local function current(levels: { [string]: number }, ocean: Model): (number, string, Attachment?, Attachment?, string)
 		local well, shore = target(ocean, "Source"), target(ocean, "PourPoint")
 		local money = player:GetAttribute("Money") or 0
-		local track, cost = cheapest(levels)
-		if track and money + 1e-6 >= cost then
+		local track, cost, affordable = cheapest(levels, money)
+		if track and affordable then
 			if not shop.Visible then
 				return 5, openText(), nil, nil, ""
 			end
@@ -185,27 +165,21 @@ function Guide.start()
 		local carried = player:GetAttribute("Carried") or 0
 		local capacity = player:GetAttribute("Capacity") or 0
 		local full = carried >= capacity * (1 - 1e-6)
-		local atWell = (root.Position - Zones.part(ocean, "Source").Position).Magnitude <= REACH
+		local atWell = (root.Position - Zones.part(ocean, "Source").Position).Magnitude <= Hud.REACH
 		if carried <= 0 and not atWell then
 			local again = if money > 0 then `Again! {Hud.money(money)} / {Hud.money(cost)} coins for your first upgrade` else "Walk to the well"
 			return 1, again, well, well, "WELL"
 		elseif atWell and not full then
 			return 2, "Scoop water until your tool is full", nil, well, "WELL"
 		end
-		local ignore: { Instance } = { workspace.CurrentCamera }
-		for _, other in Players:GetPlayers() do
-			if other.Character then
-				table.insert(ignore, other.Character)
-			end
-		end
-		if Zones.nearFlood(ocean, root.Position, REACH, ignore) then
+		if Hud.nearPour(ocean, root.Position) then
 			return 4, "Pour it in! Every litre pays coins", nil, nil, ""
 		end
 		return 3, "Carry it to the shore", shore, shore, "POUR HERE"
 	end
 
 	RunService.RenderStepped:Connect(function()
-		local levels = levelsOf()
+		local levels = Hud.levels()
 		if levels and isNew == nil then
 			isNew = not boughtAny(levels)
 		end

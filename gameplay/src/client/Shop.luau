@@ -21,7 +21,7 @@ local Window = require(script.Parent.Window)
 
 local player = Players.LocalPlayer
 local colors, images, motion = Theme.colors, Theme.images, Theme.motion
-local short, set = Hud.short, Hud.set
+local short, set, pressable = Hud.short, Hud.set, Hud.pressable
 
 local DESIGN_SIZE = Vector2.new(1000, 660) -- the shop plus room for its decorations
 local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -66,17 +66,7 @@ local function effectText(id: string, now: Ladder.Stats, after: Ladder.Stats): s
 end
 
 local function levelsOf(): { [string]: number }
-	local levels = {}
-	for _, track in Config.tracks do
-		levels[track.id] = player:GetAttribute(`Level_{track.id}`) or 0
-	end
-	return levels
-end
-
--- Areas open so far, from the ocean's published fill (Ladder.openAreas, as the server counts them).
-local function openAreas(): number
-	local fill = ReplicatedStorage:GetAttribute("Fill")
-	return Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
+	return Hud.levels(0) :: { [string]: number }
 end
 
 -- Where a locked level opens: "Opens at 22% full" (its area's stand-in fill point).
@@ -90,28 +80,6 @@ local function levelName(track, n: number, level): string
 		return level.name
 	end
 	return if #track.levels == 1 then track.name else `{track.name} {n}`
-end
-
--- Grows on hover, shrinks while pressed (motion values from the style).
-local function pressable(button: GuiButton, scale: UIScale)
-	local hovered = false
-	local function to(value: number)
-		TweenService:Create(scale, QUICK, { Scale = value }):Play()
-	end
-	button.MouseEnter:Connect(function()
-		hovered = true
-		to(motion.hoverScale)
-	end)
-	button.MouseLeave:Connect(function()
-		hovered = false
-		to(1)
-	end)
-	button.MouseButton1Down:Connect(function()
-		to(motion.pressScale)
-	end)
-	button.MouseButton1Up:Connect(function()
-		to(if hovered then motion.hoverScale else 1)
-	end)
 end
 
 local function bounce(scale: UIScale)
@@ -237,8 +205,8 @@ function Shop.start()
 		end)
 	end
 	buyButton.Activated:Connect(function()
-		local level, status = Ladder.offer(Config, levelsOf(), selected, openAreas())
-		if status == "buy" and (player:GetAttribute("Money") or 0) + 1e-6 >= level.cost then
+		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0)
+		if canBuy then
 			bounce(buyButton.Press)
 		else
 			Purchase.deny(buyButton)
@@ -277,7 +245,6 @@ function Shop.start()
 			return
 		end
 		local money = player:GetAttribute("Money") or 0
-		local areas = openAreas()
 		local levels = levelsOf()
 		local now = Ladder.stats(Config, levels)
 
@@ -286,8 +253,7 @@ function Shop.start()
 			local holder = tiles[id]
 			local button = Hud.find(holder, "Button")
 			local have = levels[id]
-			local level, status = Ladder.offer(Config, levels, id, areas)
-			local affordable = status == "buy" and money + 1e-6 >= level.cost
+			local level, status, affordable = Hud.offer(levels, id, money)
 			set(button, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 			set(Hud.find(button, "Ring"), "Visible", id == selected)
 			showArt(button, id, now.toolModel, status == "locked")
@@ -329,7 +295,7 @@ function Shop.start()
 		-- Detail panel: the selected track's next level
 		local track = Config.track(selected) :: Config.Track
 		local have = levels[selected]
-		local level, status = Ladder.offer(Config, levels, selected, areas)
+		local level, status, canBuy = Hud.offer(levels, selected, money)
 		set(Hud.find(detail, "Category"), "Text", PANEL_NAMES[track.panel])
 		set(detailArt, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 		set(Hud.find(detail, "About"), "Text", track.about)
@@ -345,7 +311,6 @@ function Shop.start()
 			set(Hud.find(detail, "ItemName"), "Text", if selected == "tool" then now.toolName else track.name)
 			set(Hud.find(detail, "Effect"), "Text", "All levels bought!")
 		end
-		local canBuy = status == "buy" and money + 1e-6 >= level.cost
 		set(buyCoin, "Visible", status == "buy")
 		set(buyPrice, "Visible", status == "buy")
 		set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else opensText(level):upper())

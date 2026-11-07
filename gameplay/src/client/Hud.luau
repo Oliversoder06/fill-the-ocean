@@ -10,6 +10,9 @@ local UserInputService = game:GetService("UserInputService")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Ease = require(ReplicatedStorage.Shared.Ease)
+local Ladder = require(ReplicatedStorage.Shared.Ladder)
+local Zones = require(ReplicatedStorage.Shared.Zones)
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 
 local player = Players.LocalPlayer
 local Hud = {}
@@ -17,6 +20,12 @@ local Hud = {}
 local SUFFIXES = { "K", "M", "B", "T" }
 local COIN_BOUNCE = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local PROGRESS_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local PRESS = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
+
+-- Studs from Source / from where the water will be within which a player scoops or pours (client
+-- Action and Guide); keep in step with server/Run ACT_REACH.
+Hud.REACH = 12
 
 -- Stopwatch text: 4:05, then 1:04:05 past an hour.
 function Hud.clock(seconds: number): string
@@ -77,6 +86,66 @@ end
 function Hud.ocean(): Model?
 	local model = workspace:FindFirstChild("Ocean")
 	return if model and model:IsA("Model") then model else nil
+end
+
+-- The save's upgrade levels by track id, from the Level_<track> attributes. A missing one counts as
+-- `fallback`; with no fallback the whole table is nil until the server has published them all.
+function Hud.levels(fallback: number?): { [string]: number }?
+	local levels = {}
+	for _, track in Config.tracks do
+		local level = player:GetAttribute(`Level_{track.id}`)
+		if type(level) ~= "number" then
+			if fallback == nil then
+				return nil
+			end
+			level = fallback
+		end
+		levels[track.id] = level
+	end
+	return levels
+end
+
+-- A track's next level, its status (Ladder.offer, with the areas the ocean's published fill opens,
+-- as the server counts them) and whether `money` buys it now.
+function Hud.offer(levels: { [string]: number }, id: string, money: number): (any, Ladder.Status?, boolean)
+	local fill = ReplicatedStorage:GetAttribute("Fill")
+	local areas = Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
+	local level, status = Ladder.offer(Config, levels, id, areas)
+	return level, status, status == "buy" and money + MONEY_EPSILON >= level.cost
+end
+
+-- Whether a character at `position` may pour: next to where the water will be, past the camera and
+-- every player's character (the same check Action offers the pour with).
+function Hud.nearPour(ocean: Model, position: Vector3): boolean
+	local ignore: { Instance } = { workspace.CurrentCamera }
+	for _, other in Players:GetPlayers() do
+		if other.Character then
+			table.insert(ignore, other.Character)
+		end
+	end
+	return Zones.nearFlood(ocean, position, Hud.REACH, ignore)
+end
+
+-- Grows on hover, shrinks while pressed (motion values from the style).
+function Hud.pressable(button: GuiButton, scale: UIScale)
+	local hovered = false
+	local function to(value: number)
+		TweenService:Create(scale, PRESS, { Scale = value }):Play()
+	end
+	button.MouseEnter:Connect(function()
+		hovered = true
+		to(Theme.motion.hoverScale)
+	end)
+	button.MouseLeave:Connect(function()
+		hovered = false
+		to(1)
+	end)
+	button.MouseButton1Down:Connect(function()
+		to(Theme.motion.pressScale)
+	end)
+	button.MouseButton1Up:Connect(function()
+		to(if hovered then Theme.motion.hoverScale else 1)
+	end)
 end
 -- Money still flying in as coins (client/Payout): the wallet shows Money minus this, so it counts
 -- up coin by coin instead of jumping when the server pays.
