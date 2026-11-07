@@ -49,9 +49,9 @@ function Ladder.stats(config, levels: { [string]: number }): Stats
 	}
 end
 
--- The next level of a track and whether it can be bought in this stage. A locked level is still
--- returned so the shop can show it. Unknown track: nil, nil.
-function Ladder.offer(config, levels: { [string]: number }, id: string, stageIndex: number)
+-- The next level of a track and whether it can be bought with `openAreas` areas open. A locked
+-- level is still returned so the shop can show it. Unknown track: nil, nil.
+function Ladder.offer(config, levels: { [string]: number }, id: string, openAreas: number)
 	local track = config.track(id)
 	if not track then
 		return nil, nil
@@ -60,7 +60,7 @@ function Ladder.offer(config, levels: { [string]: number }, id: string, stageInd
 	if not level then
 		return nil, "max" :: Status
 	end
-	return level, (if level.stage <= stageIndex then "buy" else "locked") :: Status
+	return level, (if level.area <= openAreas then "buy" else "locked") :: Status
 end
 
 -- Walk there and back, the scoop sweeps, then one quick pour.

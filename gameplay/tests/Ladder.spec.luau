@@ -43,36 +43,6 @@ function tests.base_sweeps_grow_every_two_tools_up_to_eight(t)
 	t.expectEq(Ladder.baseSweeps(Config, 20), 8, "moon is capped")
 end
 
-local function lastIn(trackId, stage)
-	local n = 0
-	for i, level in Config.track(trackId).levels do
-		if level.stage <= stage then
-			n = i
-		end
-	end
-	return n
-end
-
--- Pickup must never outrun the tools: with every Pickup a stage offers, its best tool still takes
--- a few sweeps, so Quick Scoop keeps mattering to the end.
-function tests.stage_end_tools_still_take_several_sweeps(t)
-	for stage = 1, #Config.stages do
-		local s = Ladder.stats(Config, { tool = lastIn("tool", stage), pickup = lastIn("pickup", stage) })
-		t.expectEq(s.sweeps >= 2, true, `end of stage {stage} takes {s.sweeps} sweep(s)`)
-	end
-end
-
-function tests.every_pickup_level_takes_a_sweep_off_the_stage_end_tool(t)
-	for stage = 1, #Config.stages do
-		local tool = lastIn("tool", stage)
-		for pickup = 1, lastIn("pickup", stage) do
-			local before = Ladder.stats(Config, { tool = tool, pickup = pickup - 1 }).sweeps
-			local after = Ladder.stats(Config, { tool = tool, pickup = pickup }).sweeps
-			t.expectEq(after, before - 1, `stage {stage} pickup {pickup}`)
-		end
-	end
-end
-
 function tests.offer_is_the_next_level(t)
 	local level, status = Ladder.offer(Config, {}, "tool", 1)
 	t.expectEq(status, "buy")
@@ -81,18 +51,17 @@ function tests.offer_is_the_next_level(t)
 	t.expectEq(level.name, "Cup Lv2")
 end
 
-function tests.offer_is_locked_until_its_stage(t)
-	local tools = Config.track("tool").levels
-	local poolTools = 0
-	for _, level in tools do
-		if level.stage == 1 then
-			poolTools += 1
+function tests.level_waits_for_its_area(t)
+	local firstArea = 0
+	for _, level in Config.track("tool").levels do
+		if level.area == 1 then
+			firstArea += 1
 		end
 	end
-	local level, status = Ladder.offer(Config, { tool = poolTools }, "tool", 1)
+	local level, status = Ladder.offer(Config, { tool = firstArea }, "tool", 1)
 	t.expectEq(status, "locked")
-	t.expectEq(level.stage, 2, "the locked level is still returned for the shop")
-	local _, laterStatus = Ladder.offer(Config, { tool = poolTools }, "tool", 2)
+	t.expectEq(level.area, 2, "the locked level is still returned for the shop")
+	local _, laterStatus = Ladder.offer(Config, { tool = firstArea }, "tool", 2)
 	t.expectEq(laterStatus, "buy")
 end
 

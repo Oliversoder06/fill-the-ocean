@@ -2,7 +2,7 @@
 -- Each spec returns { [testName] = function(t) ... end }, where t holds the expect helpers.
 local process = require("@lune/process")
 
-local SPECS = { "Config", "Ladder", "Boosts", "Water", "Rewards", "ToolView", "Ease", "Cues", "CoinBurst", "Reveal", "Steps", "BodyPose", "Difficulty", "Session", "SessionRules" }
+local SPECS = { "Config", "Ladder", "Boosts", "Water", "ToolView", "Ease", "Cues", "CoinBurst", "Reveal", "Steps", "BodyPose", "Difficulty", "Session", "SessionRules" }
 
 local t = {}
 

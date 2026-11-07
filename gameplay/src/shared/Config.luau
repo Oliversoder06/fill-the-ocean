@@ -2,14 +2,14 @@
 -- All run numbers (draft, from docs/design/2026-11-04-fill-the-ocean-design.md). Data only:
 -- no requires, so Lune tests and Roblox load it the same way.
 -- Upgrades are free choice: six tracks, each bought level by level. A level can be bought once its
--- `stage` has started, so each stage opens a few more levels of every track.
+-- `area` is open, so each area opens a few more levels of every track.
 -- Trip time = 2 * tripDistance / walkSpeed + sweeps * actSeconds + pourSeconds (walk there and back,
 -- scoop sweeps, one quick pour). Each tool needs more sweeps (see Ladder.baseSweeps); each Pickup
 -- level takes one off, but tools add sweeps faster than Pickup removes them.
 
 export type Level = {
 	cost: number,
-	stage: number, -- the stage that unlocks it
+	area: number, -- the area that opens it
 	name: string?, -- tools only; other tracks show "<track name> <n>"
 	model: string?, -- tools: the hero model shown in hand ("Cup" for Cup and Cup Lv2)
 	capacity: number?, -- tool
@@ -26,20 +26,13 @@ export type Track = {
 	levels: { Level },
 }
 
-export type Stage = {
-	name: string,
-	minutes: number,
-	coinsPerLitre: number,
-	waterPerPlayer: number,
-}
-
-local function tool(name: string, model: string, cost: number, capacity: number, stage: number): Level
-	return { name = name, model = model, cost = cost, capacity = capacity, stage = stage }
+local function tool(name: string, model: string, cost: number, capacity: number, area: number): Level
+	return { name = name, model = model, cost = cost, capacity = capacity, area = area }
 end
 
 local Config = {}
 
-Config.tripDistance = 80 -- studs, source centre to basin pour edge, same in every stage
+Config.tripDistance = 80 -- studs, source centre to basin pour edge
 Config.pourSeconds = 0.25 -- a pour is instant; this is only how long the tip plays
 Config.start = { capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spoon", toolModel = "Spoon" }
 -- Sweeps to fill a tool: 1 for the Spoon, then one more every `toolsPerSweep` tool levels, at most `maxSweeps`.
@@ -47,8 +40,8 @@ Config.start = { capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spo
 -- Quick Scoop keeps mattering.
 Config.sweeps = { toolsPerSweep = 2, maxSweeps = 8 }
 
--- Fill milestones: crossing one starts a boost for everyone for `seconds`. Each stage plays every
--- kind once, in a shuffled order. All are bonuses, never penalties.
+-- Fill milestones (fractions of the whole ocean): crossing one starts a boost for everyone for
+-- `seconds`. Each plays once per save. All are bonuses, never penalties.
 Config.boosts = {
 	seconds = 30,
 	milestones = { 0.25, 0.5, 0.75 },
@@ -59,11 +52,17 @@ Config.boosts = {
 	},
 }
 
-Config.stages = {
-	{ name = "Pool", minutes = 7, coinsPerLitre = 10, waterPerPlayer = 972 },
-	{ name = "Lake", minutes = 13, coinsPerLitre = 50, waterPerPlayer = 131305 },
-	{ name = "Ocean", minutes = 25, coinsPerLitre = 250, waterPerPlayer = 361183125 },
-} :: { Stage }
+-- The one ocean. Pay is flat (it never rises on its own; harder areas pay more from Phase 2).
+-- Fill curve (Water.fill): percent k needs firstPercent * growth^(k-1) litres per player, so the
+-- fill rises at a steady pace while income grows. Phase 4 tunes the numbers (tools/simulate).
+-- standInOpens: until Phase 2 builds the gates, area 2 and 3 levels open at these fill fractions.
+Config.ocean = {
+	name = "The Ocean",
+	coinsPerLitre = 10,
+	firstPercent = 250,
+	growth = 1.05,
+	standInOpens = { 0.07, 0.22 },
+}
 
 -- Shop order. Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price
 -- is split between Quick Scoop and Pickup.
@@ -101,10 +100,10 @@ Config.tracks = {
 		panel = "tool",
 		about = "Each scoop picks up more, so your tool fills in fewer sweeps.",
 		levels = {
-			{ cost = 192, stage = 1 },
-			{ cost = 14062, stage = 2 },
-			{ cost = 83333, stage = 2 },
-			{ cost = 4570312, stage = 3 },
+			{ cost = 192, area = 1 },
+			{ cost = 14062, area = 2 },
+			{ cost = 83333, area = 2 },
+			{ cost = 4570312, area = 3 },
 		},
 	},
 	{
@@ -112,7 +111,7 @@ Config.tracks = {
 		name = "Hold",
 		panel = "tool",
 		about = "Hold the button to keep scooping until your tool is full.",
-		levels = { { cost = 40, stage = 1 } },
+		levels = { { cost = 40, area = 1 } },
 	},
 	{
 		id = "quick",
@@ -120,13 +119,13 @@ Config.tracks = {
 		panel = "boosts",
 		about = "Every scoop sweep is quicker.",
 		levels = {
-			{ cost = 35, stage = 1, actSeconds = 0.45 },
-			{ cost = 192, stage = 1, actSeconds = 0.4 },
-			{ cost = 818, stage = 1, actSeconds = 0.35 },
-			{ cost = 14062, stage = 2, actSeconds = 0.3 },
-			{ cost = 83333, stage = 2, actSeconds = 0.27 },
-			{ cost = 4570312, stage = 3, actSeconds = 0.23 },
-			{ cost = 137.5e6, stage = 3, actSeconds = 0.2 },
+			{ cost = 35, area = 1, actSeconds = 0.45 },
+			{ cost = 192, area = 1, actSeconds = 0.4 },
+			{ cost = 818, area = 1, actSeconds = 0.35 },
+			{ cost = 14062, area = 2, actSeconds = 0.3 },
+			{ cost = 83333, area = 2, actSeconds = 0.27 },
+			{ cost = 4570312, area = 3, actSeconds = 0.23 },
+			{ cost = 137.5e6, area = 3, actSeconds = 0.2 },
 		},
 	},
 	{
@@ -135,13 +134,13 @@ Config.tracks = {
 		panel = "boosts",
 		about = "Walk faster between the water and the basin.",
 		levels = {
-			{ cost = 69, stage = 1, walkSpeed = 20 },
-			{ cost = 385, stage = 1, walkSpeed = 23.5 },
-			{ cost = 1637, stage = 1, walkSpeed = 25 },
-			{ cost = 28125, stage = 2, walkSpeed = 27.6 },
-			{ cost = 166667, stage = 2, walkSpeed = 30.8 },
-			{ cost = 9140625, stage = 3, walkSpeed = 31.4 },
-			{ cost = 275e6, stage = 3, walkSpeed = 32 },
+			{ cost = 69, area = 1, walkSpeed = 20 },
+			{ cost = 385, area = 1, walkSpeed = 23.5 },
+			{ cost = 1637, area = 1, walkSpeed = 25 },
+			{ cost = 28125, area = 2, walkSpeed = 27.6 },
+			{ cost = 166667, area = 2, walkSpeed = 30.8 },
+			{ cost = 9140625, area = 3, walkSpeed = 31.4 },
+			{ cost = 275e6, area = 3, walkSpeed = 32 },
 		},
 	},
 	{
@@ -150,10 +149,10 @@ Config.tracks = {
 		panel = "boosts",
 		about = "Earn more coins for every litre you pour.",
 		levels = {
-			{ cost = 300, stage = 1, coinBonus = 1.05 },
-			{ cost = 30000, stage = 2, coinBonus = 1.1 },
-			{ cost = 200000, stage = 2, coinBonus = 1.15 },
-			{ cost = 100e6, stage = 3, coinBonus = 1.2 },
+			{ cost = 300, area = 1, coinBonus = 1.05 },
+			{ cost = 30000, area = 2, coinBonus = 1.1 },
+			{ cost = 200000, area = 2, coinBonus = 1.15 },
+			{ cost = 100e6, area = 3, coinBonus = 1.2 },
 		},
 	},
 } :: { Track }
@@ -165,19 +164,6 @@ function Config.track(id: string): Track?
 		end
 	end
 	return nil
-end
-
--- Share of the run each stage counts for: its minutes over the run's minutes.
-function Config.stageWeights(): { number }
-	local total = 0
-	for _, stage in Config.stages do
-		total += stage.minutes
-	end
-	local weights = {}
-	for i, stage in Config.stages do
-		weights[i] = stage.minutes / total
-	end
-	return weights
 end
 
 return Config

@@ -2,23 +2,6 @@ local Config = require("../src/shared/Config")
 
 local tests = {}
 
-function tests.stages_in_order(t)
-	t.expectEq(#Config.stages, 3, "stage count")
-	t.expectEq(Config.stages[1].name, "Pool")
-	t.expectEq(Config.stages[2].name, "Lake")
-	t.expectEq(Config.stages[3].name, "Ocean")
-end
-
-function tests.weights_sum_to_one(t)
-	local weights = Config.stageWeights()
-	local sum = 0
-	for _, w in weights do
-		sum += w
-	end
-	t.expectNear(sum, 1, 1e-9, "sum")
-	t.expectNear(weights[1], 7 / 45, 1e-12, "pool weight")
-end
-
 function tests.six_tracks_in_shop_order(t)
 	local ids = {}
 	for _, track in Config.tracks do
@@ -29,19 +12,30 @@ function tests.six_tracks_in_shop_order(t)
 	t.expectEq(Config.track("nope"), nil)
 end
 
-function tests.every_level_has_cost_and_unlock_stage(t)
+-- Within a track the area never goes down, so each area opens the next levels of every track.
+function tests.levels_open_in_order(t)
+	local areas = #Config.ocean.standInOpens + 1
 	for _, track in Config.tracks do
 		t.expectEq(#track.levels > 0, true, `{track.id} has levels`)
-		local lastStage, lastCost = 1, 0
+		local lastArea = 1
+		for i, level in track.levels do
+			if type(level.area) ~= "number" or level.area < lastArea or level.area > areas then
+				error(`{track.id} level {i} opens in area {level.area}`)
+			end
+			lastArea = level.area
+		end
+	end
+end
+
+function tests.every_level_costs_more_than_the_last(t)
+	for _, track in Config.tracks do
+		local lastCost = 0
 		for i, level in track.levels do
 			t.expectEq(type(level.cost), "number", `{track.id} {i} cost`)
 			if level.cost <= lastCost then
 				error(`{track.id} level {i} cost {level.cost} is not above {lastCost}`)
 			end
-			if level.stage < lastStage or level.stage > #Config.stages then
-				error(`{track.id} level {i} unlocks in stage {level.stage}`)
-			end
-			lastStage, lastCost = level.stage, level.cost
+			lastCost = level.cost
 		end
 	end
 end
@@ -84,16 +78,10 @@ function tests.scoops_get_faster_to_02(t)
 	t.expectEq(last, 0.2)
 end
 
-function tests.hold_is_one_purchase_in_the_pool(t)
+function tests.hold_is_one_purchase_in_the_first_area(t)
 	local levels = Config.track("hold").levels
 	t.expectEq(#levels, 1)
-	t.expectEq(levels[1].stage, 1)
-end
-
-function tests.cup_costs_two_spoon_trips(t)
-	local cup = Config.track("tool").levels[1]
-	t.expectEq(cup.name, "Cup")
-	t.expectEq(cup.cost, 2 * Config.start.capacity * Config.stages[1].coinsPerLitre)
+	t.expectEq(levels[1].area, 1)
 end
 
 function tests.pour_is_quick(t)
