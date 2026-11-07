@@ -37,6 +37,17 @@
         "$path": "src/server"
       }
     },
+    "ServerStorage": {
+      "GameplayShared": {
+        "$className": "Folder",
+        "Config": {
+          "$path": "../gameplay/src/shared/Config.luau"
+        },
+        "Water": {
+          "$path": "../gameplay/src/shared/Water.luau"
+        }
+      }
+    },
     "StarterPlayer": {
       "StarterPlayerScripts": {
         "Client": {
