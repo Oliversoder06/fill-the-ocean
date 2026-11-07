@@ -1,4 +1,4 @@
--- Run tickets (server only). The lobby writes {difficulty, members} under the reserved server id it
+-- Run tickets (server only). The lobby writes {mapId, key, members} under the reserved server id it
 -- generated, then teleports the party with that id. The gameplay server reads it with
 -- game.PrivateServerId. Teleport data from clients is never trusted for this.
 local MemoryStoreService = game:GetService("MemoryStoreService")
@@ -7,7 +7,8 @@ local Retry = require(script.Parent.Retry)
 local MAP_NAME = "RunTickets_v1"
 local TTL_SECONDS = 900
 
-export type Ticket = { difficulty: number, members: { number } }
+-- key is the run's save key (common/RunSave.key).
+export type Ticket = { mapId: string, key: string, members: { number } }
 
 local RunTicket = {}
 
@@ -37,7 +38,12 @@ function RunTicket.read(serverId: string): (Ticket?, string?)
 	if not ok then
 		return nil, tostring(result)
 	end
-	if type(result) ~= "table" or type(result.difficulty) ~= "number" or type(result.members) ~= "table" then
+	if
+		type(result) ~= "table"
+		or type(result.mapId) ~= "string"
+		or type(result.key) ~= "string"
+		or type(result.members) ~= "table"
+	then
 		return nil, nil
 	end
 	return result :: Ticket, nil
