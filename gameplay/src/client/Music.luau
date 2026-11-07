@@ -45,7 +45,7 @@ function Music.start()
 			if type(fill) == "number" then fill else 0
 		)
 
-		local ducked = os.clock() < duckUntil
+		local ducked = phase == "ending" or os.clock() < duckUntil -- the "ocean is full" card, then purchases
 		local k = 1 - math.exp(-dt * 3 / cue.fadeSeconds) -- about 95% of the way in fadeSeconds
 		duckLevel += ((if ducked then cue.duck else 1) - duckLevel) * math.min(1, k * 4) -- ducking is quicker than a crossfade
 		for key, sound in tracks do

@@ -136,6 +136,7 @@ function Hud.start()
 		set(crosshair, "Visible", not windowOpen)
 	end)
 
+	local finalTime: number? = nil -- time played as last shown while playing
 	RunService.RenderStepped:Connect(function()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
 
@@ -157,8 +158,12 @@ function Hud.start()
 		local startedAt = ReplicatedStorage:GetAttribute("RunStartedAt")
 		set(progress, "Visible", type(startedAt) == "number")
 		if type(startedAt) == "number" then
-			local played = ReplicatedStorage:GetAttribute("PlaySeconds")
-			set(timeText, "Text", Hud.clock((if type(played) == "number" then played else 0) + workspace:GetServerTimeNow() - startedAt))
+			-- The server stops counting at the ending, so the clock freezes on the last time played.
+			if phase == "playing" or not finalTime then
+				local played = ReplicatedStorage:GetAttribute("PlaySeconds")
+				finalTime = (if type(played) == "number" then played else 0) + workspace:GetServerTimeNow() - startedAt
+			end
+			set(timeText, "Text", Hud.clock(finalTime))
 			local mapName = ReplicatedStorage:GetAttribute("MapName")
 			set(placeText, "Text", if type(mapName) == "string" then mapName else "")
 			-- A running fill-milestone boost shows its countdown in the boost tag.

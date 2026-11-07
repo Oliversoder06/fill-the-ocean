@@ -73,7 +73,6 @@ local function levelsOf(): { [string]: number }
 	return levels
 end
 
--- The next level's display name: tools have their own, the rest are "<track> <n>".
 -- Areas open so far, from the ocean's fill: until Phase 2 builds the gates, areas 2 and 3 open at
 -- their stand-in fill points (the server's openAreas in server/Run does the same).
 local function openAreas(): number
@@ -92,6 +91,7 @@ local function opensText(level): string
 	return `Opens at {math.round(Config.ocean.standInOpens[level.area - 1] * 100)}% full`
 end
 
+-- The next level's display name: tools have their own, the rest are "<track> <n>".
 local function levelName(track, n: number, level): string
 	if track.id == "tool" then
 		return level.name
