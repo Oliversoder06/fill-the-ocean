@@ -345,7 +345,7 @@ local function launch(pad: Pad, party: { Player }, title: string, prepare: () ->
 	pad.title.Text = title
 	pad.status.Text = "Starting..."
 	for _, p in party do
-		sendState(p, { kind = "launching" })
+		sendState(p, { kind = "launching", title = title })
 	end
 	local ticket, problem = prepare()
 	if not ticket then

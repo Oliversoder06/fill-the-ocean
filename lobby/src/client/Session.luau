@@ -150,6 +150,7 @@ function Session.start()
 	local unlocked: { [string]: boolean } = {}
 	local cards: { Instance } = {}
 	local confirming: string? = nil -- the card whose "Leave run?" question is open
+	local savedCount: number? = nil -- saved runs on the last menu; 0 means the tile does nothing
 
 	-- Shows one window (or none) and hides the others.
 	local function open(target: GuiObject?)
@@ -164,9 +165,11 @@ function Session.start()
 			openMaps += 1
 		end
 		createSub.Text = `{openMaps} of {plural(#Maps.list, "map")} open`
+		savedCount = state.saved
+		savedTile.ImageColor3 = if (state.saved or 0) > 0 then C.speedTag else C.locked
 		savedSub.Text = if state.saved == nil
 			then "Couldn't load your runs"
-			elseif state.saved == 0 then "No saved runs yet"
+			elseif state.saved == 0 then "None yet"
 			else plural(state.saved, "saved run")
 	end
 
@@ -201,7 +204,9 @@ function Session.start()
 		local fill = math.clamp(run.fill, 0, 1)
 		find(card, "FillBar.Fill").Size = UDim2.fromScale(fill, 1)
 		find(card, "FillBar.Label").Text = `{math.floor(fill * 100)}% full`
-		find(card, "Reason").Text = run.reason
+		local reason = find(card, "Reason")
+		reason.Text = run.reason
+		reason.Visible = run.reason ~= ""
 		local load = find(card, "LoadButton")
 		load.ImageColor3 = if run.canLoad then C.buyCoral else C.locked
 		local leave = find(card, "LeaveButton")
@@ -267,7 +272,9 @@ function Session.start()
 		action:FireServer("view", "create")
 	end)
 	savedTile.Activated:Connect(function()
-		action:FireServer("view", "saved")
+		if savedCount ~= 0 then
+			action:FireServer("view", "saved")
+		end
 	end)
 	for _, back in { createBack, savedBack } do
 		back.Activated:Connect(function()
@@ -337,6 +344,7 @@ function Session.start()
 		elseif kind == "launching" then
 			open(nil)
 			barLine.Text = "STARTING..."
+			barDetail.Text = state.title or ""
 			startButton.Visible = false
 			show(bar, true)
 		else
