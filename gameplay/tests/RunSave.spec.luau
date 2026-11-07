@@ -17,6 +17,30 @@ function tests.key_is_order_independent(t)
 	t.expectEq(RunSave.key("ocean2", { 10, 20 }) == RunSave.key("ocean1", { 10, 20 }), false, "map is part of the key")
 end
 
+function tests.key_fits_datastore_limit(t)
+	local function ids(first: number, n: number): { number }
+		local list = {}
+		for i = 1, n do
+			table.insert(list, first + i * 7919)
+		end
+		return list
+	end
+	local four = ids(1000000000, 4)
+	t.expectEq(RunSave.key("map1", four), `map1_{table.concat(four, "_")}`, "a team that fits keeps the readable key")
+	local ten = ids(1000000000, 10)
+	local key = RunSave.key("map1", ten)
+	t.expectEq(#key <= 50, true, `key of {#key} chars is over the DataStore limit`)
+	t.expectEq(string.sub(key, 1, 5), "map1_", "map stays in the key")
+	local reversed = {}
+	for i = #ten, 1, -1 do
+		table.insert(reversed, ten[i])
+	end
+	t.expectEq(RunSave.key("map1", reversed), key, "still order-independent")
+	t.expectEq(RunSave.key("map1", ids(1000000001, 10)) == key, false, "a different team gets a different key")
+	t.expectEq(RunSave.key("map2", ten) == key, false, "a different map gets a different key")
+	t.expectEq(#RunSave.key("map1", ids(9000000000, 5)) <= 50, true, "five ten-digit ids fit")
+end
+
 function tests.same_team_needs_exactly_the_members(t)
 	local save = RunSave.new("ocean1", { 1, 2, 3 })
 	t.expectEq(RunSave.sameTeam(save, { 3, 1, 2 }), true, "same set in any order")

@@ -73,9 +73,30 @@ function RunSave.new(mapId: string, members: { number }): Save
 	}
 end
 
--- The same team on the same map always gets the same key, whatever order they joined in.
+-- DataStore keys are at most 50 characters.
+RunSave.KEY_LIMIT = 50
+
+-- 32-bit FNV-1a from the given start value. h * 16777619 is split into h * 2^24 + h * 403 so the
+-- product stays exact in a double.
+local function fnv1a(text: string, start: number): number
+	local h = start
+	for i = 1, #text do
+		h = bit32.bxor(h, string.byte(text, i))
+		h = (bit32.lshift(h, 24) + h * 403) % 4294967296
+	end
+	return h
+end
+
+-- The same team on the same map always gets the same key, whatever order they joined in. A team
+-- too big for "<mapId>_<ids>" to fit the limit (5+ ten-digit ids) gets "<mapId>_h<16 hex digits>"
+-- instead; "h" keeps it apart from id keys. A hash can collide, so a loader must still check sameTeam.
 function RunSave.key(mapId: string, members: { number }): string
-	return `{mapId}_{table.concat(team(members), "_")}`
+	local ids = table.concat(team(members), "_")
+	local key = `{mapId}_{ids}`
+	if #key <= RunSave.KEY_LIMIT then
+		return key
+	end
+	return `{mapId}_h{string.format("%08x%08x", fnv1a(ids, 2166136261), fnv1a(ids, 3735928559))}`
 end
 
 -- True only for exactly the save's members: no one missing, no one extra, no one twice.
