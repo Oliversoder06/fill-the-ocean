@@ -220,10 +220,10 @@ local function saveRewards(results)
 	for _, r in results do
 		pending += 1
 		task.spawn(function()
-			local saved, err = PlayerData.addRun(r.userId, r.reward, run.difficulty)
+			-- "map1" until Task 4 gives the run its mapId.
+			local saved, err = PlayerData.clearMap(r.userId, "map1", r.reward)
 			r.saved = saved ~= nil
 			if saved then
-				r.unlocked = saved.unlocked
 				r.total = saved.raindrops
 			else
 				warn(`[Run] reward not saved for {r.name}: {err}`)

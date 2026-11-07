@@ -1,5 +1,5 @@
 -- Loads each player's saved progress when they join and shows it as attributes:
--- Raindrops, Unlocked (highest difficulty), Runs, and DataReady / DataError.
+-- Raindrops, Runs (how many saved runs), and DataReady / DataError (Unlocked is 1 until Task 4).
 -- The lobby only reads; the gameplay place writes at the end of a run.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,8 +15,7 @@ local function load(player: Player)
 	end
 	if data then
 		player:SetAttribute("Raindrops", data.raindrops)
-		player:SetAttribute("Unlocked", data.unlocked)
-		player:SetAttribute("Runs", data.runs)
+		player:SetAttribute("Runs", #data.runs)
 		player:SetAttribute("DataReady", true)
 	else
 		-- Can't reach saves: allow Difficulty 1 only, and say so in the HUD.
