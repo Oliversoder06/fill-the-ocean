@@ -21,7 +21,6 @@ local Water = require(ReplicatedStorage.Shared.Water)
 local Rewards = require(ReplicatedStorage.Shared.Rewards)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Session = require(ReplicatedStorage.Shared.Session)
-local Difficulty = require(ReplicatedStorage.Common.Difficulty)
 local Places = require(ReplicatedStorage.Common.Places)
 local PlayerData = require(ReplicatedStorage.Common.PlayerData)
 local Retry = require(ReplicatedStorage.Common.Retry)
@@ -254,7 +253,6 @@ local function endRun()
 		table.insert(entries, { id = player, share = share, pouredEveryStage = everyStage })
 	end
 	local rewards = Rewards.split(entries)
-	local multiplier = Difficulty.rewardMultiplier(run.difficulty)
 	table.sort(entries, function(a, b)
 		return a.share > b.share
 	end)
@@ -264,7 +262,7 @@ local function endRun()
 			name = e.id.DisplayName,
 			userId = e.id.UserId,
 			share = e.share,
-			reward = math.floor(rewards[e.id] * multiplier + 0.5),
+			reward = math.floor(rewards[e.id] + 0.5),
 			saved = false,
 		})
 	end
@@ -326,7 +324,7 @@ local function startRun()
 	setGlobal("RunStartedAt", workspace:GetServerTimeNow()) -- the HUD stopwatch counts from here
 	local scale = workspace:GetAttribute("WaterScale") -- Studio test shortcut
 	local studioScale = if RunService:IsStudio() and type(scale) == "number" and scale > 0 then scale else 1
-	run.scale = studioScale * Difficulty.waterMultiplier(run.difficulty)
+	run.scale = studioScale
 	startStage(1)
 end
 
@@ -576,13 +574,16 @@ local function loadSession()
 			end
 		until ticket or os.clock() > deadline
 	end
+	-- Difficulty is removed (the map replaces it, Task 4): every run counts as level 1 until then.
 	run.session = Session.decide({
 		isStudio = isStudio,
 		privateServerId = game.PrivateServerId,
 		privateServerOwnerId = game.PrivateServerOwnerId,
 		ticket = ticket,
 		studioDifficulty = workspace:GetAttribute("StudioDifficulty"),
-	}, Difficulty.clamp)
+	}, function()
+		return 1
+	end)
 	run.difficulty = run.session.difficulty
 	if run.session.mode == "closed" then
 		warn(`[Run] closed server ({if reserved then `no run ticket: {err or "missing"}` else "not a lobby run"}); sending everyone to the lobby`)

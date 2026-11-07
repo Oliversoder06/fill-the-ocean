@@ -1,0 +1,120 @@
+-- Team runs (server only). Saves live in a DataStore under RunSave.key and are written only by the
+-- gameplay server, with UpdateAsync. A run is open in one server at a time: the server that plays it
+-- holds a lock in the MemoryStore map RunLocks_v1 (90 s TTL) and calls lock again every
+-- RENEW_SECONDS to renew it; a crashed server's lock simply expires. Every failure is retried, then
+-- reported to the caller and the Output.
+local DataStoreService = game:GetService("DataStoreService")
+local MemoryStoreService = game:GetService("MemoryStoreService")
+
+local Retry = require(script.Parent.Retry)
+local RunSave = require(script.Parent.RunSave)
+
+local STORE_NAME = "TeamRuns_v1"
+local LOCK_MAP = "RunLocks_v1"
+local RELEASE_SECONDS = 1 -- unlock shortens the holder's lock to this instead of racing a remove
+
+local RunStore = {}
+
+RunStore.LOCK_SECONDS = 90
+RunStore.RENEW_SECONDS = 30
+
+local store: DataStore? = nil
+local locks: MemoryStoreHashMap? = nil
+
+local function getStore(): DataStore
+	if not store then
+		store = DataStoreService:GetDataStore(STORE_NAME)
+	end
+	return store :: DataStore
+end
+
+local function getLocks(): MemoryStoreHashMap
+	if not locks then
+		locks = MemoryStoreService:GetHashMap(LOCK_MAP)
+	end
+	return locks :: MemoryStoreHashMap
+end
+
+-- Returns the save, nil if there is none yet, or nil plus an error. A stored value that can't be
+-- read as a save is an error, not "none": treating it as empty would let a fresh run overwrite it.
+function RunStore.load(key: string): (RunSave.Save?, string?)
+	local ok, result = Retry.run(`load run {key}`, function()
+		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
+		return getStore():GetAsync(key)
+	end)
+	if not ok then
+		return nil, tostring(result)
+	end
+	if result == nil then
+		return nil, nil
+	end
+	local save = RunSave.sanitize(result)
+	if not save then
+		return nil, `run {key} is stored but unreadable`
+	end
+	return save, nil
+end
+
+-- Writes the save unless the stored one is newer (a higher updatedAt), so a late write from an old
+-- session can't roll the run back. The members are tagged on the key (privacy deletion requests).
+-- Returns ok plus an error.
+function RunStore.save(key: string, save: RunSave.Save): (boolean, string?)
+	local storedAt: number? = nil
+	local ok, result = Retry.run(`save run {key}`, function()
+		storedAt = nil
+		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
+		return getStore():UpdateAsync(key, function(old)
+			if type(old) == "table" and type(old.updatedAt) == "number" and old.updatedAt > save.updatedAt then
+				storedAt = old.updatedAt
+				return nil -- cancels the write
+			end
+			return save, save.members
+		end)
+	end)
+	if not ok then
+		return false, tostring(result)
+	end
+	if storedAt then
+		return false, `run {key} is stored newer ({storedAt}) than this save ({save.updatedAt}); not written`
+	end
+	return true, nil
+end
+
+-- Takes or renews the lock for this server. Fails if another server holds it, or MemoryStore failed.
+function RunStore.lock(key: string, serverId: string): (boolean, string?)
+	local holder: string? = nil
+	local ok, result = Retry.run(`lock run {key}`, function()
+		holder = nil
+		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
+		return getLocks():UpdateAsync(key, function(current)
+			if current ~= nil and current ~= serverId then
+				holder = tostring(current)
+				return nil -- cancels the write
+			end
+			return serverId
+		end, RunStore.LOCK_SECONDS)
+	end)
+	if not ok then
+		return false, tostring(result)
+	end
+	if holder then
+		return false, `run {key} is open in another server ({holder})`
+	end
+	return true, nil
+end
+
+-- Releases this server's lock (a lock another server holds is left alone). Returns ok plus an error.
+function RunStore.unlock(key: string, serverId: string): (boolean, string?)
+	local ok, result = Retry.run(`unlock run {key}`, function()
+		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
+		return getLocks():UpdateAsync(key, function(current)
+			if current ~= serverId then
+				return nil -- not ours (or already gone): leave it
+			end
+			return serverId
+		end, RELEASE_SECONDS)
+	end)
+	return ok, if ok then nil else tostring(result)
+end
+
+return RunStore

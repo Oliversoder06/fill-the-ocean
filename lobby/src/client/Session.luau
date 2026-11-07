@@ -6,7 +6,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local Difficulty = require(ReplicatedStorage.Common.Difficulty)
 local SessionRules = require(ReplicatedStorage.Common.SessionRules)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 
@@ -103,7 +102,7 @@ function Session.start()
 		count.Text = if n == 1 then "Solo" else `{n} players`
 		minus.ImageColor3 = if n > 1 then C.shallowWater else C.locked
 		plus.ImageColor3 = if n < SessionRules.MAX_PLAYERS then C.shallowWater else C.locked
-		for level = 1, Difficulty.MAX do
+		for level = 1, SessionRules.MAX_DIFFICULTY do
 			local tile = find(levels, `Level{level}`)
 			local open = level <= unlocked
 			tile.ImageColor3 = if open then C.shallowWater else C.locked
@@ -111,10 +110,8 @@ function Session.start()
 			find(tile, "Lock").Visible = not open
 			find(tile, "Ring").Visible = level == settings.difficulty
 		end
-		local d = settings.difficulty
-		info.Text = if d == 1
-			then "Normal water  -  x1 Raindrops"
-			else `{math.floor(Difficulty.waterMultiplier(d) * 100 + 0.5)}% water  -  x{Difficulty.rewardMultiplier(d)} Raindrops`
+		-- Difficulty no longer scales water or Raindrops (the map replaces it, Task 4).
+		info.Text = "Normal water  -  x1 Raindrops"
 		toggle.ImageColor3 = if settings.friendsOnly then C.speedTag else C.locked
 		find(toggle, "Label").Text = if settings.friendsOnly then "ON" else "OFF"
 	end
@@ -130,7 +127,7 @@ function Session.start()
 		settings.maxPlayers = math.min(SessionRules.MAX_PLAYERS, settings.maxPlayers + 1)
 		refresh()
 	end)
-	for level = 1, Difficulty.MAX do
+	for level = 1, SessionRules.MAX_DIFFICULTY do
 		local tile = find(levels, `Level{level}`)
 		juice(tile)
 		tile.Activated:Connect(function()

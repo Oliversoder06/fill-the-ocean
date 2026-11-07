@@ -12,7 +12,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 
-local Difficulty = require(ReplicatedStorage.Common.Difficulty)
 local Places = require(ReplicatedStorage.Common.Places)
 local Retry = require(ReplicatedStorage.Common.Retry)
 local RunTicket = require(ReplicatedStorage.Common.RunTicket)
@@ -289,7 +288,7 @@ local function update(pad: Pad)
 	-- Tell each member's client what to show.
 	for _, p in pad.members do
 		if p == pad.host and not settings then
-			sendState(p, { kind = "configure", pad = pad.name, unlocked = math.min(Profiles.unlocked(p), Difficulty.MAX) })
+			sendState(p, { kind = "configure", pad = pad.name, unlocked = math.min(Profiles.unlocked(p), SessionRules.MAX_DIFFICULTY) })
 		elseif settings then
 			sendState(p, {
 				kind = if p == pad.host then "hosting" else "member",

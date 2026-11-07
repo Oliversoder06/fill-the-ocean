@@ -1,9 +1,9 @@
--- Saved player progress (server only). Written once per finished run with an atomic UpdateAsync,
--- read by the lobby. No session lock: nothing holds the data between calls, and nothing ever saves
--- after a failed load. Every failure is retried, then reported to the caller and the Output.
+-- Saved player progress (server only): Raindrops, saved-run keys and cleared maps (Progress).
+-- Every write is one atomic UpdateAsync. No session lock: nothing holds the data between calls,
+-- and nothing ever saves after a failed load. Every failure is retried, then reported to the caller
+-- and the Output.
 local DataStoreService = game:GetService("DataStoreService")
 
-local Difficulty = require(script.Parent.Difficulty)
 local Progress = require(script.Parent.Progress)
 local Retry = require(script.Parent.Retry)
 
@@ -37,13 +37,13 @@ function PlayerData.load(userId: number): (Progress.Data?, string?)
 	return Progress.sanitize(result), nil
 end
 
--- Adds a finished run. Returns the new progress, or nil and an error.
-function PlayerData.addRun(userId: number, raindrops: number, difficulty: number): (Progress.Data?, string?)
+-- Applies one Progress change to the stored progress. Returns the new progress, or nil and an error.
+local function update(userId: number, label: string, change: (any) -> Progress.Data): (Progress.Data?, string?)
 	local saved: Progress.Data? = nil
-	local ok, result = Retry.run(`save run {userId}`, function()
+	local ok, result = Retry.run(`{label} {userId}`, function()
 		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
 		return getStore():UpdateAsync(key(userId), function(old)
-			saved = Progress.applyRun(old, raindrops, difficulty, Difficulty.MAX)
+			saved = change(old)
 			return saved
 		end)
 	end)
@@ -51,6 +51,27 @@ function PlayerData.addRun(userId: number, raindrops: number, difficulty: number
 		return nil, tostring(result)
 	end
 	return saved, nil
+end
+
+-- Puts a run's key first in the player's saved runs (Progress.addRun).
+function PlayerData.addRun(userId: number, runKey: string): (Progress.Data?, string?)
+	return update(userId, "add run", function(old)
+		return Progress.addRun(old, runKey)
+	end)
+end
+
+-- Takes a run off the player's saved runs ("Leave run"). The team's save itself is untouched.
+function PlayerData.removeRun(userId: number, runKey: string): (Progress.Data?, string?)
+	return update(userId, "remove run", function(old)
+		return Progress.removeRun(old, runKey)
+	end)
+end
+
+-- The player's team filled mapId's ocean: pays the Raindrops and marks the map cleared.
+function PlayerData.clearMap(userId: number, mapId: string, raindrops: number): (Progress.Data?, string?)
+	return update(userId, "clear map", function(old)
+		return Progress.clearMap(old, mapId, raindrops)
+	end)
 end
 
 return PlayerData
