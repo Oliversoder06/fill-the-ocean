@@ -20,6 +20,8 @@ local C = Theme.colors
 local POP = TweenInfo.new(Theme.motion.openSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local SHUT = TweenInfo.new(Theme.motion.closeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 local NUDGE = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local WOBBLE = TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 3, true)
+local WOBBLE_DEGREES = 6
 
 local function find(root: Instance, path: string): any
 	local node = root
@@ -53,6 +55,22 @@ local function juice(button: GuiButton)
 	button.MouseButton1Up:Connect(function()
 		to(Theme.motion.hoverScale)
 	end)
+end
+
+-- A short wobble on a button that can't do anything right now (the card says why).
+local wobbling: { [GuiObject]: boolean } = {}
+local function deny(button: GuiObject)
+	if wobbling[button] then
+		return
+	end
+	wobbling[button] = true
+	local rest = button.Rotation
+	local tween = TweenService:Create(button, WOBBLE, { Rotation = rest + WOBBLE_DEGREES })
+	tween.Completed:Once(function()
+		button.Rotation = rest
+		wobbling[button] = nil
+	end)
+	tween:Play()
 end
 
 local function show(frame: GuiObject, visible: boolean)
@@ -119,6 +137,7 @@ function Session.start()
 	local mapInfo = find(mapCard, "Info")
 	local mapLock = find(mapCard, "Lock")
 	local mapLockText = find(mapCard, "LockText")
+	local mapArt = find(mapCard, "Art")
 	local prev = find(create, "Body.Map.Prev")
 	local nextMap = find(create, "Body.Map.Next")
 	local page = find(create, "Body.Map.Page")
@@ -178,6 +197,8 @@ function Session.start()
 		local isOpen = unlocked[map.id] == true
 		mapTitle.Text = map.name
 		mapInfo.Text = `x{map.waterMultiplier} water  -  +{map.rewardRaindrops} Raindrops`
+		mapCard.ImageColor3 = if isOpen then C.shallowWater else C.locked
+		mapArt.Visible = isOpen
 		mapLock.Visible = not isOpen
 		mapLockText.Visible = not isOpen
 		if not isOpen then
@@ -223,6 +244,8 @@ function Session.start()
 		load.Activated:Connect(function()
 			if run.canLoad then
 				action:FireServer("load", run.key)
+			else
+				deny(load)
 			end
 		end)
 		leave.Activated:Connect(function()
