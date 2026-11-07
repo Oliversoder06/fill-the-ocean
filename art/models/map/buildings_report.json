@@ -1,0 +1,242 @@
+{
+ "ToolShack": {
+  "modules": {
+   "Walls": {
+    "passed": true,
+    "fails": [],
+    "tris": 2112,
+    "size": [
+     26.41,
+     19.21,
+     20.61
+    ]
+   },
+   "Detail": {
+    "passed": true,
+    "fails": [],
+    "tris": 5616,
+    "size": [
+     27.01,
+     24.41,
+     23.41
+    ]
+   },
+   "Interior": {
+    "passed": true,
+    "fails": [],
+    "tris": 4668,
+    "size": [
+     22.52,
+     15.87,
+     9.55
+    ]
+   },
+   "Roof": {
+    "passed": true,
+    "fails": [],
+    "tris": 2252,
+    "size": [
+     27.57,
+     18.85,
+     12.26
+    ]
+   },
+   "Glass": {
+    "passed": true,
+    "fails": [],
+    "tris": 36,
+    "size": [
+     21.37,
+     11.87,
+     5.01
+    ]
+   },
+   "Sign": {
+    "passed": true,
+    "fails": [],
+    "tris": 1112,
+    "size": [
+     13.03,
+     0.26,
+     2.83
+    ]
+   }
+  },
+  "signs": [],
+  "meta": {
+   "hw": 12.0,
+   "hd": 9.0,
+   "t": 0.8,
+   "floor": 1.0,
+   "H": 12,
+   "FF": 19.0,
+   "door": [
+    0,
+    -9.0
+   ]
+  },
+  "floating": 0,
+  "floating_examples": []
+ },
+ "GadgetStore": {
+  "modules": {
+   "Walls": {
+    "passed": true,
+    "fails": [],
+    "tris": 2160,
+    "size": [
+     28.41,
+     19.21,
+     21.61
+    ]
+   },
+   "Detail": {
+    "passed": true,
+    "fails": [],
+    "tris": 8772,
+    "size": [
+     29.75,
+     24.41,
+     27.56
+    ]
+   },
+   "Interior": {
+    "passed": true,
+    "fails": [],
+    "tris": 5336,
+    "size": [
+     24.07,
+     15.86,
+     11.38
+    ]
+   },
+   "Roof": {
+    "passed": true,
+    "fails": [],
+    "tris": 2456,
+    "size": [
+     29.57,
+     18.85,
+     13.19
+    ]
+   },
+   "Glass": {
+    "passed": true,
+    "fails": [],
+    "tris": 48,
+    "size": [
+     22.97,
+     12.27,
+     6.19
+    ]
+   },
+   "Sign": {
+    "passed": true,
+    "fails": [],
+    "tris": 1616,
+    "size": [
+     14.12,
+     0.26,
+     2.22
+    ]
+   }
+  },
+  "signs": [],
+  "meta": {
+   "hw": 13.0,
+   "hd": 9.0,
+   "t": 0.8,
+   "floor": 1.0,
+   "H": 13,
+   "FF": 20.0,
+   "door": [
+    0,
+    -9.0
+   ]
+  },
+  "floating": 0,
+  "floating_examples": []
+ },
+ "FireStation": {
+  "modules": {
+   "Walls": {
+    "passed": true,
+    "fails": [],
+    "tris": 4548,
+    "size": [
+     48.65,
+     41.69,
+     32.01
+    ]
+   },
+   "Detail": {
+    "passed": true,
+    "fails": [],
+    "tris": 9200,
+    "size": [
+     49.61,
+     44.78,
+     38.29
+    ]
+   },
+   "Interior": {
+    "passed": true,
+    "fails": [],
+    "tris": 9096,
+    "size": [
+     46.12,
+     28.82,
+     17.45
+    ]
+   },
+   "Roof": {
+    "passed": true,
+    "fails": [],
+    "tris": 3380,
+    "size": [
+     46.11,
+     30.11,
+     11.52
+    ]
+   },
+   "Glass": {
+    "passed": true,
+    "fails": [],
+    "tris": 108,
+    "size": [
+     47.13,
+     31.13,
+     8.61
+    ]
+   },
+   "Sign": {
+    "passed": true,
+    "fails": [],
+    "tris": 776,
+    "size": [
+     9.04,
+     0.16,
+     0.86
+    ]
+   }
+  },
+  "signs": [],
+  "meta": {
+   "hw": 24.0,
+   "hd": 16.0,
+   "t": 1.0,
+   "floor": 0.6,
+   "H": 18,
+   "bays": [
+    -12.0,
+    4.0
+   ],
+   "door": [
+    14.6,
+    -16.0
+   ]
+  },
+  "floating": 0,
+  "floating_examples": []
+ }
+}

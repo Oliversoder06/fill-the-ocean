@@ -7,21 +7,17 @@ Design: check C:\RobloxDev\library\design\README.md before planning features.
 This file overrides the library, and the library overrides the LihFolk plugin.
 
 ## What the game is
-The evil sun has evaporated all the water on Earth, and up to 10 friends refill it, starting with a
-spoon. Core loop: scoop water at a source, carry it, and pour it in. Every litre poured earns money,
-which buys bigger tools and faster trips until the body of water is full. Filling is always manual: aim
-at the well and hold E (or click / RT / the touch button) to scoop in sweeps, then aim at the basin
-and hold to pour. Each new tool takes one more sweep to fill; Quick Hands upgrades bring it back to
-one sweep. Hook: the upgrade ladder is the joke. It runs from spoon to cup to bucket to
-bathtub to cargo ship, all the way up to scooping with the Moon, and every purchase makes the next
-trip noticeably faster. A run: about 35 minutes in a private server, pool (5 min), then lake
-(10 min), then ocean (20 min), with a cutscene of the sun draining each one. Tools and money carry
-over between stages, each stage adds new tools, and each stage pays more per litre. The water needed
-scales with player count, so a run lasts the same at any group size. Nothing carries over between
-runs except unlocked difficulties and the reward currency. Rewards: paid only at the end of the run,
-from a pot of 100 per player. Half is split evenly, and the other half is split by share of the
-water poured. Twist: when the ocean finally fills, the sun throws a tantrum and blows up the Earth.
-Beating a run unlocks the next difficulty, where the sun is angrier.
+Working title: Save the Ocean. You own the ocean; a bacon-hair drank all of it while you napped.
+Starting with a spoon, you scoop water at a source, carry it and pour it back in. Every litre poured
+earns money, which buys bigger tools, gadgets, buildings, vehicles and staff, until the ocean is full
+again (target about 20 hours solo on the first map). Automation is allowed. Runs are saved per team:
+you create a party in the lobby, play, leave, and later load the run again, but only with exactly
+the same team. Each map has a fixed difficulty; clearing map 1 unlocks map 2. Story: an intro
+cutscene (the bacon-hair drinks the ocean) and an ending cutscene (you smack him away). Outside a run:
+an account level (permanent, capped perks) and a 3-month season pass (cosmetics, Raindrops).
+Design: `docs/design/2026-11-04-fill-the-ocean-design.md`. Build plan:
+`docs/plans/2026-11-05-save-the-ocean.md`. Until that plan's Phase 1 is done, the code still runs the
+old short multi-part run; the plan lists every piece it removes.
 
 ## Studio
 - Two places, each its own Rojo project folder:
@@ -30,27 +26,27 @@ Beating a run unlocks the next difficulty, where the sun is angrier.
 - In each folder, Rojo owns code only: `src/shared` -> ReplicatedStorage.Shared, `src/server` ->
   ServerScriptService.Server, `src/client` -> StarterPlayerScripts.Client, and
   `C:\RobloxDev\shared` -> ReplicatedStorage.Kit (UI and Lib). A change in Kit changes every game.
-  Both projects also map `common/` -> ReplicatedStorage.Common (difficulty, save progress, run
+  Both projects also map `common/` -> ReplicatedStorage.Common (save progress, run
   tickets, retries, place IDs) and declare their RemoteEvents in ReplicatedStorage.Remotes.
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
-  - gameplay: `workspace.Stages` (Pool, Lake, Ocean; each with invisible `Source` over its well
-    and `PourPoint` marking the usual pour spot at the basin edge; players pour anywhere next to
-    where the water will be, see `shared/Zones.nearFlood`), `ReplicatedStorage.ToolModels`
+  - gameplay: the ocean model (invisible `Source` over the water source and `PourPoint` marking
+    the usual pour spot; players pour anywhere next to where the water will be, see
+    `shared/Zones.nearFlood`), `ReplicatedStorage.ToolModels`
     (one Model per hero tool; swap placeholders for real models under the same name),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.
   - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, sign with Title and Status labels; any
-    pad hosts a session), `StarterGui.LobbyHud` (Stats, Hint, Toast, SessionSetup window, HostBar).
-- The Lake is a terrain bowl (natural shoreline); its `Basin` part is invisible and only marks the
-  water's base. The Pool is a tiled tank. The Ocean (around x=5000) is one straight beach facing
-  a seabed that runs to the horizon; its `Water` holds 5 extra `Tile` parts (2048 studs each,
-  the part size cap) that rise with it. The old crater is backed up in `ServerStorage.OceanBackup`.
-- Studio test helpers (gameplay): workspace attributes `WaterScale` (shorter runs),
-  `StudioFillStage` (fill the current stage), `StudioDifficulty` (1-5). Teleports and saving
-  need the published game / Studio API access.
+    pad hosts a party), `StarterGui.LobbyHud`.
+- The ocean is `workspace.Ocean` at the origin: one straight beach (shore along X, sea toward -Z)
+  facing a terrain seabed (y -28) that runs to the horizon; its `Water` holds 5 extra `Tile` parts
+  (2048 studs each, the part size cap) that rise with it. Every stage of the current run plays in
+  it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
+  is kept in `ServerStorage.OldMap_Backup_2026_11_06`.
+- Studio test helper (gameplay): workspace attribute `WaterScale` (less water needed). Teleports
+  and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.
 
@@ -59,5 +55,5 @@ Run in each folder you changed (`lobby/`, `gameplay/`):
 - `selene src` is clean.
 - `rojo build -o <folder>.rbxlx` succeeds.
 - `gameplay/`: `lune run tests/run` passes (Lune 0.11.1; tests cover the pure modules in
-  `src/shared` and `common/` (Difficulty, Progress), which must not require anything or touch `game`).
+  `src/shared` and `common/`, which must not require anything or touch `game`).
 - `common/`: copy `gameplay/selene.toml` in, run `selene .`, remove it (common has no own config).

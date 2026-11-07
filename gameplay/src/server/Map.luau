@@ -1,6 +1,7 @@
 --!strict
--- Stages live in the Studio place (workspace.Stages). This module checks them and moves the water.
--- Contract, one Model per stage named after config.stages[i].name:
+-- The ocean lives in the Studio place (workspace.Ocean). This module checks it and moves the water.
+-- Every stage plays in this one ocean until the stages are removed (docs/plans/2026-11-05-save-the-ocean.md).
+-- Contract, one Model workspace.Ocean holding:
 --   Spawn     where players are moved at stage start
 --   Source    invisible zone over the well; players aim at it to scoop (client/Action)
 --   PourPoint marks the usual pour spot at the basin rim (tripDistance from Source); pouring
@@ -42,21 +43,14 @@ function Map.setFill(stage: Model, fraction: number)
 	end
 end
 
-function Map.ensure(config): Folder
-	local folder = workspace:FindFirstChild("Stages")
-	assert(folder and folder:IsA("Folder"), "workspace.Stages is missing: the stages live in the place")
-	for _, stage in config.stages do
-		local model = folder:FindFirstChild(stage.name)
-		assert(model and model:IsA("Model"), `workspace.Stages is missing stage {stage.name}`)
-		for _, partName in REQUIRED do
-			Zones.part(model, partName) -- asserts with the stage and part name
-		end
-		assert(
-			type(Zones.part(model, "Water"):GetAttribute("Depth")) == "number",
-			`Stage {stage.name}: Water needs a number attribute "Depth"`
-		)
+function Map.ensure(): Model
+	local model = workspace:FindFirstChild("Ocean")
+	assert(model and model:IsA("Model"), "workspace.Ocean is missing: the ocean lives in the place")
+	for _, partName in REQUIRED do
+		Zones.part(model, partName) -- asserts with the part name
 	end
-	return folder
+	assert(type(Zones.part(model, "Water"):GetAttribute("Depth")) == "number", `Ocean: Water needs a number attribute "Depth"`)
+	return model
 end
 
 return Map

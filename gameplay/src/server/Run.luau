@@ -43,7 +43,7 @@ local LOOK_LIMIT = 80 -- degrees up or down
 
 local Run = {}
 
-local stagesFolder: Folder
+local ocean: Model -- every stage plays in the one ocean (server/Map)
 local remotes: { [string]: RemoteEvent } = {}
 local run = {
 	phase = "waiting",
@@ -72,10 +72,8 @@ local function boosted(state)
 	return Boosts.apply(Config, state.stats, run.boost and run.boost.id)
 end
 
-local function stageModel(index: number): Model
-	local model = stagesFolder:FindFirstChild(Config.stages[index].name)
-	assert(model and model:IsA("Model"), `workspace.Stages is missing {Config.stages[index].name}`)
-	return model
+local function stageModel(_index: number): Model
+	return ocean
 end
 
 local function remote(name: string): RemoteEvent
@@ -593,8 +591,8 @@ local function loadSession()
 	end
 end
 
-function Run.start(stages: Folder)
-	stagesFolder = stages
+function Run.start(oceanModel: Model)
+	ocean = oceanModel
 	for _, name in { "Buy", "Card", "Results", "Equip", "Act", "Look", "Admin" } do
 		remotes[name] = remote(name)
 	end

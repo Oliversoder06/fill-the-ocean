@@ -1,0 +1,134 @@
+{
+ "FireTruck": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 2520,
+  "size_studs": [
+   10.01,
+   25.81,
+   11.51
+  ],
+  "signs": []
+ },
+ "Hydrant": {
+  "class": "small",
+  "passed": true,
+  "fails": [],
+  "tris": 896,
+  "size_studs": [
+   3.81,
+   3.44,
+   5.06
+  ],
+  "signs": []
+ },
+ "Mountain_A": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 272,
+  "size_studs": [
+   197.7,
+   178.03,
+   262.0
+  ],
+  "signs": []
+ },
+ "Mountain_B": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 272,
+  "size_studs": [
+   231.94,
+   239.08,
+   322.0
+  ],
+  "signs": []
+ },
+ "Mountain_C": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 272,
+  "size_studs": [
+   155.14,
+   142.57,
+   212.0
+  ],
+  "signs": []
+ },
+ "TunnelCliff": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 400,
+  "size_studs": [
+   151.52,
+   62.21,
+   118.89
+  ],
+  "signs": []
+ },
+ "Dam": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 1496,
+  "size_studs": [
+   102.01,
+   20.81,
+   23.81
+  ],
+  "signs": []
+ },
+ "Pump": {
+  "class": "small",
+  "passed": true,
+  "fails": [],
+  "tris": 1048,
+  "size_studs": [
+   14.01,
+   14.9,
+   11.01
+  ],
+  "signs": []
+ },
+ "WaterTower": {
+  "class": "medium",
+  "passed": true,
+  "fails": [],
+  "tris": 1772,
+  "size_studs": [
+   16.01,
+   16.01,
+   49.55
+  ],
+  "signs": []
+ },
+ "Fence": {
+  "class": "small",
+  "passed": true,
+  "fails": [],
+  "tris": 236,
+  "size_studs": [
+   10.95,
+   1.13,
+   5.18
+  ],
+  "signs": []
+ },
+ "PlotSign": {
+  "class": "small",
+  "passed": true,
+  "fails": [],
+  "tris": 324,
+  "size_studs": [
+   6.81,
+   1.06,
+   6.61
+  ],
+  "signs": []
+ }
+}

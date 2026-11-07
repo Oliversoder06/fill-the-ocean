@@ -74,12 +74,10 @@ function Hud.set(obj: Instance, prop: string, value: any)
 	end
 end
 
--- The current stage's model in workspace.Stages, or nil between stages. Non-yielding.
+-- The current stage's model (every stage plays in workspace.Ocean), or nil between stages. Non-yielding.
 function Hud.currentStage(): Model?
-	local stages = workspace:FindFirstChild("Stages")
 	local index = ReplicatedStorage:GetAttribute("Stage")
-	local config = type(index) == "number" and Config.stages[index]
-	local model = stages and config and stages:FindFirstChild(config.name)
+	local model = type(index) == "number" and Config.stages[index] and workspace:FindFirstChild("Ocean")
 	return if model and model:IsA("Model") then model else nil
 end
 -- Money still flying in as coins (client/Payout): the wallet shows Money minus this, so it counts

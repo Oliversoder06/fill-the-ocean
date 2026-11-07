@@ -202,14 +202,6 @@ Final size: **256 x 160**.
 > dried and curled, plus two fat shiny water droplets in shallow blue #3FA9E0 beside it, thick navy
 > outlines.
 
-### C4. Angry sun (peeks over the frame)
-Final size: **512 x 512**.
-
-> The villain: a round cartoon sun with a furious, pouting face, sunny orange #FFB23F with a hot
-> coral #FF5A4E outer glow, eleven chunky triangular rays in coral red #FF5A4E around it, angry
-> slanted thick eyebrows, narrowed eyes, puffed cheeks, and a tight frowning mouth like a toddler
-> about to throw a tantrum. Thick navy outline. Goofy, not scary.
-
 ---
 
 ## D. Upgrade icons

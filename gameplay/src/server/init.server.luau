@@ -7,4 +7,4 @@ local Map = require(script.Map)
 local Run = require(script.Run)
 
 HeldTools.start(Config)
-Run.start(Map.ensure(Config))
+Run.start(Map.ensure())
