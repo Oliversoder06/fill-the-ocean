@@ -192,9 +192,16 @@ function Shop.start()
 		release(true)
 	end)
 
-	pressable(buyButton, buyButton.Press)
-	pressable(closeButton, closeButton.Press)
-	closeButton.Activated:Connect(function()
+	-- Buy and Close each hold a HitPad (a transparent button built in Studio) that keeps the touch
+	-- target at least 44 px when the shop is scaled down on phones. The pad takes mouse and touch;
+	-- the button itself still takes gamepad selection, so both run fn.
+	local function onPress(button: GuiButton, fn: () -> ())
+		local pad = Hud.find(button, "HitPad") :: GuiButton
+		pressable(pad, (button :: any).Press)
+		pad.Activated:Connect(fn)
+		button.Activated:Connect(fn)
+	end
+	onPress(closeButton, function()
 		setOpen(false)
 	end)
 	for id, holder in tiles do
@@ -204,7 +211,7 @@ function Shop.start()
 			selected = id
 		end)
 	end
-	buyButton.Activated:Connect(function()
+	onPress(buyButton, function()
 		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0)
 		if canBuy then
 			bounce(buyButton.Press)

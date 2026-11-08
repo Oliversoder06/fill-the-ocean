@@ -17,6 +17,7 @@ local Hud = require(script.Parent.Hud)
 
 local REACH = Hud.REACH
 local AIM_DISTANCE = 80
+local LOW_WATER = 4 -- studs below the player's root: the water is out of sight at a level aim
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
 local ACTION_NAME = "FillAct"
 
@@ -146,7 +147,13 @@ function Action.start()
 		emit(startedListeners, action)
 	end
 
-	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?): string?
+	-- Whether the ocean's water is far below the player, so a level aim only sees dry seabed or sky.
+	local function waterLow(ocean: Model, root: BasePart): boolean
+		local water = Zones.part(ocean, "Water")
+		return water.Position.Y + water.Size.Y / 2 < root.Position.Y - LOW_WATER
+	end
+
+	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?, root: BasePart?): string?
 		if not kind or current then
 			return nil
 		end
@@ -156,6 +163,8 @@ function Action.start()
 			return `Full! Pour it into the {if ocean then ocean.Name:lower() else "water"}`
 		elseif kind == "pour" and carried <= 0 then
 			return "Empty! Scoop more at the well"
+		elseif not aimed and kind == "pour" and ocean and root and waterLow(ocean, root) then
+			return "Look down at the dry seabed"
 		elseif not aimed then
 			return "Aim at the water"
 		end
@@ -200,7 +209,7 @@ function Action.start()
 			kind, hit = target(ocean, root, character, camera)
 		end
 
-		local text = hintText(kind, hit ~= nil, ocean)
+		local text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil)
 		Hud.set(hint, "Visible", text ~= nil)
 		if text then
 			Hud.set(hint, "Text", text)

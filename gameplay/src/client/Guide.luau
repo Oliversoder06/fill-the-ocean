@@ -62,6 +62,17 @@ local function openText(): string
 	return "Open UPGRADES (TAB)"
 end
 
+-- client/Hotbar binds key 1 and ButtonX.
+local function toolText(): string
+	local input = UserInputService:GetLastInputType()
+	if input == Enum.UserInputType.Touch then
+		return "Take out your tool (tap the slot)"
+	elseif input.Name:sub(1, 7) == "Gamepad" then
+		return "Take out your tool (press X)"
+	end
+	return "Take out your tool (press 1)"
+end
+
 function Guide.start()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local gui = playerGui:WaitForChild("Hud")
@@ -155,7 +166,7 @@ function Guide.start()
 			return 4, `Close the shop and pour more water: {Hud.money(money)} / {Hud.money(cost)} coins`, nil, nil, ""
 		end
 		if player:GetAttribute("Equipped") == false then
-			return 1, "Take out your tool (press 1 or tap the slot)", nil, nil, ""
+			return 1, toolText(), nil, nil, ""
 		end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
