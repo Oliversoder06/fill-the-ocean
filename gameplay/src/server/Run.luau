@@ -154,11 +154,8 @@ end
 
 -- Players appear at the furthest open area.
 local function moveToSpawn(player: Player)
-	local furthest = 1
-	for _, id in gatesOpen() do
-		furthest = math.max(furthest, id)
-	end
-	moveTo(player, areaPart(Areas.byId(Config, furthest), "Spawn"))
+	local open = Areas.openIds(gatesOpen())
+	moveTo(player, areaPart(Areas.byId(Config, open[#open]), "Spawn"))
 end
 
 -- The fill fraction for `litres` of water: Water.fill's curve for the team, scaled by the map.
@@ -839,14 +836,10 @@ local function onPad(area, hit: BasePart)
 	if not player or not state or not run.save or now - state.padAt < PAD_COOLDOWN then
 		return
 	end
-	local open = { 1 }
-	for _, id in run.save.gatesOpen do
-		table.insert(open, id)
-	end
-	table.sort(open)
+	local open = Areas.openIds(run.save.gatesOpen)
 	local i = table.find(open, area.id)
-	if not i then
-		return -- a closed area's pad
+	if not i or #open == 1 then
+		return -- a closed area's pad, or nowhere else to go
 	end
 	state.padAt = now
 	moveTo(player, areaPart(Areas.byId(Config, open[i % #open + 1]), "Spawn"))
@@ -907,10 +900,10 @@ function Run.start(oceanModel: Model)
 			Map.gatePrompt(Map.gate(ocean, area)).Triggered:Connect(function(player)
 				onGate(player, area)
 			end)
-			areaPart(area, "Pad").Touched:Connect(function(hit)
-				onPad(area, hit)
-			end)
 		end
+		areaPart(area, "Pad").Touched:Connect(function(hit)
+			onPad(area, hit)
+		end)
 	end
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do

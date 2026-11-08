@@ -114,8 +114,15 @@ function Action.start()
 	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?, any)
 		local origin, look = camera.CFrame.Position, camera.CFrame.LookVector * AIM_DISTANCE
 		local area, source = Hud.openSpot(ocean, "Source", root.Position)
-		-- Splash where the eye lands (the source's water or the basin), not on the invisible zone part.
-		seeParams.FilterDescendantsInstances = { character, camera, source or Zones.part(ocean, "Source"), Zones.part(ocean, "PourPoint") }
+		-- Splash where the eye lands (the source's water or the basin), not on the invisible zone parts.
+		-- Their lookups are nil-safe: a part not streamed in yet is simply not ignored.
+		local ignore: { Instance } = { character, camera }
+		for _, part in { source or ocean:FindFirstChild("Source"), ocean:FindFirstChild("PourPoint") } do
+			if part then
+				table.insert(ignore, part)
+			end
+		end
+		seeParams.FilterDescendantsInstances = ignore
 		if source then
 			local aim = aimAt(source, origin, look)
 			if not aim then

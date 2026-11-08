@@ -11,7 +11,6 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
-local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
 
 local player = Players.LocalPlayer
@@ -46,8 +45,13 @@ local function cheapest(levels: { [string]: number }, money: number): (Config.Tr
 	return best, bestCost, bestAffordable
 end
 
-local function target(ocean: Model, name: string): Attachment
-	local found = Zones.part(ocean, name):FindFirstChild("GuideTarget")
+-- The ocean part's GuideTarget, or nil while the part hasn't streamed in.
+local function target(ocean: Model, name: string): Attachment?
+	local part = ocean:FindFirstChild(name)
+	if not part then
+		return nil
+	end
+	local found = part:FindFirstChild("GuideTarget")
 	assert(found and found:IsA("Attachment"), `{ocean.Name}.{name} is missing its GuideTarget attachment (built in Studio)`)
 	return found
 end
@@ -151,6 +155,7 @@ function Guide.start()
 	-- The step (1-6), its text and the beam and marker targets, from live state.
 	local function current(levels: { [string]: number }, ocean: Model): (number, string, Attachment?, Attachment?, string)
 		local well, shore = target(ocean, "Source"), target(ocean, "PourPoint")
+		local source = ocean:FindFirstChild("Source")
 		local money = player:GetAttribute("Money") or 0
 		local track, cost, affordable = cheapest(levels, money)
 		if track and affordable then
@@ -170,13 +175,13 @@ function Guide.start()
 		end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if not (root and root:IsA("BasePart")) then
-			return shownStep, text.Text, nil, nil, ""
+		if not (root and root:IsA("BasePart") and source and source:IsA("BasePart") and well and shore) then
+			return shownStep, text.Text, nil, nil, "" -- no body yet, or the cove not streamed in
 		end
 		local carried = player:GetAttribute("Carried") or 0
 		local capacity = player:GetAttribute("Capacity") or 0
 		local full = carried >= capacity * (1 - 1e-6)
-		local atWell = (root.Position - Zones.part(ocean, "Source").Position).Magnitude <= Hud.REACH
+		local atWell = (root.Position - source.Position).Magnitude <= Hud.REACH
 		if carried <= 0 and not atWell then
 			local again = if money > 0 then `Again! {Hud.money(money)} / {Hud.money(cost)} coins for your first upgrade` else "Walk to the well"
 			return 1, again, well, well, "WELL"

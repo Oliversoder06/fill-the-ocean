@@ -13,6 +13,14 @@ function Areas.open(gatesOpen: { number }): { [number]: boolean }
 	return open
 end
 
+-- The open area ids in order: the cove (1) and every open gate, sorted (the save's list is left as is).
+function Areas.openIds(gatesOpen: { number }): { number }
+	local ids = table.clone(gatesOpen)
+	table.insert(ids, 1)
+	table.sort(ids)
+	return ids
+end
+
 -- The lowest area whose gate is still closed, and whether it is on sale at the ocean's `fill`
 -- (0..1). No gate left: nil, false.
 function Areas.nextGate(config, gatesOpen: { number }, fill: number): (number?, boolean)

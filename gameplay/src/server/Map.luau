@@ -2,6 +2,7 @@
 -- The ocean lives in the Studio place (workspace.Ocean). This module checks it and moves the water.
 -- Contract, one Model workspace.Ocean holding:
 --   Spawn     where players appear
+--   Pad       touching it moves you to the next open area's Spawn (as in every area below)
 --   Source    invisible zone over the well; players aim at it to scoop (client/Action)
 --   PourPoint marks the usual pour spot at the basin rim (tripDistance from Source); pouring
 --             itself works anywhere next to where the Water will be (shared/Zones.nearFlood)
@@ -22,7 +23,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Zones = require(ReplicatedStorage.Shared.Zones)
 
-local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water" }
+local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water", "Pad" }
 local AREA_PARTS = { "Source", "Pour", "Pad", "Spawn" }
 
 local Map = {}

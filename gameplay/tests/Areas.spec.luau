@@ -14,6 +14,20 @@ function tests.open_is_the_cove_plus_open_gates(t)
 	t.expectEq(open[4], nil)
 end
 
+-- The open area ids in order, the cove first, whatever order the save lists the gates in.
+function tests.open_ids_sorted_with_the_cove(t)
+	local ids = Areas.openIds({})
+	t.expectEq(#ids, 1)
+	t.expectEq(ids[1], 1)
+	local gates = { 3, 2 }
+	ids = Areas.openIds(gates)
+	t.expectEq(#ids, 3)
+	t.expectEq(ids[1], 1)
+	t.expectEq(ids[2], 2)
+	t.expectEq(ids[3], 3)
+	t.expectEq(gates[1], 3, "the save's list is not changed")
+end
+
 -- The next gate is the lowest closed one; it goes on sale exactly at its fill point.
 function tests.gate_on_sale_at_its_fill(t)
 	local id, onSale = Areas.nextGate(Config, {}, 0)
