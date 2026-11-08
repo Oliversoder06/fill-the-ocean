@@ -109,6 +109,21 @@ function tests.sanitize_repairs_bad_fields(t)
 	t.expectEq(again.updatedAt, 1700000000)
 end
 
+-- Only gates 2-5 can be open, each once; the cove (1) has no gate.
+function tests.sanitize_gates(t)
+	local save = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, gatesOpen = { 3, 2, 3, 1, 6, 2.5, "4", 0 / 0, 5 } })
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(table.concat(save.gatesOpen, ","), "3,2,5")
+	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, gatesOpen = "all" })
+	assert(broken, "a bad gatesOpen must not drop the save")
+	t.expectEq(#broken.gatesOpen, 0)
+	local fresh = RunSave.new("ocean1", { 1 })
+	fresh.gatesOpen = { 2, 3 }
+	local again = RunSave.sanitize(fresh)
+	assert(again, "a valid save must survive sanitize")
+	t.expectEq(table.concat(again.gatesOpen, ","), "2,3")
+end
+
 function tests.sanitize_rejects_non_tables(t)
 	t.expectEq(RunSave.sanitize(nil), nil)
 	t.expectEq(RunSave.sanitize("save"), nil)
@@ -135,6 +150,7 @@ function tests.new_save_starts_empty(t)
 	t.expectEq(save.playSeconds, 0)
 	t.expectEq(save.introSeen, false)
 	t.expectEq(#save.boostsPlayed, 0)
+	t.expectEq(#save.gatesOpen, 0, "no gate open")
 	t.expectEq(save.finished, false)
 	t.expectEq(save.updatedAt, 0)
 end

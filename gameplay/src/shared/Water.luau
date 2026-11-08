@@ -1,5 +1,5 @@
 --!strict
--- Water math: the ocean's fill curve, rescaling on player-count change, litres moved per tick.
+-- Water math: the ocean's fill curve, litres moved per scoop and pour, and carried water's value.
 
 export type Curve = { firstPercent: number, growth: number }
 
@@ -48,6 +48,12 @@ function Water.scoopAmount(carried: number, capacity: number, sweeps: number): n
 	local room = math.max(0, capacity - carried)
 	local per = capacity / math.max(1, sweeps)
 	return if per >= room - capacity * 1e-9 then room else per
+end
+
+-- A tool holds litres and their total coin value: adding `litres` worth `payPerLitre` each returns
+-- the new value, so water scooped in two areas pays each area's rate when poured.
+function Water.mix(_carriedLitres: number, carriedValue: number, litres: number, payPerLitre: number): number
+	return carriedValue + litres * payPerLitre
 end
 
 return Water

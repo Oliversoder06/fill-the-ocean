@@ -14,6 +14,7 @@ export type Save = {
 	playSeconds: number,
 	introSeen: boolean,
 	boostsPlayed: { string },
+	gatesOpen: { number }, -- area ids whose gate is bought (2-5), in the order they opened
 	finished: boolean,
 	updatedAt: number,
 }
@@ -68,6 +69,7 @@ function RunSave.new(mapId: string, members: { number }): Save
 		playSeconds = 0,
 		introSeen = false,
 		boostsPlayed = {},
+		gatesOpen = {},
 		finished = false,
 		updatedAt = 0,
 	}
@@ -139,6 +141,13 @@ function RunSave.sanitize(raw: any): Save?
 		for _, boostId in raw.boostsPlayed do
 			if type(boostId) == "string" then
 				table.insert(save.boostsPlayed, boostId)
+			end
+		end
+	end
+	if type(raw.gatesOpen) == "table" then
+		for _, areaId in raw.gatesOpen do
+			if type(areaId) == "number" and areaId % 1 == 0 and areaId >= 2 and areaId <= 5 and not table.find(save.gatesOpen, areaId) then
+				table.insert(save.gatesOpen, areaId)
 			end
 		end
 	end

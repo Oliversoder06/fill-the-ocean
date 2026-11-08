@@ -18,6 +18,14 @@ export type Level = {
 	coinBonus: number?, -- tip: coins per litre multiplier
 }
 
+export type Area = {
+	id: number,
+	name: string,
+	payMultiplier: number, -- a litre scooped here pays coinsPerLitre * this
+	scoopFactor: number, -- scoop sweeps here take actSeconds * this
+	gate: { fill: number, price: number }?, -- on sale once the ocean is `fill` full; nil = open from the start
+}
+
 export type Track = {
 	id: string,
 	name: string,
@@ -55,14 +63,23 @@ Config.boosts = {
 -- The one ocean. Pay is flat (it never rises on its own; harder areas pay more from Phase 2).
 -- Fill curve (Water.fill): percent k needs firstPercent * growth^(k-1) litres per player, so the
 -- fill rises at a steady pace while income grows. Phase 4 tunes the numbers (tools/simulate).
--- standInOpens: until Phase 2 builds the gates, area 2 and 3 levels open at these fill fractions.
 Config.ocean = {
 	name = "The Ocean",
 	coinsPerLitre = 10,
 	firstPercent = 250,
 	growth = 1.05,
-	standInOpens = { 0.07, 0.22 },
 }
+
+-- The areas, in the order their gates open (common/Areas). Pay ratios match the old stage pay
+-- (10/50/250) so the upgrade prices still fit. Gate prices are the money tools/simulate holds when
+-- the ocean reaches the gate's fill, at 2 significant figures.
+Config.areas = {
+	{ id = 1, name = "Cove Well", payMultiplier = 1, scoopFactor = 1 },
+	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 } },
+	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 } },
+	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.7e6 } },
+	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 130e6 } },
+} :: { Area }
 
 -- Shop order. Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price
 -- is split between Quick Scoop and Pickup.

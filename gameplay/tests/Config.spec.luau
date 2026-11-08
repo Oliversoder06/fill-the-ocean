@@ -14,7 +14,7 @@ end
 
 -- Within a track the area never goes down, so each area opens the next levels of every track.
 function tests.levels_open_in_order(t)
-	local areas = #Config.ocean.standInOpens + 1
+	local areas = #Config.areas
 	for _, track in Config.tracks do
 		t.expectEq(#track.levels > 0, true, `{track.id} has levels`)
 		local lastArea = 1
@@ -25,6 +25,45 @@ function tests.levels_open_in_order(t)
 			lastArea = level.area
 		end
 	end
+end
+
+-- Five areas, ids 1-5 in order; the cove is open from the start and every other area has a gate.
+function tests.areas_in_order(t)
+	local names = {}
+	for i, area in Config.areas do
+		t.expectEq(area.id, i, `area {i} id`)
+		table.insert(names, area.name)
+	end
+	t.expectEq(table.concat(names, ","), "Cove Well,Mountain Spring,Hot Springs,Glacier,Cloud Catcher")
+	t.expectEq(Config.areas[1].gate, nil, "the cove has no gate")
+	t.expectEq(Config.areas[1].payMultiplier, 1)
+	t.expectEq(Config.areas[1].scoopFactor, 1)
+	t.expectEq(Config.areas[2].payMultiplier, 5)
+	t.expectEq(Config.areas[5].payMultiplier, 625)
+	t.expectEq(Config.areas[5].scoopFactor, 3)
+	t.expectEq((Config.ocean :: any).standInOpens, nil, "the stand-in fill points are gone")
+end
+
+-- Each later area pays more, scoops slower, and its gate needs more fill and more coins.
+function tests.gates_rise(t)
+	local last = Config.areas[1]
+	local lastFill, lastPrice = 0, 0
+	for i = 2, #Config.areas do
+		local area = Config.areas[i]
+		local gate = area.gate
+		assert(gate, `{area.name} has no gate`)
+		if area.payMultiplier <= last.payMultiplier or area.scoopFactor <= last.scoopFactor then
+			error(`{area.name} does not pay more and scoop slower than {last.name}`)
+		end
+		if gate.fill <= lastFill or gate.fill >= 1 or gate.price <= lastPrice then
+			error(`{area.name} gate {gate.fill} / {gate.price} is not above {lastFill} / {lastPrice}`)
+		end
+		last, lastFill, lastPrice = area, gate.fill, gate.price
+	end
+	t.expectEq(Config.areas[2].gate.fill, 0.07)
+	t.expectEq(Config.areas[3].gate.fill, 0.22)
+	t.expectEq(Config.areas[4].gate.fill, 0.45)
+	t.expectEq(Config.areas[5].gate.fill, 0.7)
 end
 
 function tests.every_level_costs_more_than_the_last(t)
