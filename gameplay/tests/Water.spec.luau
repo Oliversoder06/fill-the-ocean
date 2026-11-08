@@ -2,14 +2,6 @@ local Water = require("../src/shared/Water")
 
 local tests = {}
 
-function tests.rescale_keeps_percent(t)
-	t.expectEq(Water.rescale(400, 1000, 500), 200)
-end
-
-function tests.rescale_up_keeps_percent(t)
-	t.expectEq(Water.rescale(300, 1000, 2000), 600)
-end
-
 function tests.pour_empties_whole_tool(t)
 	t.expectEq(Water.pourAmount(60, 0, 1000), 60)
 end

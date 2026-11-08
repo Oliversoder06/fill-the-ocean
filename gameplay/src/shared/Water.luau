@@ -38,11 +38,6 @@ function Water.litresAt(fraction: number, ocean: Curve, players: number): number
 	return litres
 end
 
--- Keeps the fill fraction when the target changes.
-function Water.rescale(current: number, oldTarget: number, newTarget: number): number
-	return current / oldTarget * newTarget
-end
-
 -- One pour empties the tool, but never past the target; the rest stays carried.
 function Water.pourAmount(carried: number, current: number, target: number): number
 	return math.max(0, math.min(carried, target - current))
