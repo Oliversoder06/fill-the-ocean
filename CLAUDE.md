@@ -21,8 +21,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
 
 ## Studio
 - Two places, each its own Rojo project folder:
-  - `lobby/`: Place ID 99179921994084, the start place players load into. Rojo port 34872.
-  - `gameplay/`: Place ID 96136704873524, where a run happens. Rojo port 34873.
+  - `lobby/`: Place ID 99179921994084, the start place players load into. Rojo port 34674.
+  - `gameplay/`: Place ID 96136704873524, where a run happens. Rojo port 34675.
 - In each folder, Rojo owns code only: `src/shared` -> ReplicatedStorage.Shared, `src/server` ->
   ServerScriptService.Server, `src/client` -> StarterPlayerScripts.Client, and
   `C:\RobloxDev\shared` -> ReplicatedStorage.Kit (UI and Lib). A change in Kit changes every game.
