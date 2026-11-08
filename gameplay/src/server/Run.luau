@@ -1,9 +1,12 @@
 -- The run: one team's saved ocean. Owns money, carried water, purchases, the water level and the save.
--- Clients send Act("scoop" | "pour") when they start a scoop sweep or a pour (aimed at the well or
--- the basin, see client/Action) and Buy(trackId); state goes out as attributes. The server checks
--- the distance and, for scoops, the pace (one per ActSeconds) when an action starts. A scoop is
--- credited when it ends, ActSeconds later; a pour is instant. Each accepted action is published as
--- ActKind + ActAt (server time) so other clients can play it on that player's body (client/Bodies).
+-- Clients send Act("scoop" | "pour") when they start a scoop sweep or a pour (aimed at an open
+-- area's Source, the basin or an open area's Pour, see client/Action) and Buy(trackId); state goes
+-- out as attributes. The server checks the distance and, for scoops, the pace (one per ActSeconds
+-- x the area's scoopFactor) when an action starts. A scoop is credited when it ends; a pour is
+-- instant. Gates (Config.areas) are bought through their ProximityPrompt and open for the whole
+-- team (save.gatesOpen, published as GatesOpen); pads move players between open areas. Each
+-- accepted action is published as ActKind + ActAt (server time) so other clients can play it on
+-- that player's body (client/Bodies).
 -- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
@@ -27,6 +30,7 @@ local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Water = require(ReplicatedStorage.Shared.Water)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Session = require(ReplicatedStorage.Shared.Session)
+local Areas = require(ReplicatedStorage.Common.Areas)
 local Maps = require(ReplicatedStorage.Common.Maps)
 local Places = require(ReplicatedStorage.Common.Places)
 local PlayerData = require(ReplicatedStorage.Common.PlayerData)
@@ -41,8 +45,9 @@ local PARTY_WAIT = 20 -- party: start when everyone is in, or this long after th
 local CARD_SECONDS = 3
 local MAX_BUYS_PER_SECOND = 5
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
-local ACT_REACH = 12 -- studs from Source / from where the water will be; keep in step with client/Action REACH
+local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
+local PAD_COOLDOWN = 2 -- seconds after a pad move before a pad moves the same player again
 local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action pace check (mobile lag spikes)
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
@@ -130,11 +135,30 @@ local function applyWalkSpeed(player: Player)
 	end
 end
 
-local function moveToSpawn(player: Player)
+-- The save's open gates (area ids); none before the save is loaded.
+local function gatesOpen(): { number }
+	return if run.save then run.save.gatesOpen else {}
+end
+
+local function moveTo(player: Player, spawn: BasePart)
 	local character = player.Character
 	if character then
-		character:PivotTo(Zones.part(ocean, "Spawn").CFrame + Vector3.new(0, 3, 0))
+		character:PivotTo(spawn.CFrame + Vector3.new(0, 3, 0))
 	end
+end
+
+-- An area's part that Map.ensure checked is there.
+local function areaPart(area, name: string): BasePart
+	return Zones.areaPart(ocean, area, name) :: BasePart
+end
+
+-- Players appear at the furthest open area.
+local function moveToSpawn(player: Player)
+	local furthest = 1
+	for _, id in gatesOpen() do
+		furthest = math.max(furthest, id)
+	end
+	moveTo(player, areaPart(Areas.byId(Config, furthest), "Spawn"))
 end
 
 -- The fill fraction for `litres` of water: Water.fill's curve for the team, scaled by the map.
@@ -150,9 +174,9 @@ local function litresAt(fraction: number): number
 	return Water.litresAt(fraction, Config.ocean, run.teamSize) * run.waterScale
 end
 
--- Areas open so far (Ladder.openAreas: stand-in fill points until Phase 2 builds the gates).
+-- Areas open so far (Ladder.openAreas).
 local function openAreas(): number
-	return Ladder.openAreas(Config, fillOf(run.current))
+	return Ladder.openAreas(Config, gatesOpen())
 end
 
 local function setWater(current: number)
@@ -171,6 +195,11 @@ end
 
 local function card(text: string)
 	remotes.Card:FireAllClients(text, CARD_SECONDS)
+end
+
+-- The open gates go out as "2,3" (client/Hud.gatesOpen).
+local function publishGates()
+	setGlobal("GatesOpen", table.concat(gatesOpen(), ","))
 end
 
 -- Boost start and end change everyone's walk speed and sweeps at once.
@@ -282,6 +311,7 @@ local function snapshot(): RunSave.Save
 	local copy = table.clone(save)
 	copy.players = table.clone(save.players)
 	copy.boostsPlayed = table.clone(save.boostsPlayed)
+	copy.gatesOpen = table.clone(save.gatesOpen)
 	return copy
 end
 
@@ -492,6 +522,10 @@ local function startRun()
 		run.key = key
 	end
 	run.save = save
+	for _, id in save.gatesOpen do
+		Map.openGate(ocean, Areas.byId(Config, id))
+	end
+	publishGates()
 
 	local scale = workspace:GetAttribute("WaterScale") -- Studio test shortcut
 	local studioScale = if RunService:IsStudio() and type(scale) == "number" and scale > 0 then scale else 1
@@ -501,6 +535,7 @@ local function startRun()
 	setWater(math.min(save.current, run.target))
 	for player in states do
 		applySaved(player)
+		moveToSpawn(player) -- those who spawned before the load go to the furthest open area
 	end
 	refreshAll()
 	run.playBase, run.playSince = save.playSeconds, os.clock()
@@ -561,7 +596,8 @@ local function onPlayerAdded(player: Player)
 	end
 	states[player] = {
 		money = 0,
-		carried = 0,
+		carried = 0, -- litres in the tool
+		carriedValue = 0, -- their coins before coinBonus (Water.mix: each area's litres at its pay)
 		levels = {} :: { [string]: number },
 		stats = Ladder.stats(Config, {}),
 		litres = 0,
@@ -569,6 +605,7 @@ local function onPlayerAdded(player: Player)
 		buyWindowStart = 0,
 		buysInWindow = 0,
 		lastLookAt = 0, -- os.clock() of the last accepted Look
+		padAt = 0, -- os.clock() of the last pad move
 		equipped = true,
 	}
 	if run.save then
@@ -656,9 +693,18 @@ local function onAdmin(player: Player, fraction: unknown)
 	jumpFill(fraction)
 end
 
-local function nearPart(player: Player, part: BasePart): boolean
+local function rootOf(player: Player): BasePart?
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	return root ~= nil and ((root :: BasePart).Position - part.Position).Magnitude <= ACT_REACH + DISTANCE_SLACK
+	return if root and root:IsA("BasePart") then root else nil
+end
+
+-- The open area whose Source (scoop) or Pour (pour) the player stands by, and that part.
+local function openSpot(player: Player, name: string)
+	local root = rootOf(player)
+	if not root then
+		return nil, nil
+	end
+	return Zones.openSpot(ocean, Config, Areas.open(gatesOpen()), name, root.Position, ACT_REACH + DISTANCE_SLACK)
 end
 
 -- Pouring works anywhere next to where the ocean's water will be (shared/Zones.nearFlood).
@@ -676,8 +722,11 @@ local function nearFlood(player: Player): boolean
 	return Zones.nearFlood(ocean, (root :: BasePart).Position, ACT_REACH + DISTANCE_SLACK, characters)
 end
 
-local function creditScoop(state)
-	state.carried += Water.scoopAmount(state.carried, state.stats.capacity, boosted(state).sweeps)
+-- A sweep at `area`'s Source: its litres are worth that area's pay.
+local function creditScoop(state, area)
+	local litres = Water.scoopAmount(state.carried, state.stats.capacity, boosted(state).sweeps)
+	state.carried += litres
+	state.carriedValue = Water.mix(state.carriedValue, litres, Config.ocean.coinsPerLitre * area.payMultiplier)
 end
 
 -- Tells every client an accepted action started, so they can play it on this player's body.
@@ -691,8 +740,11 @@ local function creditPour(state): boolean
 	if litres <= 0 then
 		return false
 	end
+	-- The poured share of the carried value (all of it, unless the ocean takes less than the tool holds).
+	local value = state.carriedValue * litres / state.carried
 	state.carried -= litres
-	state.money += litres * Config.ocean.coinsPerLitre * boosted(state).coinBonus
+	state.carriedValue = if state.carried > 0 then state.carriedValue - value else 0
+	state.money += value * boosted(state).coinBonus
 	state.litres += litres
 	local before = fillOf(run.current)
 	setWater(run.current + litres)
@@ -700,22 +752,29 @@ local function creditPour(state): boolean
 	return true
 end
 
--- A scoop sweep or a pour. Checked when it starts (distance, room or water). A scoop is
--- credited when it ends (it always plays out in full on the client) and is paced: on average one
--- per actSeconds, with slack for latency. A pour is instant and needs no pacing: it empties the tool.
+-- A scoop sweep or a pour. Checked when it starts (distance, room or water). A scoop is at an open
+-- area's Source and is credited when it ends (it always plays out in full on the client); it is
+-- paced: on average one per actSeconds x the area's scoopFactor, with slack for latency. A pour is
+-- by the ocean or at an open area's Pour, instant and needs no pacing: it empties the tool.
 -- lihfolk-ignore: remote-unvalidated-args (kind is checked against exactly "scoop" / "pour" below)
 local function onAct(player: Player, kind: unknown)
 	local state = states[player]
 	if not state or (kind ~= "scoop" and kind ~= "pour") or not state.equipped or run.phase ~= "playing" then
 		return
 	end
-	local act = state.stats.actSeconds
+	local area = nil
+	if kind == "scoop" then
+		area = openSpot(player, "Source")
+		if not area then
+			return
+		end
+	elseif not (nearFlood(player) or openSpot(player, "Pour")) then
+		return
+	end
+	local act = state.stats.actSeconds * (if area then area.scoopFactor else 1)
 	local slack = math.min(HOLD_SLACK, act / 2)
 	local now = os.clock()
 	if kind == "scoop" and now < state.nextActAt - slack then
-		return
-	end
-	if not (if kind == "scoop" then nearPart(player, Zones.part(ocean, "Source")) else nearFlood(player)) then
 		return
 	end
 	if kind == "scoop" and state.carried >= state.stats.capacity - 1e-9 then
@@ -738,9 +797,59 @@ local function onAct(player: Player, kind: unknown)
 		if states[player] ~= state or run.phase ~= "playing" or not state.equipped then
 			return
 		end
-		creditScoop(state)
+		creditScoop(state, area)
 		publish(player)
 	end)
+end
+
+-- The gate prompt of `area`: when it is the next gate and on sale, the buyer pays and it opens for
+-- the whole team.
+local function onGate(player: Player, area)
+	local state = states[player]
+	local save = run.save
+	if not state or not save or run.phase ~= "playing" then
+		return
+	end
+	local nextId, onSale = Areas.nextGate(Config, save.gatesOpen, fillOf(run.current))
+	if nextId ~= area.id or not onSale or state.money + MONEY_EPSILON < area.gate.price then
+		return
+	end
+	local prompt = Map.gatePrompt(Map.gate(ocean, area))
+	local root = rootOf(player)
+	local at = (prompt.Parent :: BasePart).Position
+	if not root or (root.Position - at).Magnitude > prompt.MaxActivationDistance + DISTANCE_SLACK then
+		return
+	end
+	state.money = math.max(0, state.money - area.gate.price)
+	table.insert(save.gatesOpen, area.id)
+	Map.openGate(ocean, area)
+	publishGates()
+	publish(player)
+	card(`{player.DisplayName} opened {area.name}!`)
+	task.spawn(saveRun, `gate {area.id} opened`)
+end
+
+-- A pad in an open area moves the player to the next open area's Spawn, in area order, the last
+-- one back to the cove.
+local function onPad(area, hit: BasePart)
+	local character = hit.Parent
+	local player = character and Players:GetPlayerFromCharacter(character)
+	local state = player and states[player]
+	local now = os.clock()
+	if not player or not state or not run.save or now - state.padAt < PAD_COOLDOWN then
+		return
+	end
+	local open = { 1 }
+	for _, id in run.save.gatesOpen do
+		table.insert(open, id)
+	end
+	table.sort(open)
+	local i = table.find(open, area.id)
+	if not i then
+		return -- a closed area's pad
+	end
+	state.padAt = now
+	moveTo(player, areaPart(Areas.byId(Config, open[i % #open + 1]), "Spawn"))
 end
 
 -- Decides who may play here. Only a reserved server the lobby made (with its ticket) runs; the
@@ -780,6 +889,7 @@ function Run.start(oceanModel: Model)
 	end
 	setGlobal("Fill", 0)
 	setGlobal("Waiting", "")
+	publishGates()
 	setPhase("loading")
 
 	loadSession()
@@ -792,6 +902,16 @@ function Run.start(oceanModel: Model)
 	remotes.Act.OnServerEvent:Connect(onAct)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
+	for _, area in Config.areas do
+		if area.model then
+			Map.gatePrompt(Map.gate(ocean, area)).Triggered:Connect(function(player)
+				onGate(player, area)
+			end)
+			areaPart(area, "Pad").Touched:Connect(function(hit)
+				onPad(area, hit)
+			end)
+		end
+	end
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do
 		onPlayerAdded(player)

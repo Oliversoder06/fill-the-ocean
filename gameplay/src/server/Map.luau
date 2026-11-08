@@ -9,11 +9,21 @@
 --   Water     with a number attribute "Depth"; rises with the fill fraction. It may hold BasePart
 --             children: extra tiles for water wider than one part can be (2048 studs); every tile
 --             keeps its own X and Z and rises with it
+-- Areas 2-5 (Config.areas with a `model`): one Model each in workspace.Areas, named by that model:
+--   Source    zone over the area's water; scooping here pays the area's rate (server/Run)
+--   Pour      the channel inlet; pouring here counts as pouring into the ocean
+--   Gate      Model: Blocker and Boards (parts, or models of parts) that close the way in, Sign
+--             (a SurfaceGui with a TextLabel "Label", client/Gates) and a part Prompt holding a
+--             ProximityPrompt "Prompt" (buys the gate)
+--   Stand     the area's shop stand
+--   Pad       touching it moves you to the next open area's Spawn
+--   Spawn     where players appear in the area
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Zones = require(ReplicatedStorage.Shared.Zones)
 
 local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water" }
+local AREA_PARTS = { "Source", "Pour", "Pad", "Spawn" }
 
 local Map = {}
 
@@ -42,13 +52,73 @@ function Map.setFill(ocean: Model, fraction: number)
 	end
 end
 
-function Map.ensure(): Model
+local function child(parent: Instance, name: string): Instance
+	local found = parent:FindFirstChild(name)
+	assert(found, `{parent:GetFullName()} is missing {name}`)
+	return found
+end
+
+-- A gate's ProximityPrompt (Gate.Prompt.Prompt).
+function Map.gatePrompt(gate: Instance): ProximityPrompt
+	local prompt = child(child(gate, "Prompt"), "Prompt")
+	assert(prompt:IsA("ProximityPrompt"), `{prompt:GetFullName()} must be a ProximityPrompt`)
+	return prompt
+end
+
+-- An area's Gate model (checked by Map.ensure).
+function Map.gate(ocean: Model, area): Instance
+	return child(Zones.areaModel(ocean, area) :: Instance, "Gate")
+end
+
+-- Opens a bought gate: its Boards and Blocker no longer block or show, and its prompt goes away.
+function Map.openGate(ocean: Model, area)
+	local gate = Map.gate(ocean, area)
+	for _, name in { "Boards", "Blocker" } do
+		local piece = child(gate, name)
+		local parts = piece:GetDescendants()
+		table.insert(parts, piece)
+		for _, part in parts do
+			if part:IsA("BasePart") then
+				part.Transparency = 1
+				part.CanCollide = false
+				part.CanQuery = false -- aim rays (client/Action) see through it
+				part.CanTouch = false
+			end
+		end
+	end
+	Map.gatePrompt(gate).Enabled = false
+end
+
+-- Checks one area's model against the contract above.
+local function ensureArea(ocean: Model, area)
+	local model = Zones.areaModel(ocean, area)
+	assert(model and model:IsA("Model"), `workspace.Areas.{area.model} is missing (a Model: the areas live in the place)`)
+	for _, name in AREA_PARTS do
+		assert(Zones.areaPart(ocean, area, name), `{model:GetFullName()} is missing part {name}`)
+	end
+	child(model, "Stand")
+	local gate = child(model, "Gate")
+	assert(gate:IsA("Model"), `{gate:GetFullName()} must be a Model`)
+	child(gate, "Blocker")
+	child(gate, "Boards")
+	local label = child(gate, "Sign"):FindFirstChild("Label", true)
+	assert(label and label:IsA("TextLabel") and label:FindFirstAncestorWhichIsA("SurfaceGui"), `{gate:GetFullName()}.Sign needs a SurfaceGui with a TextLabel "Label"`)
+	assert(child(gate, "Prompt"):IsA("BasePart"), `{gate:GetFullName()}.Prompt must be a part`)
+	Map.gatePrompt(gate)
+end
+
+function Map.ensure(config): Model
 	local model = workspace:FindFirstChild("Ocean")
 	assert(model and model:IsA("Model"), "workspace.Ocean is missing: the ocean lives in the place")
 	for _, partName in REQUIRED do
 		Zones.part(model, partName) -- asserts with the part name
 	end
 	assert(type(Zones.part(model, "Water"):GetAttribute("Depth")) == "number", `Ocean: Water needs a number attribute "Depth"`)
+	for _, area in config.areas do
+		if area.model then
+			ensureArea(model, area)
+		end
+	end
 	return model
 end
 

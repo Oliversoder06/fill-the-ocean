@@ -157,7 +157,13 @@ function Feel.start()
 			if not (character and root and root:IsA("BasePart")) or math.abs(carried - before) <= 1e-9 then
 				return
 			end
-			local at = othersPoint(character, root)
+			-- A pour at an area's channel inlet splashes on the inlet.
+			local ocean = Hud.ocean()
+			local _, pour = nil, nil
+			if carried < before and ocean then
+				_, pour = Hud.openSpot(ocean, "Pour", root.Position)
+			end
+			local at = if pour then pour.Position else othersPoint(character, root)
 			if at then
 				splash(if carried > before then Cues.scoop else Cues.pour, at, other:GetAttribute("ToolTier") or 1, false)
 			end

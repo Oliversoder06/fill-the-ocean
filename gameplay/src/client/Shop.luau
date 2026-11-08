@@ -13,6 +13,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
+local Areas = require(ReplicatedStorage.Common.Areas)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 local Hud = require(script.Parent.Hud)
@@ -69,9 +70,9 @@ local function levelsOf(): { [string]: number }
 	return Hud.levels(0) :: { [string]: number }
 end
 
--- Where a locked level opens: "Opens at 22% full" (its area's stand-in fill point).
+-- Where a locked level opens: "Opens with Hot Springs" (its area's gate).
 local function opensText(level): string
-	return `Opens at {math.round(Config.ocean.standInOpens[level.area - 1] * 100)}% full`
+	return `Opens with {Areas.byId(Config, level.area).name}`
 end
 
 -- The next level's display name: tools have their own, the rest are "<track> <n>".

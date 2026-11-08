@@ -12,6 +12,7 @@ local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Zones = require(ReplicatedStorage.Shared.Zones)
+local Areas = require(ReplicatedStorage.Common.Areas)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 
 local player = Players.LocalPlayer
@@ -23,9 +24,9 @@ local PROGRESS_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum
 local PRESS = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 
--- Studs from Source / from where the water will be within which a player scoops or pours (client
--- Action and Guide); keep in step with server/Run ACT_REACH.
-Hud.REACH = 12
+-- Studs from a Source or Pour / from where the water will be within which a player scoops or pours
+-- (client Action and Guide); the server uses the same (shared/Zones).
+Hud.REACH = Zones.REACH
 
 -- Stopwatch text: 4:05, then 1:04:05 past an hour.
 function Hud.clock(seconds: number): string
@@ -105,18 +106,37 @@ function Hud.levels(fallback: number?): { [string]: number }?
 	return levels
 end
 
--- A track's next level, its status (Ladder.offer, with the areas the ocean's published fill opens,
--- as the server counts them) and whether `money` buys it now.
+-- The open gates (area ids) from the server's GatesOpen attribute ("2,3").
+function Hud.gatesOpen(): { number }
+	local ids = {}
+	local text = ReplicatedStorage:GetAttribute("GatesOpen")
+	if type(text) == "string" then
+		for id in text:gmatch("%d+") do
+			table.insert(ids, tonumber(id) :: number)
+		end
+	end
+	return ids
+end
+
+-- A track's next level, its status (Ladder.offer, with the areas the open gates open, as the server
+-- counts them) and whether `money` buys it now.
 function Hud.offer(levels: { [string]: number }, id: string, money: number): (any, Ladder.Status?, boolean)
-	local fill = ReplicatedStorage:GetAttribute("Fill")
-	local areas = Ladder.openAreas(Config, if type(fill) == "number" then fill else 0)
-	local level, status = Ladder.offer(Config, levels, id, areas)
+	local level, status = Ladder.offer(Config, levels, id, Ladder.openAreas(Config, Hud.gatesOpen()))
 	return level, status, status == "buy" and money + MONEY_EPSILON >= level.cost
 end
 
--- Whether a character at `position` may pour: next to where the water will be, past the camera and
--- every player's character (the same check Action offers the pour with).
+-- The open area whose `name` part (Source or Pour) is within reach of `position`, and that part
+-- (Zones.openSpot, as the server checks it).
+function Hud.openSpot(ocean: Model, name: string, position: Vector3)
+	return Zones.openSpot(ocean, Config, Areas.open(Hud.gatesOpen()), name, position, Hud.REACH)
+end
+
+-- Whether a character at `position` may pour: by an open area's Pour, or next to where the water
+-- will be, past the camera and every player's character (the same check Action offers the pour with).
 function Hud.nearPour(ocean: Model, position: Vector3): boolean
+	if Hud.openSpot(ocean, "Pour", position) then
+		return true
+	end
 	local ignore: { Instance } = { workspace.CurrentCamera }
 	for _, other in Players:GetPlayers() do
 		if other.Character then

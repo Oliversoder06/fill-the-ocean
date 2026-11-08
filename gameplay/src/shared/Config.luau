@@ -24,6 +24,7 @@ export type Area = {
 	payMultiplier: number, -- a litre scooped here pays coinsPerLitre * this
 	scoopFactor: number, -- scoop sweeps here take actSeconds * this
 	gate: { fill: number, price: number }?, -- on sale once the ocean is `fill` full; nil = open from the start
+	model: string?, -- its model in workspace.Areas (server/Map); nil = the cove, whose parts are the ocean's
 }
 
 export type Track = {
@@ -75,10 +76,10 @@ Config.ocean = {
 -- the ocean reaches the gate's fill, rounded down to 2 significant figures.
 Config.areas = {
 	{ id = 1, name = "Cove Well", payMultiplier = 1, scoopFactor = 1 },
-	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 } },
-	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 } },
-	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 } },
-	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 } },
+	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 }, model = "MountainSpring" },
+	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 }, model = "HotSprings" },
+	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 }, model = "Glacier" },
+	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher" },
 } :: { Area }
 
 -- Shop order. Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price

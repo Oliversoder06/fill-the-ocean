@@ -1,6 +1,6 @@
--- Scoop and pour. Stand by the well (the ocean's Source) or anywhere next to where the water will
--- be (shared/Zones.nearFlood), aim at the
--- water and press E, left mouse, RT or the touch button. A scoop is one sweep (the tool fills over
+-- Scoop and pour. Stand by an open area's Source (the cove's is the well) to scoop, and by an open
+-- area's Pour or anywhere next to where the water will be (shared/Zones.nearFlood) to pour, aim at
+-- the water and press E, left mouse, RT or the touch button. A scoop is one sweep (the tool fills over
 -- `Sweeps` of them); each press does one sweep, and holding keeps sweeping only once the player owns
 -- the Hold upgrade. A pour is one quick tip that empties the tool. An action that has started always
 -- plays to the end. The server re-checks and credits each action (server/Run onAct). Viewmodel and
@@ -15,7 +15,6 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Hud = require(script.Parent.Hud)
 
-local REACH = Hud.REACH
 local AIM_DISTANCE = 80
 local LOW_WATER = 4 -- studs below the player's root: the water is out of sight at a level aim
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
@@ -102,28 +101,38 @@ function Action.start()
 		held = false
 	end)
 
-	-- The action this spot offers, whether the aim is on its water, and the visible point aimed at.
-	-- Pouring works anywhere next to where the water will be, aimed at a spot it will cover.
-	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?)
-		local source = Zones.part(ocean, "Source")
-		local pourPoint = Zones.part(ocean, "PourPoint")
+	-- Where the aim lands on `part` (a Source or Pour), or nil when it misses the part.
+	local function aimAt(part: BasePart, origin: Vector3, look: Vector3): Vector3?
+		aimParams.FilterDescendantsInstances = { part }
+		local aim = workspace:Raycast(origin, look, aimParams)
+		return aim and aim.Position
+	end
+
+	-- The action this spot offers, the visible point aimed at (nil = not aimed at its water) and,
+	-- for a scoop, the area scooped. Scooping is at an open area's Source; pouring at an open area's
+	-- Pour, or anywhere next to where the water will be, aimed at a spot it will cover.
+	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?, any)
 		local origin, look = camera.CFrame.Position, camera.CFrame.LookVector * AIM_DISTANCE
-		-- Splash where the eye lands (the well's water or the basin), not on the invisible zone part.
-		seeParams.FilterDescendantsInstances = { character, camera, source, pourPoint }
-		if (root.Position - source.Position).Magnitude <= REACH then
-			aimParams.FilterDescendantsInstances = { source }
-			local aim = workspace:Raycast(origin, look, aimParams)
+		local area, source = Hud.openSpot(ocean, "Source", root.Position)
+		-- Splash where the eye lands (the source's water or the basin), not on the invisible zone part.
+		seeParams.FilterDescendantsInstances = { character, camera, source or Zones.part(ocean, "Source"), Zones.part(ocean, "PourPoint") }
+		if source then
+			local aim = aimAt(source, origin, look)
 			if not aim then
-				return "scoop", nil
+				return "scoop", nil, area
 			end
 			local seen = workspace:Raycast(origin, look, seeParams)
-			return "scoop", if seen then seen.Position else aim.Position
+			return "scoop", if seen then seen.Position else aim, area
+		end
+		local _, pour = Hud.openSpot(ocean, "Pour", root.Position)
+		if pour then
+			return "pour", aimAt(pour, origin, look), nil -- the splash plays on the channel inlet
 		end
 		if not Hud.nearPour(ocean, root.Position) then
-			return nil, nil
+			return nil, nil, nil
 		end
 		local seen = workspace:Raycast(origin, look, seeParams)
-		return "pour", if seen and Zones.willFlood(ocean, seen.Position) then seen.Position else nil
+		return "pour", if seen and Zones.willFlood(ocean, seen.Position) then seen.Position else nil, nil
 	end
 
 	local function canStart(kind: Kind): boolean
@@ -137,9 +146,12 @@ function Action.start()
 	end
 
 	local nextId = 0
-	local function begin(kind: Kind, hit: Vector3, now: number)
+	-- `area`: the area scooped (its scoopFactor slows the sweep, as the server paces it).
+	local function begin(kind: Kind, hit: Vector3, now: number, area)
 		nextId += 1
-		local duration = if kind == "pour" then Config.pourSeconds else player:GetAttribute("ActSeconds") or Config.start.actSeconds
+		local duration = if kind == "pour"
+			then Config.pourSeconds
+			else (player:GetAttribute("ActSeconds") or Config.start.actSeconds) * area.scoopFactor
 		local action: Current = { kind = kind, id = nextId, started = now, duration = duration, hit = hit }
 		current = action
 		table.insert(if kind == "scoop" then pendingScoops else pendingPours, now + duration + PENDING_GRACE)
@@ -193,7 +205,7 @@ function Action.start()
 		local camera = workspace.CurrentCamera
 		local ocean = Hud.ocean()
 		local windowOpen = shop.Visible
-		local kind, hit = nil, nil
+		local kind, hit, area = nil, nil, nil
 		if
 			ReplicatedStorage:GetAttribute("Phase") == "playing"
 			and player:GetAttribute("Equipped") ~= false
@@ -206,7 +218,7 @@ function Action.start()
 			and camera
 			and not windowOpen
 		then
-			kind, hit = target(ocean, root, character, camera)
+			kind, hit, area = target(ocean, root, character, camera)
 		end
 
 		local text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil)
@@ -226,7 +238,7 @@ function Action.start()
 		-- Without Hold, only a fresh press starts a sweep; holding the button does nothing more.
 		local repeatHeld = held and player:GetAttribute("Hold") == true
 		if not current and (repeatHeld or tapped) and kind and hit and canStart(kind) then
-			begin(kind, hit, now)
+			begin(kind, hit, now, area)
 			tapped = false
 		elseif not current then
 			tapped = false

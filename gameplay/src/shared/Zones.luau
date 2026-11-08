@@ -1,7 +1,11 @@
 --!strict
--- Parts of the ocean model (the map contract in server/Map.luau), and distance checks.
+-- Parts of the ocean and area models (the map contract in server/Map.luau), and distance checks.
 
 local Zones = {}
+
+-- Studs from a Source or Pour / from where the water will be within which a player scoops or pours.
+-- The server (server/Run) and the client (client/Action, Guide) both use it; the server adds slack.
+Zones.REACH = 12
 
 -- An ocean child the map contract requires; a missing one is a map bug, so fail loudly.
 function Zones.part(ocean: Model, name: string): BasePart
@@ -12,6 +16,39 @@ end
 
 function Zones.near(ocean: Model, name: string, position: Vector3, radius: number): boolean
 	return (position - Zones.part(ocean, name).Position).Magnitude <= radius
+end
+
+-- An area's model, workspace.Areas.<area.model> (Config.areas); the cove's (no model) is the ocean.
+-- Nil when it isn't there: on a client, an area that hasn't streamed in.
+function Zones.areaModel(ocean: Model, area): Instance?
+	if not area.model then
+		return ocean
+	end
+	local areas = workspace:FindFirstChild("Areas")
+	return areas and areas:FindFirstChild(area.model)
+end
+
+-- An area's part by name (Source, Pour, Pad, Spawn), or nil when it isn't there (not streamed in).
+-- The cove has no Pour: the sea itself is where its water goes.
+function Zones.areaPart(ocean: Model, area, name: string): BasePart?
+	if not area.model and name == "Pour" then
+		return nil
+	end
+	local model = Zones.areaModel(ocean, area)
+	local part = model and model:FindFirstChild(name)
+	return if part and part:IsA("BasePart") then part else nil
+end
+
+-- The first open area (`open`: Areas.open) whose `name` part lies within `radius` studs of
+-- `position`, and that part; nil when none does.
+function Zones.openSpot(ocean: Model, config, open: { [number]: boolean }, name: string, position: Vector3, radius: number)
+	for _, area in config.areas do
+		local part = if open[area.id] then Zones.areaPart(ocean, area, name) else nil
+		if part and (position - part.Position).Magnitude <= radius then
+			return area, part
+		end
+	end
+	return nil, nil
 end
 
 -- Where the water will be once the ocean is full: inside a Water tile's footprint (server/Map), on
