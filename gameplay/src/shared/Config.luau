@@ -72,13 +72,13 @@ Config.ocean = {
 
 -- The areas, in the order their gates open (common/Areas). Pay ratios match the old stage pay
 -- (10/50/250) so the upgrade prices still fit. Gate prices are the money tools/simulate holds when
--- the ocean reaches the gate's fill, at 2 significant figures.
+-- the ocean reaches the gate's fill, rounded down to 2 significant figures.
 Config.areas = {
 	{ id = 1, name = "Cove Well", payMultiplier = 1, scoopFactor = 1 },
 	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 } },
 	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 } },
-	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.7e6 } },
-	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 130e6 } },
+	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 } },
+	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 } },
 } :: { Area }
 
 -- Shop order. Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price

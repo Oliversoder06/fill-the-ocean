@@ -73,11 +73,11 @@ end
 
 -- A tool keeps the coin value of what it holds, so water scooped in two areas pays each one's rate.
 function tests.mix_pays_each_area(t)
-	t.expectEq(Water.mix(0, 0, 10, 10), 100, "an empty tool takes the new water's value")
-	local value = Water.mix(0, 0, 4, 10) -- 4 L of cove water at 10 a litre
-	value = Water.mix(4, value, 6, 50) -- topped up with 6 L of spring water at 50
+	t.expectEq(Water.mix(0, 10, 10), 100, "an empty tool takes the new water's value")
+	local value = Water.mix(0, 4, 10) -- 4 L of cove water at 10 a litre
+	value = Water.mix(value, 6, 50) -- topped up with 6 L of spring water at 50
 	t.expectEq(value, 40 + 300)
-	t.expectEq(Water.mix(10, value, 0, 50), value, "no new water keeps the value")
+	t.expectEq(Water.mix(value, 0, 50), value, "no new water keeps the value")
 end
 
 function tests.fill_scales_with_players(t)

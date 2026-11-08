@@ -4,7 +4,7 @@
 -- sale and affordable, and from then scoop in that area (its pay; sweeps take actSeconds *
 -- scoopFactor; the walk stays the same). Then they buy upgrades, cheapest affordable and open level
 -- first, until nothing is affordable. Prints the money held when the ocean reaches each gate's fill
--- (gate prices are that at 2 significant figures), the time each gate opens, the time at every 10%
+-- (gate prices are that rounded down to 2 significant figures), the time each gate opens, the time at every 10%
 -- and how long each 10% took against the average.
 -- Uses the game's own modules. Pass "quiet" to print only the 10% times.
 local process = require("@lune/process")
@@ -50,7 +50,7 @@ while current < target - 1e-6 do
 		while carried < stats.capacity do -- one sweep per actSeconds until the tool is full
 			t += stats.actSeconds * area.scoopFactor
 			local litres = Water.scoopAmount(carried, stats.capacity, stats.sweeps)
-			carriedValue = Water.mix(carried, carriedValue, litres, ocean.coinsPerLitre * area.payMultiplier)
+			carriedValue = Water.mix(carriedValue, litres, ocean.coinsPerLitre * area.payMultiplier)
 			carried += litres
 		end
 		t += Config.tripDistance / stats.walkSpeed

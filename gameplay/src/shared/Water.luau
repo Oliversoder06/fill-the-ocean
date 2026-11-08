@@ -52,7 +52,7 @@ end
 
 -- A tool holds litres and their total coin value: adding `litres` worth `payPerLitre` each returns
 -- the new value, so water scooped in two areas pays each area's rate when poured.
-function Water.mix(_carriedLitres: number, carriedValue: number, litres: number, payPerLitre: number): number
+function Water.mix(carriedValue: number, litres: number, payPerLitre: number): number
 	return carriedValue + litres * payPerLitre
 end
 
