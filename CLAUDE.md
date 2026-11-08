@@ -46,7 +46,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
   (2048 studs each, the part size cap) that rise with it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
   is kept in `ServerStorage.OldMap_Backup_2026_11_06`.
 - Studio test helpers (gameplay), workspace attributes: `WaterScale` (less water needed),
-  `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioFill` (a fraction 0-1:
+  `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins given to every
+  player) and `StudioFill` (a fraction 0-1:
   jumps the fill). Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.

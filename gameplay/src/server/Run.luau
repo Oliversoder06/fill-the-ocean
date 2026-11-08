@@ -952,6 +952,17 @@ function Run.start(oceanModel: Model)
 				jumpFill(fraction)
 			end
 		end)
+		-- StudioMoney: a number of coins given to every player in the run.
+		workspace:GetAttributeChangedSignal("StudioMoney"):Connect(function()
+			local coins = workspace:GetAttribute("StudioMoney")
+			if type(coins) == "number" and coins > 0 and run.phase == "playing" then
+				workspace:SetAttribute("StudioMoney", nil)
+				for player, state in states do
+					state.money += coins
+					publish(player)
+				end
+			end
+		end)
 	end
 end
 
