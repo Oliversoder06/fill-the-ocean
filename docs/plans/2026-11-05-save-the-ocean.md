@@ -317,6 +317,33 @@ vertical slice: Area 2 finished, areas 3 to 5 as blockouts with working gates.
 - **Done when:** from a fresh save, with the admin fill and money jumps: buy gate 2, scoop spring
   water, pour it in its channel and get its pay, use the pads, rejoin and spawn in Area 2.
 
+### Phase 2 tasks (step by step; needs the owner's OK before building)
+Defaults used: D1 (a gate opens for the whole team), D6 (five areas), D7 (one stand per area).
+1. **Planner (owner + Claude).** Add areas 2-5, their gates, sources, pour channels, pads and stands
+   to the map planner artifact; the owner arranges them; save to `layouts/main`. Nothing is built
+   before this.
+2. **Config + pure modules (tests first).** `Config.areas` (id, name, payMultiplier, scoopFactor,
+   gate = { fill, price }); delete `Config.ocean.standInOpens`; `Ladder.openAreas` reads gates.
+   `common/Areas.luau`: `open(gatesOpen)`, `next(gatesOpen, fill)` (the next gate and whether it is
+   on sale), `ofPart(name)`. `Water.mix(carried, value, litres, pay)` keeps a tool's coin value when
+   water from two areas is mixed. Save gets `gatesOpen: { number }` (RunSave.sanitize + test).
+   Tests: areas_in_order, gates_rise, gate_on_sale_at_its_fill, mix_pays_each_area, sanitize_gates.
+3. **Map contract (Studio, Claude via MCP).** `workspace.Areas.<Name>` with `Source`, `Pour`,
+   `Gate` (`Blocker`, `Boards`, `Sign.Label`, `Prompt`), `Stand`, `Pad`, `Spawn`. Area 2 built with
+   real terrain and MapKit props; areas 3-5 as blockouts (terrain shape, a source, a pour, a gate).
+   `Map.ensure` checks every area. StreamingEnabled on, each area a streamed model.
+4. **Server.** Scoop from any open area's Source (that area's pay and scoop time); pour into any
+   open area's Pour counts as the ocean. Gate prompt: server checks fill and price, takes the
+   coins from the buyer, opens it for the team, saves, fires a toast; boards burst, blocker goes.
+   Pads teleport between open areas; spawn at the furthest open area. Shop levels of a closed area
+   say "Opens with <Area>".
+5. **Client.** Gate sign text (fill needed / price / open), area toast, channel-flow VFX after a
+   pour, area ambience and music by where you stand, guide hint pointing at the next gate once it is
+   on sale.
+6. **Checks + play test.** All checks; Studio play test of the "Done when" line above; phone
+   emulation fps and memory with streaming on.
+Each task: one worker, one reviewer, at most one fix round; the lead play tests at the end.
+
 ## Phase 3: everything you can buy (outline)
 The buying rule: each thing is bought once at its place on the map, then levelled in TAB, which
 lists everything.
