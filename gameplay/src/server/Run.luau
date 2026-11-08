@@ -12,7 +12,8 @@
 -- Saving (common/RunStore): the run is locked to this server before its save is loaded, and the lock
 -- is renewed while it plays. A run that can't be locked or loaded, belongs to another team or is
 -- finished is never played (Studio plays it unsaved, with a warning), so a failed load never
--- overwrites a save. Saves every AUTOSAVE_SECONDS, when a player leaves and when the server closes.
+-- overwrites a save; only a Studio test replaces a finished save with a fresh one. Saves every
+-- AUTOSAVE_SECONDS, when a player leaves and when the server closes.
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -365,8 +366,10 @@ local function addRun(userId: number)
 end
 
 -- The ocean is full: store the finished run, pay every member the map's Raindrops and send everyone
--- back to the lobby. Raindrops are paid only once the finished run is stored, so loading it again
--- can't pay twice; if it can't be stored, the run stays unfinished and ends again on its next load.
+-- back to the lobby. The run stays finished here even if the store is slow (later saves carry it).
+-- Each member is paid once per run (Progress.clearMap), so an ending that runs again (the finished
+-- save never landed) can't pay twice; a member whose payment fails here is paid on their next lobby
+-- join (lobby/Profiles).
 local function endRun()
 	endBoost()
 	card("The ocean is full!")
@@ -376,18 +379,17 @@ local function endRun()
 	local map = run.map :: Maps.Map
 	save.finished = true
 	if run.key then
-		if saveNow("ocean full", END_SAVE_SECONDS) then
-			eachMember(PROGRESS_SECONDS, function(userId)
-				local cleared, err = PlayerData.clearMap(userId, map.id, map.rewardRaindrops)
-				if not cleared then
-					warn(`[Run] {map.id} not cleared for {userId} ({map.rewardRaindrops} Raindrops): {err}`)
-				end
-				addRun(userId)
-			end)
-		else
-			save.finished = false
-			warn(`[Run] the finished run {run.key} wasn't stored, so no Raindrops were paid; it ends again on its next load`)
+		local key = run.key
+		if not saveNow("ocean full", END_SAVE_SECONDS) then
+			warn(`[Run] the finished run {key} isn't confirmed stored; if it never lands, it ends again on its next load`)
 		end
+		eachMember(PROGRESS_SECONDS, function(userId)
+			local cleared, err = PlayerData.clearMap(userId, map.id, map.rewardRaindrops, key)
+			if not cleared then
+				warn(`[Run] {map.id} not cleared for {userId} ({map.rewardRaindrops} Raindrops): {err}; paid on their next lobby join`)
+			end
+			addRun(userId)
+		end)
 	end
 	task.wait(math.max(0, shownUntil - os.clock()))
 	setPhase("done")
@@ -403,8 +405,9 @@ end
 
 -- Locks the run to this server, then loads its save (a new one if there is none yet). Returns the
 -- save, or nil and what to tell the players. Nothing is loaded without the lock, and a failed load,
--- another team's save or a finished run is never played, so it can't be overwritten.
-local function openRun(key: string, mapId: string, members: { number }): (RunSave.Save?, string?)
+-- another team's save or a finished run is never played, so it can't be overwritten. Only a Studio
+-- test (replaceFinished) starts a fresh save in place of a finished one, so the team can test again.
+local function openRun(key: string, mapId: string, members: { number }, replaceFinished: boolean): (RunSave.Save?, string?)
 	local locked, lockErr = RunStore.lock(key, serverId)
 	if not locked then
 		warn(`[Run] couldn't lock run {key}: {lockErr}`)
@@ -419,6 +422,11 @@ local function openRun(key: string, mapId: string, members: { number }): (RunSav
 	elseif save and (save.mapId ~= mapId or not RunSave.sameTeam(save, members)) then
 		warn(`[Run] run {key} belongs to another team or map; not loaded`)
 		problem = "This run belongs to another team"
+	elseif save and save.finished and replaceFinished then
+		warn(`[Run] Studio: run {key} is finished; starting a fresh save in its place`)
+		local fresh = RunSave.new(mapId, members)
+		fresh.updatedAt = save.updatedAt -- the first write lands above it (snapshot adds 1)
+		return fresh, nil
 	elseif save and save.finished then
 		problem = "This run is already finished"
 	end
@@ -471,14 +479,14 @@ local function startRun()
 	elseif #members == 0 then
 		problem = "no team that can save (Studio test accounts)"
 	else
-		save, problem = openRun(key, map.id, members)
+		save, problem = openRun(key, map.id, members, session.mode == "test")
 	end
 	if not save then
 		if session.mode ~= "test" then
 			closeRun(problem :: string)
 			return
 		end
-		warn(`[Run] Studio: playing without saving ({problem}). Saving needs Studio API access.`)
+		warn(`[Run] Studio: playing without saving: {problem} (see the warning above for the cause)`)
 		save = RunSave.new(map.id, members)
 	else
 		run.key = key
@@ -695,6 +703,7 @@ end
 -- A scoop sweep or a pour. Checked when it starts (distance, room or water). A scoop is
 -- credited when it ends (it always plays out in full on the client) and is paced: on average one
 -- per actSeconds, with slack for latency. A pour is instant and needs no pacing: it empties the tool.
+-- lihfolk-ignore: remote-unvalidated-args (kind is checked against exactly "scoop" / "pour" below)
 local function onAct(player: Player, kind: unknown)
 	local state = states[player]
 	if not state or (kind ~= "scoop" and kind ~= "pour") or not state.equipped or run.phase ~= "playing" then

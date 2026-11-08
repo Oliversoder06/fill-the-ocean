@@ -97,25 +97,44 @@ function tests.remove_unknown_run_changes_nothing(t)
 end
 
 function tests.clear_map_adds_raindrops_and_marks_the_map(t)
-	local after = Progress.clearMap({ raindrops = 10, runs = { "map1_1" } }, "map1", 100)
+	local after = Progress.clearMap({ raindrops = 10, runs = { "map1_1" } }, "map1", 100, "map1_1")
 	t.expectEq(after.raindrops, 110)
 	t.expectEq(after.mapsCleared.map1, true)
+	t.expectEq(after.paidRuns.map1_1, true, "the run is marked paid")
 	t.expectEq(after.runs[1], "map1_1", "clearing a map keeps the run list")
-	local again = Progress.clearMap(after, "map1", 100)
-	t.expectEq(again.raindrops, 210, "a replay still pays")
+	local again = Progress.clearMap(after, "map1", 100, "map1_1_2")
+	t.expectEq(again.raindrops, 210, "a replay (another run) still pays")
 	t.expectEq(again.mapsCleared.map1, true)
 end
 
+function tests.clear_map_pays_each_run_once(t)
+	local after = Progress.clearMap({ raindrops = 10 }, "map1", 100, "map1_1")
+	local again = Progress.clearMap(after, "map1", 100, "map1_1")
+	t.expectEq(again.raindrops, 110, "the same run's ending again pays nothing")
+	t.expectEq(again.mapsCleared.map1, true)
+	t.expectEq(Progress.isPaid(again, "map1_1"), true)
+	t.expectEq(Progress.isPaid(again, "map1_2"), false)
+end
+
+function tests.sanitize_keeps_paid_runs(t)
+	local s = Progress.sanitize({ paidRuns = { map1_1 = true, map1_2 = "yes", [3] = true, [""] = true } })
+	t.expectEq(s.paidRuns.map1_1, true)
+	t.expectEq(s.paidRuns.map1_2, nil)
+	t.expectEq(s.paidRuns[3], nil)
+	t.expectEq(s.paidRuns[""], nil)
+	t.expectEq(next(Progress.sanitize(nil).paidRuns), nil)
+end
+
 function tests.clear_map_ignores_bad_raindrops(t)
-	t.expectEq(Progress.clearMap({ raindrops = 10 }, "map1", -50).raindrops, 10)
-	t.expectEq(Progress.clearMap({ raindrops = 10 }, "map1", 2.7).raindrops, 12)
+	t.expectEq(Progress.clearMap({ raindrops = 10 }, "map1", -50, "map1_1").raindrops, 10)
+	t.expectEq(Progress.clearMap({ raindrops = 10 }, "map1", 2.7, "map1_1").raindrops, 12)
 end
 
 function tests.changes_return_new_tables(t)
 	local raw = { raindrops = 1, runs = { "map1_1" }, mapsCleared = {} }
 	Progress.addRun(raw, "map1_2")
 	Progress.removeRun(raw, "map1_1")
-	Progress.clearMap(raw, "map1", 5)
+	Progress.clearMap(raw, "map1", 5, "map1_1")
 	t.expectEq(#raw.runs, 1)
 	t.expectEq(raw.runs[1], "map1_1")
 	t.expectEq(raw.raindrops, 1)

@@ -1,8 +1,14 @@
 --!strict
--- A player's saved progress: Raindrops, their saved-run keys (newest first) and the maps they
--- cleared. Pure: Lune-tested. PlayerData does the DataStore calls; this module only decides the data.
+-- A player's saved progress: Raindrops, their saved-run keys (newest first), the maps they cleared
+-- and the runs whose ending paid them (each pays once). Pure: Lune-tested. PlayerData does the
+-- DataStore calls; this module only decides the data.
 
-export type Data = { raindrops: number, runs: { string }, mapsCleared: { [string]: boolean } }
+export type Data = {
+	raindrops: number,
+	runs: { string },
+	mapsCleared: { [string]: boolean },
+	paidRuns: { [string]: boolean },
+}
 
 local Progress = {}
 
@@ -10,7 +16,7 @@ local Progress = {}
 Progress.MAX_RUNS = 10
 
 function Progress.default(): Data
-	return { raindrops = 0, runs = {}, mapsCleared = {} }
+	return { raindrops = 0, runs = {}, mapsCleared = {}, paidRuns = {} }
 end
 
 -- Fills in missing or broken fields so old or partial saves still load. Unknown fields (such as
@@ -35,6 +41,13 @@ function Progress.sanitize(raw: any): Data
 			for mapId, cleared in raw.mapsCleared do
 				if type(mapId) == "string" and cleared == true then
 					data.mapsCleared[mapId] = true
+				end
+			end
+		end
+		if type(raw.paidRuns) == "table" then
+			for key, paid in raw.paidRuns do
+				if type(key) == "string" and key ~= "" and paid == true then
+					data.paidRuns[key] = true
 				end
 			end
 		end
@@ -63,10 +76,20 @@ function Progress.removeRun(raw: any, key: string): Data
 	return data
 end
 
--- The ocean of mapId was filled: add the Raindrops and mark the map cleared. Returns a new table.
-function Progress.clearMap(raw: any, mapId: string, raindrops: number): Data
+-- Has the ending of run runKey already paid this player?
+function Progress.isPaid(raw: any, runKey: string): boolean
+	return Progress.sanitize(raw).paidRuns[runKey] == true
+end
+
+-- Run runKey filled mapId's ocean: add the Raindrops and mark the map cleared and the run paid. A run
+-- that already paid this player pays nothing again, so an ending that runs twice can't pay twice.
+-- Returns a new table.
+function Progress.clearMap(raw: any, mapId: string, raindrops: number, runKey: string): Data
 	local data = Progress.sanitize(raw)
-	data.raindrops += math.max(0, math.floor(raindrops))
+	if not data.paidRuns[runKey] then
+		data.raindrops += math.max(0, math.floor(raindrops))
+		data.paidRuns[runKey] = true
+	end
 	data.mapsCleared[mapId] = true
 	return data
 end

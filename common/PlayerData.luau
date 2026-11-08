@@ -67,10 +67,11 @@ function PlayerData.removeRun(userId: number, runKey: string): (Progress.Data?, 
 	end)
 end
 
--- The player's team filled mapId's ocean: pays the Raindrops and marks the map cleared.
-function PlayerData.clearMap(userId: number, mapId: string, raindrops: number): (Progress.Data?, string?)
+-- The player's team filled mapId's ocean in run runKey: pays the Raindrops (once per run) and marks
+-- the map cleared.
+function PlayerData.clearMap(userId: number, mapId: string, raindrops: number, runKey: string): (Progress.Data?, string?)
 	return update(userId, "clear map", function(old)
-		return Progress.clearMap(old, mapId, raindrops)
+		return Progress.clearMap(old, mapId, raindrops, runKey)
 	end)
 end
 

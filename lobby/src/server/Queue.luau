@@ -389,13 +389,24 @@ local function launch(pad: Pad, party: { Player }, title: string, prepare: () ->
 	pad.launching = false
 end
 
--- A new party (Create Party): the same team on the same map always gets the same run key.
+-- A new party (Create Party): the same team on the same map always gets the same run key, so a team
+-- that already has a save there is sent to Saved Runs (or told it's done) instead of launching.
 local function launchParty(pad: Pad)
 	local settings = pad.settings :: SessionRules.Settings
 	local party = table.clone(pad.members)
 	local members = userIds(party)
 	launch(pad, party, mapName(settings.mapId), function()
-		return { mapId = settings.mapId, key = RunSave.key(settings.mapId, members), members = members }, nil
+		local key = RunSave.key(settings.mapId, members)
+		local save, err = RunStore.load(key)
+		if err then
+			warn(`[Queue] couldn't check run {key} before a new party: {err}`)
+			return nil, "Couldn't start the run. Please try again."
+		elseif save and save.finished then
+			return nil, "Your team already filled this ocean!"
+		elseif save then
+			return nil, "Your team already has a run on this map. Load it from Saved Runs."
+		end
+		return { mapId = settings.mapId, key = key, members = members }, nil
 	end)
 end
 
