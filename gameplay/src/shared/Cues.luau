@@ -34,8 +34,34 @@ Cues.pour = {
 	pitchMin = 0.78,
 	pitchMax = 0.9,
 	vfx = "ScoopSplash",
-	sizeScale = 1.6,
 	otherBurstScale = 0.5,
+}
+
+-- Poured water on its way to the ocean (client/Channels, shared/PourFlow). Channel water textures
+-- trickle at trickleSpeed; a pour at an area's Pour sends `wave` (a part in ReplicatedStorage.Vfx) down
+-- the channel at waveSpeed studs a second, at most maxWaves on screen; it lingers waveLinger seconds
+-- for its particles to fade, then `splash` plays where it meets the ocean and the fill bar pulses.
+-- The seabed's pour marker is gone by markerFadeFill.
+Cues.channel = {
+	wave = "ChannelWave",
+	waveSpeed = 40,
+	trickleSpeed = 3,
+	maxWaves = 8,
+	waveLinger = 1.5,
+	pulseMin = 1.04,
+	pulseMax = 1.12,
+	pulseFullLitres = 1e6,
+	markerFadeFill = 0.05,
+	splash = {
+		splashSounds = { "ScoopSplash1", "ScoopSplash2", "ScoopSplash3" },
+		splashVolume = 0.8,
+		otherVolume = 0.5,
+		pitchMin = 0.7,
+		pitchMax = 0.82,
+		vfx = "ScoopSplash",
+		sizeScale = 2,
+		otherBurstScale = 1,
+	},
 }
 
 -- Your own payout: coins from shared/CoinBurst. `coin` is a Part and `pop` a BillboardGui (with a

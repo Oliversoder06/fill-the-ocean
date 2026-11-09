@@ -1,7 +1,9 @@
 -- Vehicles (Config.items kind "vehicle", shared/VehicleRules): Fire Truck, Tanker, Snowcat Tanker and
 -- Water Bomber. Bought at the Fire Station like a cove shop (Config.stands, server/Run onStand) and
--- levelled in TAB. The station's CallPrompt brings the player's best owned vehicle out at its
--- VehicleSpawn: a clone of ReplicatedStorage.Vehicles.<model> named Vehicle_<UserId>. One out per
+-- levelled in TAB. The station's CallPrompt brings one of the player's owned vehicles out at its
+-- VehicleSpawn: the best (the furthest area's) first, then each call while one is out swaps it for the
+-- next one down (Items.nextOwned; client/Vehicles names it in the prompt). A clone of
+-- ReplicatedStorage.Vehicles.<model> named Vehicle_<UserId>. One out per
 -- player; it goes when they leave, call again or play ends. Only its owner gets in, through the seat's
 -- DrivePrompt (touch seating is off). The driver owns its physics while seated
 -- (client/Vehicles sets the Drive and Turn constraints made here); vehicles pass through characters
@@ -258,7 +260,7 @@ local function spawn(player: Player, item)
 	publish(player)
 end
 
--- The CallPrompt: brings out the player's best owned vehicle (the furthest area's, Items.furthest).
+-- The CallPrompt: brings out the owned vehicle after the one out now (Items.nextOwned), replacing it.
 local function onCall(player: Player, prompt: ProximityPrompt)
 	local state = hooks.states[player]
 	local now = os.clock()
@@ -269,7 +271,8 @@ local function onCall(player: Player, prompt: ProximityPrompt)
 	if not hooks.inReach(player, prompt) then
 		return
 	end
-	local item = Items.furthest(Config, state, "vehicle")
+	local current = out[player]
+	local item = Items.nextOwned(Config, state, "vehicle", current and current.item.id)
 	if not item then
 		hooks.tell(player, "Buy a vehicle here at the Fire Station first")
 		return

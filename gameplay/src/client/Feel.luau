@@ -26,7 +26,7 @@ local function checkAssets(): (Instance, Instance)
 	assert(audio, "ReplicatedStorage.Audio is missing (the sounds are baked into the place)")
 	local vfx = ReplicatedStorage:WaitForChild("Vfx", 10)
 	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
-	for _, cue in { Cues.scoop, Cues.pour } do
+	for _, cue in { Cues.scoop, Cues.pour, Cues.channel.splash } do
 		local names = table.clone(cue.splashSounds)
 		if (cue :: any).holdSound then
 			table.insert(names, (cue :: any).holdSound)
@@ -55,31 +55,36 @@ local function scaled(sequence: NumberSequence, factor: number): NumberSequence
 	return NumberSequence.new(points)
 end
 
-function Feel.start()
-	local audio, vfx = checkAssets()
+local audio: Instance, vfx: Instance -- ReplicatedStorage.Audio and Vfx, checked by Feel.start
 
-	local function splash(cue, at: Vector3, tier: number, own: boolean)
-		local effect = (vfx :: any)[cue.vfx]:Clone() :: Attachment
-		effect.Parent = workspace.Terrain
-		effect.WorldPosition = at
-		local size = Cues.size(tier) * cue.sizeScale
-		local burstScale = if own then 1 else cue.otherBurstScale
-		for _, emitter in effect:GetChildren() do
-			if emitter:IsA("ParticleEmitter") then
-				emitter.Size = scaled(emitter.Size, size)
-				emitter:Emit(math.max(1, math.floor(emitter:GetAttribute("Burst") * size * burstScale + 0.5)))
-			end
+-- A splash of `cue` (Cues.scoop, pour, channel.splash) at `at`, sized by tool `tier`. `own`: the local
+-- player's, a flat sound; else a quieter one in the world. Works once Feel.start has run.
+function Feel.splash(cue, at: Vector3, tier: number, own: boolean)
+	local effect = (vfx :: any)[cue.vfx]:Clone() :: Attachment
+	effect.Parent = workspace.Terrain
+	effect.WorldPosition = at
+	local size = Cues.size(tier) * cue.sizeScale
+	local burstScale = if own then 1 else cue.otherBurstScale
+	for _, emitter in effect:GetChildren() do
+		if emitter:IsA("ParticleEmitter") then
+			emitter.Size = scaled(emitter.Size, size)
+			emitter:Emit(math.max(1, math.floor(emitter:GetAttribute("Burst") * size * burstScale + 0.5)))
 		end
-		local sound = (audio :: any)[Cues.pick(cue.splashSounds, rng:NextNumber())]:Clone() :: Sound
-		sound.PlaybackSpeed = Cues.between(cue.pitchMin, cue.pitchMax, rng:NextNumber()) * Cues.pitch(tier)
-		sound.Volume = if own then cue.splashVolume else cue.otherVolume
-		sound.Parent = if own then SoundService else effect -- own: flat and close; others: in the world
-		sound:Play()
-		task.delay(CLEANUP_SECONDS, function()
-			sound:Destroy()
-			effect:Destroy()
-		end)
 	end
+	local sound = (audio :: any)[Cues.pick(cue.splashSounds, rng:NextNumber())]:Clone() :: Sound
+	sound.PlaybackSpeed = Cues.between(cue.pitchMin, cue.pitchMax, rng:NextNumber()) * Cues.pitch(tier)
+	sound.Volume = if own then cue.splashVolume else cue.otherVolume
+	sound.Parent = if own then SoundService else effect -- own: flat and close; others: in the world
+	sound:Play()
+	task.delay(CLEANUP_SECONDS, function()
+		sound:Destroy()
+		effect:Destroy()
+	end)
+end
+
+function Feel.start()
+	audio, vfx = checkAssets()
+	local splash = Feel.splash
 
 	-- Own actions: a slosh that rises in pitch through each sweep, a splash where you aimed.
 	local hold: Sound? = nil

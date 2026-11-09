@@ -46,7 +46,8 @@ Server (`src/server/`):
   rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
   `rocksBroken` and `goldenId` when it credits a scoop.
 - `Vehicles.luau`: vehicles (Fire Truck, Tanker, Snowcat Tanker, Water Bomber): the Fire Station's
-  `CallPrompt` brings the best owned one out (`Vehicle_<UserId>`), owner-only `DrivePrompt`, driver
+  `CallPrompt` brings an owned one out (`Vehicle_<UserId>`): the best first, each call while one is
+  out swaps it for the next one down (`Items.nextOwned`), owner-only `DrivePrompt`, driver
   network ownership, collision groups, hydrant fill, truck hose spray, bomber skim and drop; `Run`
   starts it with the same hooks as `Mechanics` and calls `leave` / `stop`.
 - `Buildings.luau`: the team's buildings on `workspace.Map.Plots.PlotN` (`Build` remote, TAB levels
@@ -63,11 +64,18 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
   panel: stopwatch, map name, fill bar), frees the cursor while
   a window is open. Exposes helpers `Hud.find` (asserting path lookup), `Hud.set` (write only on
-  change), `Hud.short` (1.2K), `Hud.money` (12,480), `Hud.ocean`, and `Hud.walletHold`
+  change), `Hud.short` (1.2K), `Hud.money` (12,480), `Hud.ocean`, `Hud.pulseFill(litres)` (the fill
+  bar's pulse when poured water reaches the ocean) and `Hud.walletHold`
   (money still flying in as coins; the wallet shows Money minus it).
 - `Action.luau`: scoop and pour input (aim at the water + hold E / LMB / RT / touch button), one
   full sweep or pour per action, the `ActHint` text. Viewmodel and Feel read `Action.current()`.
-- `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`.
+- `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`;
+  `Feel.splash` is shared with `Channels`.
+- `Channels.luau`: poured water's trip to the ocean: open areas' `Channel.Water` textures trickle,
+  each `LastPour` at an area's Pour sends a pooled `Vfx.ChannelWave` down its `Channel.Path`, which
+  splashes at the ocean and pulses the fill bar (cove pours just pulse it); fades the seabed's
+  `Ocean.PourDecal` as the ocean fills (`Cues.channel`, `shared/PourFlow`). Its `textures` / `scroll`
+  also scroll the aqueducts (`Buildings`).
 - `Payout.luau`: when Money goes up, coins burst from the pour, land around you and fly into the
   wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
 - `Shop.luau`: the shop window: one tile per upgrade track in the Tool and Boosts panels, and a
@@ -107,7 +115,8 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Vehicles.luau`: drives your own vehicle while seated (sets its `Drive` / `Turn` constraints from
   the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `driving` (seated in
   your own: CameraFeel goes third person, Viewmodel hides), `hoseReady` (on foot by
-  your truck with water: Action sprays it) and `gauge` (Hotbar shows the tank).
+  your truck with water: Action sprays it) and `gauge` (Hotbar shows the tank); names the next vehicle
+  in the Fire Station's `CallPrompt` while it shows (local `ActionText`, `Items.nextOwned`).
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
 - `Buildings.luau`: the build picker (`Hud.BuildPicker`, options cloned from
   `Hud.Templates.BuildOption`) opened by a plot's prompt; scrolls flowing aqueducts' water.
@@ -142,7 +151,10 @@ Shared (`src/shared/`, pure unless noted):
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
   vehicle's own area). Numbers in `Config.vehicle`; `Water.share` splits a tank's value.
-- `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
+- `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). `Zones.channelPath` reads
+  an area's `Channel.Path` (server/Map checks it, client/Channels follows it).
+- `PourFlow.luau` (pure, tested): the `LastPour` attribute's `encode` / `decode`, a wave's place
+  `along` a channel path, the fill bar's `pulse` and the seabed marker's fade.
 - `StaffRules.luau` (pure, tested): staff `targets` / `post` / `nextPost` (where each job may work),
   `rate`, `payPerLitre`, `bonus` (2x), `plumber`, `walkFactor`, the `Staff` attribute's
   `encode` / `decode`. Numbers in `Config.staff`.
@@ -160,7 +172,8 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus` (plus the Jetpack Tank's),
   `standPick` (an area's stand or a cove shop in `Config.stands`; never a building), `gadgetStat`,
   `slots` (hotbar gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`,
-  `buildingOffer` / `buildingStat` (the team's building levels).
+  `buildingOffer` / `buildingStat` (the team's building levels), `nextOwned` (the vehicle a Fire
+  Station call brings next).
 - `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore).
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps.
@@ -175,7 +188,8 @@ The server publishes state as attributes; the client only reads them.
   `MapId`, `MapName`, `Current`, `Target`, `Fill`, `Waiting`, `RunStartedAt` (server time) and
   `PlaySeconds` (time played on this save before this session), for the stopwatch, `Boost`
   (running boost id or `""`) and `BoostEndsAt` (server time), `RocksBroken` (`"1,3"`), `Golden`
-  (area id of the golden spring, 0 for none) and `GoldenEndsAt`; vent parts carry `VentState`
+  (area id of the golden spring, 0 for none) and `GoldenEndsAt`, `LastPour`
+  (`"<areaId>@<litres>@<serverTime>"`, set on every accepted `Act` pour; `shared/PourFlow`); vent parts carry `VentState`
   (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the
   boost applied. `BuildingLevel_<id>` (the team's upgrades per building, nil until built); a placed
   building (`Plots.PlotN.Building`) carries `Clogged`; `Town.Aqueduct_<side>` carries `Flowing`.

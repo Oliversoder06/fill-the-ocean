@@ -4,16 +4,17 @@
 -- out as attributes. The server checks the distance and, for scoops, the pace (one per ActSeconds
 -- x the area's scoopFactor) when an action starts. A scoop is credited when it ends; a pour is
 -- instant. Gates (Config.areas) are bought through their ProximityPrompt and open for the whole
--- team (save.gatesOpen, published as GatesOpen); pads move players between open areas. Items
+-- team (save.gatesOpen, published as GatesOpen). Items
 -- (Config.items, common/Items) are bought once through their area's stand prompt and levelled with
 -- Buy(itemId); a worn backpack adds to Capacity. Gadgets (kind "gadget") with a hotbar slot are taken
 -- out with Equip(itemId) instead of the tool: the Water Gun pours from its range (Act "pour"), the
 -- Garden Hose clips to an area's Tap and pours from it while the player stays in reach and holds the
 -- act input (Gadget "clip" / "spray"), and the Jetpack Tank flies while its fuel lasts (Gadget "fly";
 -- server/HeldTools adds the lift only while Flying is set). Cloud Catcher (an area that `needs` an
--- item) is reached only with the Jetpack Tank: pads, spawn, scoop and pour skip it without one. Each
+-- item) is reached only with the Jetpack Tank: spawn, scoop and pour skip it without one. Each
 -- accepted action is published as ActKind + ActAt (server time) so other clients can play it on
--- that player's body (client/Bodies).
+-- that player's body (client/Bodies); an accepted pour also goes out as LastPour (shared/PourFlow:
+-- area, litres, server time) for the wave down that area's channel (client/Channels).
 -- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
 -- Area mechanics (server/Mechanics, shared/AreaRules): steam vents, snow, the drifting cloud (the
 -- Cloud Net scoops it from its range), ice blocks at the Glacier's Source (each sweep is a hit; the
@@ -48,6 +49,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
+local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Water = require(ReplicatedStorage.Shared.Water)
 local Zones = require(ReplicatedStorage.Shared.Zones)
@@ -79,7 +81,6 @@ local HOSE_TICK = 0.5 -- seconds between the hose's credits while it sprays
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
-local PAD_COOLDOWN = 2 -- seconds after a pad move before a pad moves the same player again
 local STAND_COOLDOWN = 0.5 -- seconds between accepted stand prompts per player (exploits can fire prompts)
 local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action pace check (mobile lag spikes)
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
@@ -711,7 +712,6 @@ local function onPlayerAdded(player: Player)
 		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
 		windows = {} :: { [string]: { start: number, count: number } }, -- per-remote rate limits (allow)
 		lastLookAt = 0, -- os.clock() of the last accepted Look
-		padAt = 0, -- os.clock() of the last pad move
 		standAt = 0, -- os.clock() of the last accepted stand prompt
 		equipped = true, -- the tool is in hand
 		gadget = "", -- the hotbar gadget in hand instead (an item id), "" for none
@@ -1012,9 +1012,11 @@ local function onAct(player: Player, kind: unknown)
 		return
 	end
 	if kind == "pour" then
+		local before = state.carried
 		if creditPour(state) then
 			worked(state, poured)
 			publishAct(player, kind)
+			setGlobal("LastPour", PourFlow.encode(poured, before - state.carried, workspace:GetServerTimeNow()))
 			publish(player)
 			checkFull()
 		end
@@ -1083,32 +1085,6 @@ local function onStand(player: Player, area, prompt: ProximityPrompt, stand: str
 	local bought = if item.kind == "staff" then `You hired a {item.name}! Assign them in TAB (Staff)` else `You bought the {item.name}!`
 	remotes.Card:FireClient(player, bought, CARD_SECONDS)
 	task.spawn(saveRun, `{player.Name} bought {item.id}`)
-end
-
--- A pad in an open area moves the player to the next open area's Spawn, in area order, the last
--- one back to the cove.
-local function onPad(area, hit: BasePart)
-	local character = hit.Parent
-	local player = character and Players:GetPlayerFromCharacter(character)
-	local state = player and states[player]
-	local now = os.clock()
-	if not player or not state or not run.save or now - state.padAt < PAD_COOLDOWN then
-		return
-	end
-	local open = reachableIds(state)
-	local i = table.find(open, area.id)
-	if not i or #open == 1 then
-		return -- a closed area's pad, or nowhere else to go
-	end
-	state.padAt = now
-	-- An open area skipped for lack of its item (Cloud Catcher without the jetpack) says why.
-	local all = Areas.openIds(run.save.gatesOpen)
-	local skipped = Areas.byId(Config, all[(table.find(all, area.id) :: number) % #all + 1])
-	if skipped.needs and not table.find(open, skipped.id) then
-		local needs = Items.get(Config, skipped.needs)
-		remotes.Card:FireClient(player, `{skipped.name} is up in the clouds: you need the {needs.name}`, CARD_SECONDS)
-	end
-	moveTo(player, areaPart(Areas.byId(Config, open[i % #open + 1]), "Spawn"))
 end
 
 -- Gadget requests from the hotbar gadget in hand (client/Action, client/Jetpack):
@@ -1322,9 +1298,6 @@ function Run.start(oceanModel: Model)
 				onGate(player, area)
 			end)
 		end
-		areaPart(area, "Pad").Touched:Connect(function(hit)
-			onPad(area, hit)
-		end)
 		local stand = Map.stand(ocean, area)
 		local prompt = stand and Map.standPrompt(stand)
 		if prompt then

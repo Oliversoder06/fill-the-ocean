@@ -15,6 +15,7 @@ local BuildingRules = require(ReplicatedStorage.Shared.BuildingRules)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Channels = require(script.Parent.Channels)
 local Hud = require(script.Parent.Hud)
 local Purchase = require(script.Parent.Purchase)
 local Window = require(script.Parent.Window)
@@ -59,13 +60,7 @@ local function findFlows()
 		local aqueduct = town and town:FindFirstChild(`Aqueduct_{side}`)
 		local water = aqueduct and aqueduct:FindFirstChild("Water")
 		if water then
-			local textures = {}
-			for _, texture in water:GetChildren() do
-				if texture:IsA("Texture") then
-					table.insert(textures, texture)
-				end
-			end
-			flows[side] = { aqueduct = aqueduct :: Instance, textures = textures }
+			flows[side] = { aqueduct = aqueduct :: Instance, textures = Channels.textures(water) }
 		end
 	end
 end
@@ -79,9 +74,7 @@ local function scrollAqueducts(dt: number)
 	end
 	for _, flow in flows do
 		if flow.aqueduct:GetAttribute("Flowing") == true then
-			for _, texture in flow.textures do
-				texture.OffsetStudsV = (texture.OffsetStudsV + FLOW_SPEED * dt) % texture.StudsPerTileV
-			end
+			Channels.scroll(flow.textures, FLOW_SPEED, dt)
 		end
 	end
 end

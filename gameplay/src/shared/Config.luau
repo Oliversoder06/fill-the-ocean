@@ -25,7 +25,7 @@ export type Area = {
 	scoopFactor: number, -- scoop sweeps here take actSeconds * this
 	gate: { fill: number, price: number }?, -- on sale once the ocean is `fill` full; nil = open from the start
 	model: string?, -- its model in workspace.Areas (server/Map); nil = the cove, whose parts are the ocean's
-	needs: string?, -- an item id: only players who own it reach this area (pads, spawn, scoop, pour)
+	needs: string?, -- an item id: only players who own it reach this area (spawn, scoop, pour)
 	-- its area mechanic (shared/AreaRules, server/Mechanics): "steam" vents knock you back and Heat
 	-- Gloves speed up its pools; "ice": its Source gives ice blocks you chip; "cloud": its Source drifts
 	mechanic: ("steam" | "ice" | "cloud")?,

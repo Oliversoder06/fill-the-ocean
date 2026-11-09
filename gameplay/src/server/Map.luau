@@ -1,8 +1,7 @@
 --!strict
 -- The ocean lives in the Studio place (workspace.Ocean). This module checks it and moves the water.
 -- Contract, one Model workspace.Ocean holding:
---   Spawn     where players appear
---   Pad       touching it moves you to the next open area's Spawn (as in every area below)
+--   Spawn     where players appear (the furthest open area's Spawn, server/Run)
 --   Source    invisible zone over the well; players aim at it to scoop (client/Action)
 --   PourPoint marks the usual pour spot at the basin rim (tripDistance from Source); pouring
 --             itself works anywhere next to where the Water will be (shared/Zones.nearFlood)
@@ -11,16 +10,20 @@
 --   Water     with a number attribute "Depth"; rises with the fill fraction. It may hold BasePart
 --             children: extra tiles for water wider than one part can be (2048 studs); every tile
 --             keeps its own X and Z and rises with it
+--   PourDecal a flat part on the seabed by PourPoint holding a Decal ("POUR HERE"), shown while the
+--             ocean is nearly empty (client/Channels fades it out as it fills)
 -- Areas 2-5 (Config.areas with a `model`): one Model each in workspace.Areas, named by that model:
 --   Source    zone over the area's water; scooping here pays the area's rate (server/Run)
 --   Pour      the channel inlet; pouring here counts as pouring into the ocean
+--   Channel   the channel from the Pour down to the ocean (client/Channels): Path, a Folder of parts
+--             named 1..N (N >= 2) from the Pour to where it meets the ocean, that a wave follows after
+--             every pour; Water, a part or a Folder/Model of parts whose Textures trickle downstream
 --   Tap       the Garden Hose's tap by the Pour, holding an Attachment "Hose" (the rope's end)
 --   Gate      Model: Blocker and Boards (parts, or models of parts) that close the way in, Sign
 --             (a SurfaceGui with a TextLabel "Label", client/Gates) and a part Prompt holding a
 --             ProximityPrompt "Prompt" (buys the gate)
 --   Stand     the area's shop stand (a part or Model) holding a ProximityPrompt "Prompt" that buys
 --             the area's items (server/Run); the cove's is workspace.Map.Beach.BackpackStand
---   Pad       touching it moves you to the next open area's Spawn
 --   Spawn     where players appear in the area
 -- Every area, the cove (in workspace.Ocean) included, also holds its deeper pool (server/Mechanics):
 --   DeepPool  zone over the deeper pool's water; scooping here brings Config.deepPool.sweepScale
@@ -42,8 +45,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Zones = require(ReplicatedStorage.Shared.Zones)
 
-local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water", "Pad", "Tap" }
-local AREA_PARTS = { "Source", "Pour", "Pad", "Spawn", "Tap" }
+local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water", "Tap", "PourDecal" }
+local AREA_PARTS = { "Source", "Pour", "Spawn", "Tap" }
 
 local Map = {}
 
@@ -246,6 +249,9 @@ local function ensureArea(ocean: Model, area)
 		assert(Zones.areaPart(ocean, area, name), `{model:GetFullName()} is missing part {name}`)
 	end
 	Map.tapAttachment(Zones.areaPart(ocean, area, "Tap") :: BasePart)
+	local channel = child(model, "Channel")
+	child(channel, "Water")
+	assert(Zones.channelPath(ocean, area), `{channel:GetFullName()}.Path needs parts named 1..N (N >= 2, no gaps) from the Pour to the ocean`)
 	child(model, "Stand")
 	local gate = child(model, "Gate")
 	assert(gate:IsA("Model"), `{gate:GetFullName()} must be a Model`)
@@ -265,6 +271,7 @@ function Map.ensure(config): Model
 	end
 	assert(type(Zones.part(model, "Water"):GetAttribute("Depth")) == "number", `Ocean: Water needs a number attribute "Depth"`)
 	Map.tapAttachment(Zones.part(model, "Tap"))
+	assert(Zones.part(model, "PourDecal"):FindFirstChildWhichIsA("Decal"), "Ocean: PourDecal needs a Decal")
 
 	for _, area in config.areas do
 		if area.model then

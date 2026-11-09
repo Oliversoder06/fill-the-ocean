@@ -121,6 +121,25 @@ function tests.best_vehicle(t)
 	t.expectEq(Items.furthest(Config, state, "vehicle"), Items.get(Config, "snowcatTanker"))
 end
 
+-- The Fire Station chooses: a call with none out brings the best; each call while one is out brings
+-- the next one down, wrapping back to the best.
+function tests.call_cycles_owned_vehicles(t)
+	local state = fresh()
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", nil), nil, "none owned")
+	own(state, "waterGun")
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", ""), nil, "gadgets aren't vehicles")
+	own(state, "fireTruck")
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", nil), Items.get(Config, "fireTruck"))
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", "fireTruck"), Items.get(Config, "fireTruck"), "the only one comes back")
+	own(state, "waterBomber")
+	own(state, "tanker")
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", ""), Items.get(Config, "waterBomber"), "none out: the best")
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", "waterBomber"), Items.get(Config, "tanker"))
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", "tanker"), Items.get(Config, "fireTruck"))
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", "fireTruck"), Items.get(Config, "waterBomber"), "wraps to the best")
+	t.expectEq(Items.nextOwned(Config, state, "vehicle", "snowcatTanker"), Items.get(Config, "waterBomber"), "not owned: the best")
+end
+
 function tests.fill_until_full(t)
 	t.expectEq(VehicleRules.fill(0, 100, 10, 1), 10)
 	t.expectEq(VehicleRules.fill(95, 100, 10, 1), 100, "never above the tank")

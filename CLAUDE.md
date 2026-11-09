@@ -34,18 +34,21 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
   - gameplay: the ocean model `workspace.Ocean` (`Spawn`, `Basin`, `Water`, an invisible `Source`
-    over the water source and `PourPoint` marking the usual pour spot; `Map.ensure` checks them;
+    over the water source and `PourPoint` marking the usual pour spot, and `PourDecal`, a flat part
+    on the seabed with a Decal that client/Channels fades out as the ocean fills; `Map.ensure` checks them;
     players pour anywhere next to where the water will be, see
     `shared/Zones.nearFlood`; a `Tap` with an Attachment `Hose` for the Garden Hose, as in every
-    area), `ReplicatedStorage.ToolModels`
+    area), each area's `Areas.<Name>.Channel` from its `Pour` to the ocean (`Path`: parts named
+    1..N in order, a wave follows them; `Water`: parts whose Textures trickle; server/Map),
+    `ReplicatedStorage.ToolModels`
     (one Model per hero tool, and `Gadgets.<Model>` per gadget; swap placeholders for real models
     under the same name), `workspace.Map.Town.ToolShack`'s ProximityPrompt `Prompt` (sells the Water Gun),
     `workspace.Map.Town.FireStation` (`Prompt` sells vehicles, `CallPrompt` and part `VehicleSpawn`
-    bring one out), `ReplicatedStorage.Vehicles.<Model>` (VehicleSeat `Seat` with a `DrivePrompt`),
+    bring one out, the next owned one on each call), `ReplicatedStorage.Vehicles.<Model>` (VehicleSeat `Seat` with a `DrivePrompt`),
     hydrants (`Map.Roads.TruckRefillBay1/2`, `Areas.<Name>.Hydrant`; server/Map),
     `workspace.Map.Beach.Stage_Ocean_LifeguardTower`'s ProximityPrompt `Prompt` (hires staff),
     `ReplicatedStorage.Staff.<Model>` (R15 staff rigs with a PrimaryPart; client/Staff walks copies),
-    `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
+    `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects, `ChannelWave` included) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.
   - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, sign with Title and Status labels; any

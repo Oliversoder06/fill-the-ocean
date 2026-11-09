@@ -9,8 +9,10 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
+local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
+local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
@@ -236,6 +238,16 @@ end
 -- up coin by coin instead of jumping when the server pays.
 Hud.walletHold = 0
 
+local fillPop: UIScale? = nil -- the fill bar's Progress.Bar.Pop, once Hud.start has found it
+
+-- Pulses the fill bar as poured water reaches the ocean (client/Channels); bigger pours pulse more.
+function Hud.pulseFill(litres: number)
+	if fillPop then
+		fillPop.Scale = PourFlow.pulse(Cues.channel, litres)
+		TweenService:Create(fillPop, PROGRESS_POP, { Scale = 1 }):Play()
+	end
+end
+
 local find, set = Hud.find, Hud.set
 
 function Hud.start()
@@ -255,6 +267,7 @@ function Hud.start()
 	local progressFill = find(progress, "Bar.Fill")
 	local progressLabel = find(progress, "Bar.Label")
 	local progressPop = find(progress, "Bar.Pop")
+	fillPop = progressPop
 	local shownFill, fillFrom, fillTo, fillChangedAt = 0, 0, 0, -math.huge
 
 	local cardToken = 0

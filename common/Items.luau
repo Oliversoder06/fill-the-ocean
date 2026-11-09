@@ -39,6 +39,27 @@ function Items.furthest(config, state: State, kind: string)
 	return best
 end
 
+-- The owned item of `kind` a Fire Station call brings next: with `current` (the one out now) the next
+-- one down by area, wrapping to the furthest; with none out (or `current` not owned) the furthest.
+-- Nil = none owned.
+function Items.nextOwned(config, state: State, kind: string, current: string?)
+	local list = {}
+	for _, item in config.items do
+		if item.kind == kind and Items.owned(state, item.id) then
+			table.insert(list, item)
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.area > b.area or (a.area == b.area and a.id < b.id)
+	end)
+	for i, item in list do
+		if item.id == current then
+			return list[i % #list + 1]
+		end
+	end
+	return list[1]
+end
+
 -- The backpack worn: the owned one of the furthest area. Nil = none.
 function Items.backpack(config, state: State)
 	return Items.furthest(config, state, "backpack")

@@ -4,13 +4,17 @@
 -- attribute and steer (A/D) turns it, like a car (no turning on the spot, reverse turns the other
 -- way). The Water Bomber also climbs and dives: E / gamepad R1 / touch "Up", Q / L1 / touch "Down",
 -- bound only while flying it. Action and Hotbar ask here whether the player holds their truck's hose
--- and for the tank gauge; CameraFeel and Viewmodel whether they drive.
+-- and for the tank gauge; CameraFeel and Viewmodel whether they drive. While the Fire Station's
+-- CallPrompt shows, its ActionText names the vehicle a call brings next (Items.nextOwned, as
+-- server/Vehicles picks it); set locally, so only this player sees it.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Items = require(ReplicatedStorage.Common.Items)
 local Hud = require(script.Parent.Hud)
 
 local TURN_FULL_SPEED = 8 -- studs a second at which steering turns at full rate
@@ -117,7 +121,36 @@ function Vehicles.gauge(): (number?, number?)
 	return nil, nil
 end
 
+-- Names the next vehicle in the shown CallPrompt; with none owned it keeps the place's own text.
+local function watchCallPrompt()
+	local shown: ProximityPrompt? = nil
+	local placeText: string? = nil
+	local function label()
+		local prompt = shown
+		if not prompt then
+			return
+		end
+		local item = Items.nextOwned(Config, Hud.items(), "vehicle", player:GetAttribute("Vehicle"))
+		Hud.set(prompt, "ActionText", if item then `Call {item.name}` else placeText)
+	end
+	ProximityPromptService.PromptShown:Connect(function(prompt)
+		if prompt.Name == "CallPrompt" then
+			placeText = placeText or prompt.ActionText
+			shown = prompt
+			label()
+		end
+	end)
+	ProximityPromptService.PromptHidden:Connect(function(prompt)
+		if prompt == shown then
+			shown = nil
+		end
+	end)
+	player:GetAttributeChangedSignal("Vehicle"):Connect(label)
+	player:GetAttributeChangedSignal("Owned"):Connect(label)
+end
+
 function Vehicles.start()
+	watchCallPrompt()
 	local up, down = false, false
 	local function climbAction(set: (boolean) -> ())
 		return function(_, inputState)

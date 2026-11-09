@@ -28,7 +28,7 @@ function Zones.areaModel(ocean: Model, area): Instance?
 	return areas and areas:FindFirstChild(area.model)
 end
 
--- An area's part by name (Source, Pour, Pad, Spawn), or nil when it isn't there (not streamed in).
+-- An area's part by name (Source, Pour, Spawn), or nil when it isn't there (not streamed in).
 -- The cove has no Pour: the sea itself is where its water goes.
 function Zones.areaPart(ocean: Model, area, name: string): BasePart?
 	if not area.model and name == "Pour" then
@@ -47,6 +47,32 @@ function Zones.pourPart(ocean: Model, area): BasePart?
 	end
 	local part = ocean:FindFirstChild("PourPoint")
 	return if part and part:IsA("BasePart") then part else nil
+end
+
+-- An area's channel path (Channel.Path: parts named 1..N from its Pour down to the ocean) as points
+-- in order; nil for the cove (it pours into the ocean itself) or a path not all there (not streamed in).
+function Zones.channelPath(ocean: Model, area): { Vector3 }?
+	local model = if area.model then Zones.areaModel(ocean, area) else nil
+	local channel = model and model:FindFirstChild("Channel")
+	local path = channel and channel:FindFirstChild("Path")
+	if not path then
+		return nil
+	end
+	local points: { Vector3 } = {}
+	local count = 0
+	for _, point in path:GetChildren() do
+		local i = tonumber(point.Name)
+		if i and point:IsA("BasePart") then
+			points[i] = point.Position
+			count += 1
+		end
+	end
+	for i = 1, count do
+		if not points[i] then
+			return nil
+		end
+	end
+	return if count >= 2 then points else nil
 end
 
 -- The first open area (`open`: Areas.open) whose `name` part lies within `radius` studs of
