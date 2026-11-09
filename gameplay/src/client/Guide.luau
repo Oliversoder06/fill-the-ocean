@@ -25,6 +25,9 @@ local DONE_SECONDS = 3
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local RAY_UP, RAY_DOWN = 8, 40 -- studs above the trail line a chevron's ground ray starts, and its length
 local LIFT = 0.05 -- studs a chevron floats over the ground, so it never flickers into it
+local RAY_EVERY = 0.1 -- seconds between a chevron's ground rays; between them it slides along the last ground hit
+local RAY_DRIFT = 2 -- studs a chevron may slide from its last ray before it casts again (it also loops back)
+local FILTER_EVERY = 0.5 -- seconds between rebuilds of what the ground rays skip (bodies and vehicles come and go)
 
 local Guide = {}
 
@@ -125,6 +128,13 @@ function Guide.start()
 	end
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.RespectCanCollide = true -- the ground, not invisible zones (as shared/Zones.ground)
+	local filterAt = -math.huge
+	-- Each chevron's last ground ray: the point it was cast over, when, and the ground it hit (nil: none).
+	local castFrom: { [number]: Vector3? } = {}
+	local castAt: { [number]: number } = {}
+	local hitAt: { [number]: Vector3? } = {}
+	local hitUp: { [number]: Vector3? } = {}
 
 	-- nil until the save's levels are published; then whether this save is new.
 	local isNew: boolean? = nil
@@ -207,20 +217,27 @@ function Guide.start()
 		return 3, "Carry it to the shore", shore.WorldPosition, nil
 	end
 
-	-- Chevron ground spot `ahead` studs along the flat line `along` from `from` toward `goal`, turned
-	-- to point at the goal; nil over a gap or a wall.
-	local function groundAt(from: Vector3, goal: Vector3, along: Vector3, ahead: number, distance: number): CFrame?
+	-- Chevron `i`'s ground spot `ahead` studs along the flat line `along` from `from` toward `goal`,
+	-- turned to point at the goal; nil over a gap or a wall.
+	local function groundAt(i: number, now: number, from: Vector3, goal: Vector3, along: Vector3, ahead: number, distance: number): CFrame?
 		local point = from + along * ahead + Vector3.yAxis * ((goal.Y - from.Y) * ahead / distance)
-		local hit = workspace:Raycast(point + Vector3.yAxis * RAY_UP, Vector3.yAxis * -RAY_DOWN, rayParams)
-		if not hit then
+		local castPoint = castFrom[i]
+		if not castPoint or now - castAt[i] >= RAY_EVERY or (point - castPoint).Magnitude > RAY_DRIFT then
+			local hit = workspace:Raycast(point + Vector3.yAxis * RAY_UP, Vector3.yAxis * -RAY_DOWN, rayParams)
+			castPoint = point
+			castFrom[i], castAt[i] = point, now
+			hitAt[i], hitUp[i] = if hit then hit.Position else nil, if hit then hit.Normal else nil
+		end
+		local ground, up = hitAt[i], hitUp[i]
+		if not (ground and up) then
 			return nil
 		end
-		local up = hit.Normal
 		local look = along - up * along:Dot(up)
 		if look.Magnitude < 1e-3 then
 			return nil
 		end
-		local at = hit.Position + up * LIFT
+		local moved = point - (castPoint :: Vector3)
+		local at = ground + (moved - up * moved:Dot(up)) + up * LIFT
 		return CFrame.lookAt(at, at + look.Unit, up)
 	end
 
@@ -231,11 +248,17 @@ function Guide.start()
 		local from = if root and root:IsA("BasePart") then root.Position else nil
 		local flat = if goal and from then Vector3.new(goal.X - from.X, 0, goal.Z - from.Z) else Vector3.zero
 		local distance = flat.Magnitude
-		if distance > GuideTrail.HIDE_NEAR then
+		local seconds = os.clock()
+		if distance > GuideTrail.HIDE_NEAR and seconds - filterAt >= FILTER_EVERY then
+			filterAt = seconds
 			local ignore: { Instance } = { camera }
 			for _, other in Players:GetPlayers() do
 				if other.Character then
 					table.insert(ignore, other.Character)
+				end
+				local vehicle = workspace:FindFirstChild(`Vehicle_{other.UserId}`)
+				if vehicle then
+					table.insert(ignore, vehicle)
 				end
 			end
 			local staff = workspace:FindFirstChild("StaffBodies")
@@ -244,10 +267,9 @@ function Guide.start()
 			end
 			rayParams.FilterDescendantsInstances = ignore
 		end
-		local seconds = os.clock()
 		for i, chevron in chevrons do
 			local ahead = GuideTrail.ahead(i, seconds)
-			local at = if GuideTrail.shows(ahead, distance) then groundAt(from :: Vector3, goal :: Vector3, flat / distance, ahead, distance) else nil
+			local at = if GuideTrail.shows(ahead, distance) then groundAt(i, seconds, from :: Vector3, goal :: Vector3, flat / distance, ahead, distance) else nil
 			if at and at ~= placed[i] then
 				placed[i] = at
 				chevron:PivotTo(at)
@@ -302,9 +324,9 @@ function Guide.start()
 			return
 		end
 		set(text, "Text", message)
-		set(objective, "Text", `Objective {step}/{STEPS}`)
 		if step ~= shownStep then -- a new goal: the objective bounces
 			shownStep = step
+			objective.Text = `Objective {step}/{STEPS}`
 			pop.Scale = 1.12
 			TweenService:Create(pop, POP, { Scale = 1 }):Play()
 		end

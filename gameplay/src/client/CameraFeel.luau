@@ -82,6 +82,7 @@ function CameraFeel.start()
 			player.CameraMinZoomDistance = DRIVE_ZOOM_MIN
 			player.CameraMode = Enum.CameraMode.Classic
 		else
+			roll, pitch, dip, dipVelocity = 0, 0, 0, 0 -- no tilt or dip left over from before the drive
 			player.CameraMinZoomDistance = walkZoomMin
 			player.CameraMaxZoomDistance = walkZoomMax
 			player.CameraMode = Enum.CameraMode.LockFirstPerson

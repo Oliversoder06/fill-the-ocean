@@ -159,7 +159,8 @@ end
 
 function Viewmodel.start()
 	local current: Model? = nil
-	local currentKey: string? = nil -- "<sub>.<model>" of what shows
+	local currentName: string? = nil -- the model name and ToolModels subfolder of what shows
+	local currentSub: string? = nil
 	local currentTier = 0
 	local toolTier = 0 -- the last tool tier held, so a bought tool swings in
 	local viewSize = ToolView.VIEW_START
@@ -202,7 +203,7 @@ function Viewmodel.start()
 		end
 		model.Name = "Viewmodel"
 		model.Parent = workspace.CurrentCamera
-		current, currentKey, currentTier = model, `{sub}.{modelName}`, tier
+		current, currentName, currentSub, currentTier = model, modelName, sub, tier
 		shownWater = nil
 		return true
 	end
@@ -215,7 +216,7 @@ function Viewmodel.start()
 		if not modelName or not alive or camera.CameraType ~= Enum.CameraType.Custom or Vehicles.driving() then
 			if current then
 				current:Destroy()
-				current, currentKey = nil, nil
+				current, currentName, currentSub = nil, nil, nil
 			end
 			if arm and arm.model.Parent then
 				arm.model.Parent = nil
@@ -223,7 +224,7 @@ function Viewmodel.start()
 			lastLook = nil
 			return
 		end
-		local changed = `{sub}.{modelName}` ~= currentKey or tier ~= currentTier
+		local changed = modelName ~= currentName or sub ~= currentSub or tier ~= currentTier
 		if not sub then
 			if toolTier > 0 and tier > toolTier then
 				revealPending = true -- a bought tool: swing it in once the shop is closed

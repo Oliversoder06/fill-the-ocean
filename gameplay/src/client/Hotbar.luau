@@ -205,6 +205,9 @@ function Hotbar.start()
 		if icon and icon ~= shownIcon then
 			ToolModels.showIn(fillTool, icon)
 			shownIcon = icon
+		elseif not icon and kind ~= shownKind and shownIcon then -- not the last thing's icon while this one's replicates
+			fillTool:ClearAllChildren()
+			shownIcon = nil
 		end
 		local jetpack = kind == "jetpackTank"
 		local carried = player:GetAttribute("Carried") or 0
