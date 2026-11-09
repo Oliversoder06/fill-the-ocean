@@ -7,7 +7,7 @@ Read this first in every new session. Then read CLAUDE.md, AGENTS.md and
 - `main` has everything: Phase 1 (saved runs), Phase 2 (areas) and Phase 3a (buy-at-stand + backpacks).
   The owner's checkout `C:/RobloxDev/games/fill the ocean` is on `main`; Rojo serves it to Studio
   (gameplay port 34675, lobby 34674), so whatever is on `main` runs in Studio.
-- **Next: Phase 3b (gadgets)**, then 3c (area mechanics), 3d (vehicles), 3e (buildings), 3f (staff), then
+- 3b and 3c are done. **Next: 3d (vehicles)**, then 3e (buildings), 3f (staff), then
   Phases 4-9 (each needs its step-by-step tasks written into the plan first).
 - Phase 2 leftovers (do with 3b or later): per-area ambience/music, guide hint toward the next gate, a
   gate-burst VFX.
@@ -78,8 +78,8 @@ Map 8, UX 7.5, Code 8.
 | Batch | Status | Needs first |
 |---|---|---|
 | 3a Items core + backpacks | done (`40a8030`) | |
-| 3b Gadgets | next | 3a |
-| 3c Area mechanics | todo | 3b (gloves, pick, net take effect here) |
+| 3b Gadgets | done (`308199d`) | 3a |
+| 3c Area mechanics | done (`b7d481f`) | 3b (gloves, pick, net take effect here) |
 | 3d Vehicles | todo | 3a |
 | 3e Buildings | todo | 3a |
 | 3f Staff | todo | 3d and 3e (Firefighter drives a truck, Plumber fixes buildings) |
@@ -181,4 +181,7 @@ bonus when you work beside it; rejoin keeps the hire and assignment.
 Stages.blend still has pool/lake scenes; client WaitForChild calls without timeouts; three map
 textures owned by user 62763090 not the group; a spoon + backpack needs ~50 scoops to fill
 (Phase 4 tuning); the simulator doesn't model backpacks; per-area music missing; item tiles show
-the "unknown" icon until icons are drawn.
+the "unknown" icon until icons are drawn. 3c: no ice/steam/golden sounds, no ice-chip VFX, carried ice
+looks like water; rocks of areas 4-5 use the ladder's Cargo Ship/The Moon, whose levels still sit in
+area 3 (Phase 4); the golden timer counts server time; Cloud Net not play tested (needs 3e9 coins);
+Run.luau is 1312 lines.
