@@ -277,8 +277,8 @@ needs it.
 | # | Question | Needed by | Default |
 |---|---|---|---|
 | D1 | One player buys a gate: does it open for the whole team? | Phase 2 | Yes. |
-| D2 | Are buildings the team's or one player's? | Phase 3 | The team's: anyone buys or levels one, its pay is split evenly (6 plots cannot hold 10 players' own buildings). |
-| D3 | Are staff the team's or one player's? | Phase 3 | One player's: up to 3 each, their pay goes to the owner. |
+| D2 | Are buildings the team's or one player's? | Phase 3 | The team's: anyone buys or levels one. Since 2026-11-10 everything is the team's (see "Team economy"). |
+| D3 | Are staff the team's or one player's? | Phase 3 | Was one player's; since 2026-11-10 the team's (see "Team economy"). |
 | D4 | Does anything fill while nobody plays? | Phase 3 | No. |
 | D5 | Save expiry, save count, leaving a team's save | Phase 1 Task 3 | No expiry; 10 runs per player, oldest drops off; a "Leave run" button on the Saved Runs card. |
 | D6 | Five areas with these themes? | Phase 2 | Cove Well, Mountain Spring, Hot Springs, Glacier, Cloud Catcher. |
@@ -430,6 +430,17 @@ offline progress. Every new thing ships with a placeholder model under its final
 - **3f. Staff.** Helper, Lifeguard, Firefighter, Plumber: hired at the Lifeguard Tower, assigned to
   an area/truck/plots; server-side rates, client-side NPC bodies; animations (idle, walk, carry,
   scoop, pour, cheer + one each); work 2× while their owner works the same area.
+
+## Team economy + honeycomb upgrades (owner, 2026-11-10)
+- One team wallet: every coin anyone earns goes into it; anyone spends it. Tool and boost levels,
+  items and their levels, buildings and staff are the team's; every player gets the same stats
+  and their own copy of what is worn or held (backpack, gadgets, a called vehicle).
+- Prices scale with team size (`Config.team.priceStep`, price x (1 + step x (players - 1))).
+- Old saves convert: wallet = the members' money added up, levels and items = the best any member had.
+- The TAB shop is replaced by a honeycomb (layout: `C:\RobloxDev\library\ui\screens\shop.md`).
+- **Owner approval:** tests that assume per-player money, levels or ownership may be rewritten for
+  the team model (Items, Ladder, RunSave, StaffRules, BuildingRules, Session and similar). Every
+  other test still follows the hard rule in `AGENTS.md`.
 
 ## Phase 4: the 20-hour climb (outline)
 - **Simulator:** `tools/simulate` plays the whole map (hands, areas, gadgets, vehicles, buildings,
