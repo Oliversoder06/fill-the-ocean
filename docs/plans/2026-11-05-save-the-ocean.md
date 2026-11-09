@@ -402,6 +402,30 @@ lists everything.
 - **Done when:** with admin money every item can be bought, levelled, used and saved, with
   placeholder models, and a 2-player test shows team buildings and personal staff working.
 
+### Phase 3 tasks (step by step; built in batches, one worker + one reviewer each)
+Defaults: D2 buildings are the team's (pay split evenly), D3 staff are personal (3 each), D4 no
+offline progress. Every new thing ships with a placeholder model under its final name.
+- **3a. Items core + Backpacks.** `Config.items` (id, kind, area, stand, price, levels) and pure
+  `common/Items.luau` (owned, canBuy, nextLevel, teamOwned) with tests; save: per-player `owned` +
+  `levels`, team `buildings`. Buying = a ProximityPrompt on the area's Stand (server-checked:
+  area open, price, not owned); levelling in TAB. TAB gets tabs Tools, Gear, Vehicles, Buildings,
+  Staff; unowned items say "Buy at the <area> stand". Backpacks (5, one per area): extra capacity;
+  scooping fills the pack after the tool; one pour empties both; worn as an Accessory placeholder.
+- **3b. Gadgets.** Hotbar slots; Water Gun (pour from 30 studs), Garden Hose (tethered to a tap by
+  each pour spot, pours continuously), Heat Gloves, Ice Pick, Jetpack Tank (short flights; needed to
+  reach Cloud Catcher), Cloud Net.
+- **3c. Area mechanics.** Steam vents (telegraphed timer, knockback), ice blocks (chip, carry,
+  melt at the pour; snow slows walking), drifting clouds (moving source); a deeper pool per area
+  behind a breakable rock; a golden spring event (2 min, 3× pay).
+- **3d. Vehicles.** Fire Truck, Tanker, Snowcat Tanker, Water Bomber: called at the Fire Station,
+  VehicleSeat driving, hydrant fill (~30 s), side hose spray anywhere on the waterline, server
+  checks on fill and spray, no player collision.
+- **3e. Buildings.** Pump, Water Tower, Pipeline, Rain Machine on Plot1..6: litres/s at half pay,
+  clogs every few minutes until tapped.
+- **3f. Staff.** Helper, Lifeguard, Firefighter, Plumber: hired at the Lifeguard Tower, assigned to
+  an area/truck/plots; server-side rates, client-side NPC bodies; animations (idle, walk, carry,
+  scoop, pour, cheer + one each); work 2× while their owner works the same area.
+
 ## Phase 4: the 20-hour climb (outline)
 - **Simulator:** `tools/simulate` plays the whole map (hands, areas, gadgets, vehicles, buildings,
   staff) as an active player and as an idle one, and prints a timeline of every purchase and gate.
