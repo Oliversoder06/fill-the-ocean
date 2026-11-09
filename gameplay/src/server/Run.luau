@@ -248,9 +248,19 @@ local function setWater(current: number)
 	Map.setFill(ocean, fill)
 end
 
+-- Leaving "playing" also stops every jetpack lift and takes every hose off its tap (the gadget
+-- ticks only run while playing, so nothing else would end them).
 local function setPhase(phase: string)
 	run.phase = phase
 	setGlobal("Phase", phase)
+	if phase ~= "playing" then
+		for player, state in states do
+			if state.flying or state.hose then
+				state.flying, state.hose = false, nil
+				publish(player)
+			end
+		end
+	end
 end
 
 local function card(text: string)

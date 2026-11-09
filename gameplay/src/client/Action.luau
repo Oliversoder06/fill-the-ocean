@@ -24,6 +24,7 @@ local AIM_DISTANCE = 80
 local LOW_WATER = 4 -- studs below the player's root: the water is out of sight at a level aim
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
 local ACTION_NAME = "FillAct"
+local SPRAY_RESEND_SECONDS = 0.25 -- while the server's Spraying disagrees with the input, ask again this often
 
 export type Kind = "scoop" | "pour"
 export type Current = { kind: Kind, id: number, started: number, duration: number, hit: Vector3 }
@@ -213,16 +214,18 @@ function Action.start()
 
 	-- The Garden Hose: a press by a Tap clips it there; once clipped it sprays while the input is held
 	-- aimed at the water. Returns the hint and the touch button's title.
-	local spraying = false
+	-- Compared with the server's Spraying and resent while they differ: a toggle the server's rate
+	-- limit drops must not leave the hose stuck on or off.
+	local spraySentAt = -math.huge
 	local function setSpray(on: boolean)
-		if on ~= spraying then
-			spraying = on
+		local now = os.clock()
+		if on ~= (player:GetAttribute("Spraying") == true) and now - spraySentAt >= SPRAY_RESEND_SECONDS then
+			spraySentAt = now
 			gadgetRemote:FireServer("spray", on)
 		end
 	end
 	local function hoseStep(ocean: Model, root: BasePart, character: Model, camera: Camera): (string, string?)
 		if (player:GetAttribute("HoseArea") or 0) == 0 then
-			spraying = false -- the server stops spraying when the hose comes off
 			if not Hud.openSpot(ocean, "Tap", root.Position) then
 				return "Take the hose to a tap by a pour spot", nil
 			end
@@ -233,11 +236,12 @@ function Action.start()
 		end
 		local reach = Items.gadgetStat(Config, Hud.items(), "gardenHose", "reach")
 		local _, hit = target(ocean, root, character, camera, reach, true)
-		setSpray(held and hit ~= nil)
+		local want = held and hit ~= nil
+		setSpray(want)
 		if not hit then
 			return "Aim the hose at the water", "Spray"
 		end
-		return if spraying then "Spraying!" else `Hold {keyName()} to spray`, "Spray"
+		return if want then "Spraying!" else `Hold {keyName()} to spray`, "Spray"
 	end
 
 	local shownTitle: string? = nil
