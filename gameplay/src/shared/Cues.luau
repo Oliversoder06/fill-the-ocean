@@ -34,17 +34,20 @@ Cues.pour = {
 	pitchMin = 0.78,
 	pitchMax = 0.9,
 	vfx = "ScoopSplash",
+	sizeScale = 1.6,
 	otherBurstScale = 0.5,
 }
 
 -- Poured water on its way to the ocean (client/Channels, shared/PourFlow). Channel water textures
 -- trickle at trickleSpeed; a pour at an area's Pour sends `wave` (a part in ReplicatedStorage.Vfx) down
--- the channel at waveSpeed studs a second, at most maxWaves on screen; it lingers waveLinger seconds
--- for its particles to fade, then `splash` plays where it meets the ocean and the fill bar pulses.
+-- the channel at waveSpeed studs a second (faster on long channels, so none takes over waveSeconds),
+-- at most maxWaves on screen; it lingers waveLinger seconds for its particles to fade, then `splash`
+-- plays where it meets the ocean and the fill bar pulses.
 -- The seabed's pour marker is gone by markerFadeFill.
 Cues.channel = {
 	wave = "ChannelWave",
 	waveSpeed = 40,
+	waveSeconds = 5,
 	trickleSpeed = 3,
 	maxWaves = 8,
 	waveLinger = 1.5,

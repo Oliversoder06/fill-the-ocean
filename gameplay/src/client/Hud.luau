@@ -240,6 +240,10 @@ Hud.walletHold = 0
 
 local fillPop: UIScale? = nil -- the fill bar's Progress.Bar.Pop, once Hud.start has found it
 
+-- Pours on their way down a channel (client/Channels): their landing pulses the bar, so the Fill rise
+-- doesn't pop it too.
+Hud.wavesInFlight = 0
+
 -- Pulses the fill bar as poured water reaches the ocean (client/Channels); bigger pours pulse more.
 function Hud.pulseFill(litres: number)
 	if fillPop then
@@ -347,7 +351,7 @@ function Hud.start()
 			local target = if type(fill) == "number" then math.clamp(fill, 0, 1) else 0
 			local clock = os.clock()
 			if target ~= fillTo then
-				if target > fillTo then
+				if target > fillTo and Hud.wavesInFlight == 0 then
 					progressPop.Scale = 1.06
 					TweenService:Create(progressPop, PROGRESS_POP, { Scale = 1 }):Play()
 				end

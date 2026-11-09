@@ -25,6 +25,7 @@ type Wave = {
 	points: { Vector3 },
 	lengths: { number },
 	total: number,
+	speed: number, -- studs a second (PourFlow.waveSpeed)
 	distance: number,
 	litres: number,
 	part: BasePart?, -- nil past Cues.channel.maxWaves: it still lands and pulses the bar, unseen
@@ -130,7 +131,8 @@ local function onPour()
 	for i = 1, #points - 1 do
 		table.insert(lengths, (points[i + 1] - points[i]).Magnitude)
 	end
-	local wave: Wave = { points = points, lengths = lengths, total = PourFlow.total(lengths), distance = 0, litres = litres, part = nil }
+	local total = PourFlow.total(lengths)
+	local wave: Wave = { points = points, lengths = lengths, total = total, speed = PourFlow.waveSpeed(cue, total), distance = 0, litres = litres, part = nil }
 	local part = takePart()
 	if part then
 		place(wave, part)
@@ -138,10 +140,16 @@ local function onPour()
 	end
 	wave.part = part
 	table.insert(waves, wave)
+	Hud.wavesInFlight = #waves
 end
 
 -- Finds the open areas' channel water and the seabed marker again (streaming), and fades the marker.
 local function refresh()
+	for decal in markerBase do
+		if not decal:IsDescendantOf(workspace) then
+			markerBase[decal] = nil -- streamed out; a streamed-in copy reads its own base
+		end
+	end
 	local ocean = Hud.ocean()
 	table.clear(trickles)
 	if not ocean then
@@ -185,13 +193,14 @@ function Channels.start()
 		end
 		for i = #waves, 1, -1 do
 			local wave = waves[i]
-			wave.distance += cue.waveSpeed * dt
+			wave.distance += wave.speed * dt
 			local part = wave.part
 			if part then
 				place(wave, part)
 			end
 			if wave.distance >= wave.total then
 				table.remove(waves, i)
+				Hud.wavesInFlight = #waves
 				Hud.pulseFill(wave.litres)
 				if part then
 					Feel.splash(cue.splash, wave.points[#wave.points], 1, false)

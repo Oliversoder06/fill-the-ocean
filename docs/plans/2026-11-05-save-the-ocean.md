@@ -306,7 +306,8 @@ vertical slice: Area 2 finished, areas 3 to 5 as blockouts with working gates.
     it (a ProximityPrompt, checked by the server) opens it for the team (D1) and saves it in
     `gatesOpen`; the boards burst, the blocker goes, and everyone gets a toast.
   - Pouring into an open area's `Pour` counts as pouring into the ocean (`Zones` learns the spots).
-  - Pads move you between open areas; you spawn at your furthest open area.
+  - No pads (removed; owner, 2026-11-09: no teleporting, you walk or fly between areas); you spawn
+    at your furthest open area.
   - Shop levels of a closed area say "Opens with <Area>".
 - **Client:** channel flow VFX after a pour (the water visibly runs down to the ocean), the gate
   states, the area toast, and ambience and music that follow the area you stand in.
@@ -315,7 +316,8 @@ vertical slice: Area 2 finished, areas 3 to 5 as blockouts with working gates.
 - **Owner step (Studio):** Area 2's terrain and props. Claude can build the blockouts of areas 3
   to 5 through the Studio connection.
 - **Done when:** from a fresh save, with the admin fill and money jumps: buy gate 2, scoop spring
-  water, pour it in its channel and get its pay, use the pads, rejoin and spawn in Area 2.
+  water, pour it in its channel and get its pay, walk back to the cove (pads were removed, owner,
+  2026-11-09: no teleporting), rejoin and spawn in Area 2.
 
 ### Phase 2 tasks (step by step; needs the owner's OK before building)
 Defaults used: D1 (a gate opens for the whole team), D6 (five areas), D7 (one stand per area).
@@ -335,7 +337,8 @@ Defaults used: D1 (a gate opens for the whole team), D6 (five areas), D7 (one st
 4. **Server.** Scoop from any open area's Source (that area's pay and scoop time); pour into any
    open area's Pour counts as the ocean. Gate prompt: server checks fill and price, takes the
    coins from the buyer, opens it for the team, saves, fires a toast; boards burst, blocker goes.
-   Pads teleport between open areas; spawn at the furthest open area. Shop levels of a closed area
+   Pads were removed (owner, 2026-11-09: no teleporting; you walk or fly); spawn at the furthest
+   open area. Shop levels of a closed area
    say "Opens with <Area>".
 5. **Client.** Gate sign text (fill needed / price / open), area toast, channel-flow VFX after a
    pour, area ambience and music by where you stand, guide hint pointing at the next gate once it is

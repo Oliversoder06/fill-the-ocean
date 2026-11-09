@@ -17,7 +17,7 @@ end
 
 function tests.last_pour_rejects_anything_else(t)
 	t.expectEq(PourFlow.decode(nil), nil, "no pour yet")
-	for _, value in { 5, "", "1@2", "x@1@2", "0@1@2", "1.5@1@2", "2@-1@3", "2@1@3@4", "2@nan@3" } do
+	for _, value in { 5, "", "1@2", "x@1@2", "0@1@2", "1.5@1@2", "2@-1@3", "2@0@3", "2@1@3@4", "2@nan@3" } do
 		t.expectEq(PourFlow.decode(value), nil, `decode({tostring(value)})`)
 	end
 end
@@ -41,6 +41,19 @@ function tests.along_a_path(t)
 	local s, f = PourFlow.along({ 0, 10 }, 0)
 	t.expectEq(s, 1, "a zero-length segment")
 	t.expectEq(f, 1)
+end
+
+-- Short channels flow at the cue's waveSpeed; long ones speed up so no wave takes over waveSeconds.
+function tests.wave_speed_caps_the_trip(t)
+	local cue = Cues.channel
+	t.expectEq(cue.waveSeconds <= 5, true, "waveSeconds")
+	t.expectEq(PourFlow.waveSpeed(cue, 0), cue.waveSpeed, "no channel")
+	t.expectEq(PourFlow.waveSpeed(cue, cue.waveSpeed * cue.waveSeconds / 2), cue.waveSpeed, "short channel")
+	for _, length in { 180, 480, 540, 2000 } do
+		local seconds = length / PourFlow.waveSpeed(cue, length)
+		t.expectEq(seconds <= cue.waveSeconds + 1e-9, true, `{length} studs takes {seconds}s`)
+	end
+	t.expectNear(PourFlow.waveSpeed(cue, 540), 540 / cue.waveSeconds, 1e-9, "long channel")
 end
 
 -- Bigger pours pulse the fill bar more, by orders of magnitude, between the cue's min and max.

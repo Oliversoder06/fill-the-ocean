@@ -65,6 +65,16 @@ function tests.pour_cue_is_sane(t)
 	end
 end
 
+-- client/Feel.splash multiplies the splash by sizeScale, so every splash cue needs one.
+function tests.every_splash_cue_has_a_size_scale(t)
+	for name, cue in { scoop = Cues.scoop, pour = Cues.pour, channelSplash = Cues.channel.splash } do
+		local v = cue.sizeScale
+		if not (type(v) == "number" and v > 0) then
+			error(`{name} sizeScale = {tostring(v)} is not a positive number`)
+		end
+	end
+end
+
 function tests.coins_cue_is_sane(t)
 	local cue = Cues.coins
 	t.expectEq(type(cue.tickSound), "string")

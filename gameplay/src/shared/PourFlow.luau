@@ -18,7 +18,7 @@ function PourFlow.decode(value: any): (number?, number?, number?)
 	end
 	local a, l, s = value:match("^([^@]+)@([^@]+)@([^@]+)$")
 	local areaId, litres, at = tonumber(a), tonumber(l), tonumber(s)
-	if not (areaId and litres and at) or areaId < 1 or areaId % 1 ~= 0 or not (litres >= 0 and litres < math.huge) or at ~= at then
+	if not (areaId and litres and at) or areaId < 1 or areaId % 1 ~= 0 or not (litres > 0 and litres < math.huge) or at ~= at then
 		return nil, nil, nil
 	end
 	return areaId, litres, at
@@ -30,6 +30,12 @@ function PourFlow.total(lengths: { number }): number
 		sum += length
 	end
 	return sum
+end
+
+-- A wave's speed down a channel `total` studs long: cue.waveSpeed, or faster so it takes at most
+-- cue.waveSeconds.
+function PourFlow.waveSpeed(cue, total: number): number
+	return math.max(cue.waveSpeed, total / cue.waveSeconds)
 end
 
 -- Where a wave `distance` studs down a path with segment `lengths` is: the segment and the fraction
