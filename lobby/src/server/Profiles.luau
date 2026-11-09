@@ -22,6 +22,7 @@ local Profiles = {}
 
 local loaded: { [Player]: Progress.Data } = {}
 local adminAt: { [Player]: number } = {} -- os.clock() of the last reset; math.huge while one runs
+local revisions: { [Player]: number } = {} -- bumped on every write to a player's progress or runs
 
 local function show(player: Player, data: Progress.Data)
 	local cleared = 0
@@ -82,6 +83,18 @@ function Profiles.get(player: Player): Progress.Data?
 	return loaded[player]
 end
 
+-- Changes whenever the lobby writes this player's progress or erases their runs (Queue's saved-runs
+-- cache keys on it).
+function Profiles.revision(player: Player): number
+	return revisions[player] or 0
+end
+
+local function bump(player: Player)
+	if player.Parent then
+		revisions[player] = (revisions[player] or 0) + 1
+	end
+end
+
 -- The map ids this player may start a party on (Common.Maps.unlocked).
 function Profiles.unlockedMaps(player: Player): { [string]: boolean }
 	local data = loaded[player]
@@ -97,6 +110,7 @@ end
 
 -- Keeps a player's freshly written progress (while they're here). Returns ok plus an error.
 local function keep(player: Player, data: Progress.Data?, err: string?): (boolean, string?)
+	bump(player)
 	if not data then
 		return false, err
 	end
@@ -124,6 +138,7 @@ end
 -- Their team runs only leave the list; the teams keep them. Returns ok, an error, and whether a run
 -- was open in a server.
 function Profiles.resetProfile(player: Player): (boolean, string?, boolean)
+	bump(player)
 	for _, map in Maps.list do
 		local ok, err, open = RunStore.erase(RunSave.key(map.id, { player.UserId }))
 		if not ok then
@@ -145,11 +160,17 @@ local function onAdmin(notice: RemoteEvent, player: Player, action: unknown)
 		return
 	end
 	adminAt[player] = math.huge
-	local ok, err, open = Profiles.resetProfile(player)
+	-- the busy flag is cleared even if the reset throws; the error is raised again after
+	local ran, ok, err, open = pcall(Profiles.resetProfile, player)
+	if player.Parent then
+		adminAt[player] = os.clock()
+	end
+	if not ran then
+		error(ok, 0)
+	end
 	if not player.Parent then
 		return
 	end
-	adminAt[player] = os.clock()
 	if not ok then
 		warn(`[Profiles] couldn't reset {player.Name}'s profile: {err}`)
 		notice:FireClient(player, if open then "A solo run of yours is open in a server. Try again in a minute." else "Couldn't reset your profile. Please try again.")
@@ -175,6 +196,7 @@ function Profiles.start()
 	Players.PlayerRemoving:Connect(function(player)
 		loaded[player] = nil
 		adminAt[player] = nil
+		revisions[player] = nil
 	end)
 	for _, player in Players:GetPlayers() do
 		task.spawn(load, player)

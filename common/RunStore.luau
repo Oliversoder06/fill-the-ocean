@@ -57,7 +57,7 @@ function RunStore.load(key: string): (RunSave.Save?, string?)
 	return save, nil
 end
 
--- Writes the save unless the stored one is newer (a higher updatedAt), so a late write from an old
+-- Writes the save unless the stored one is as new or newer (RunSave.storedNewer), so a late write from an old
 -- session can't roll the run back. The members are tagged on the key (privacy deletion requests).
 -- Returns ok plus an error.
 function RunStore.save(key: string, save: RunSave.Save): (boolean, string?)
@@ -66,7 +66,7 @@ function RunStore.save(key: string, save: RunSave.Save): (boolean, string?)
 		storedAt = nil
 		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
 		return getStore():UpdateAsync(key, function(old)
-			if type(old) == "table" and type(old.updatedAt) == "number" and old.updatedAt > save.updatedAt then
+			if RunSave.storedNewer(old, save.updatedAt) then
 				storedAt = old.updatedAt
 				return nil -- cancels the write
 			end
@@ -77,7 +77,7 @@ function RunStore.save(key: string, save: RunSave.Save): (boolean, string?)
 		return false, tostring(result)
 	end
 	if storedAt then
-		return false, `run {key} is stored newer ({storedAt}) than this save ({save.updatedAt}); not written`
+		return false, `run {key} is stored as new or newer ({storedAt}) than this save ({save.updatedAt}); not written`
 	end
 	return true, nil
 end

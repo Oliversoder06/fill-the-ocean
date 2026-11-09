@@ -140,6 +140,13 @@ function RunSave.blank(old: Save, now: number): Save
 	return save
 end
 
+-- A write stamped `updatedAt` must not land on `stored` with the same or a newer stamp. Gameplay
+-- writes always step up by at least 1 (Run's snapshot), so an equal stamp is an erase's blank or a
+-- late copy.
+function RunSave.storedNewer(stored: any, updatedAt: number): boolean
+	return type(stored) == "table" and type(stored.updatedAt) == "number" and stored.updatedAt >= updatedAt
+end
+
 -- Nobody has played this save (an erased run): a new party may start over it without asking.
 function RunSave.isBlank(save: Save): boolean
 	return next(save.players) == nil and save.current <= 0 and save.playSeconds <= 0 and not save.finished

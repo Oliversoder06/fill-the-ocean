@@ -309,4 +309,15 @@ function tests.only_unplayed_saves_are_blank(t)
 	t.expectEq(RunSave.isBlank(done), false, "finished")
 end
 
+-- A write lands only over an older stamp: an erase's blank stamped in the same second as a late
+-- gameplay write must win.
+function tests.write_lands_only_over_an_older_stamp(t)
+	t.expectEq(RunSave.storedNewer(nil, 100), false, "nothing stored")
+	t.expectEq(RunSave.storedNewer({ updatedAt = 99 }, 100), false, "older stamp")
+	t.expectEq(RunSave.storedNewer({ updatedAt = 100 }, 100), true, "same second")
+	t.expectEq(RunSave.storedNewer({ updatedAt = 101 }, 100), true, "newer stamp")
+	t.expectEq(RunSave.storedNewer({ updatedAt = "101" }, 100), false, "no readable stamp")
+	t.expectEq(RunSave.storedNewer("broken", 100), false, "not a save")
+end
+
 return tests

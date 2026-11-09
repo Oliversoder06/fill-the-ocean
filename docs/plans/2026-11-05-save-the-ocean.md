@@ -16,7 +16,9 @@ tests listed in each task below. Any other test still follows the hard rule in `
 Owner-step help.
 
 ## Global constraints
-- Server-authoritative. Saves are written only by the gameplay server, with `UpdateAsync`.
+- Server-authoritative. Saves are written only by the gameplay server, with `UpdateAsync`. The
+  lobby may only ERASE a run (`RunStore.erase`: a blank save, stamped newer, written under the run's
+  lock) for New Game, Delete and an admin's profile reset (owner-approved 2026-11-09).
 - One save is loaded in at most one server at a time (a MemoryStore lock).
 - Pure modules (no `require`, no `game`) stay Lune-tested in `gameplay/tests/`.
 - Checks after every task, in each folder touched: `selene src` (0 errors, 0 warnings),

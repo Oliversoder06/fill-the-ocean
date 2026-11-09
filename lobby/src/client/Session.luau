@@ -371,6 +371,7 @@ function Session.start()
 		if kind == "hosting" or kind == "member" then
 			barLine.Text = if kind == "hosting" then "YOUR SESSION" else `{string.upper(state.host)}'S SESSION`
 			barDetail.Text = `{state.count}/{state.max} players - {state.mapName}{if state.friendsOnly then " - Friends" else ""}`
+				.. if state.startsOver then ` - starts over your saved run ({state.startsOver}% filled)` else ""
 			startButton.Visible = kind == "hosting"
 			show(bar, true)
 		elseif kind == "launching" then
