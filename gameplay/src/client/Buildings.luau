@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local BuildingRules = require(ReplicatedStorage.Shared.BuildingRules)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
@@ -25,9 +26,13 @@ local set = Hud.set
 local DESIGN_SIZE = Vector2.new(620, 440) -- the picker plus room for its decorations
 local REACH_SLACK = 4 -- studs past the prompt's reach before the picker closes
 local FLOW_SPEED = 8 -- studs a second the aqueduct water's textures scroll
+local FIND_SECONDS = 1 -- seconds between looks for an aqueduct not found yet (or streamed out)
 local SIDES = { "ShopSide", "StaffSide" }
 
 local Buildings = {}
+
+local flows: { [string]: { aqueduct: Instance, textures: { Texture } } } = {}
+local nextFind = 0
 
 -- The plot number of a plot's prompt (Plots.PlotN.Base.Prompt), or nil for any other prompt.
 local function plotOf(prompt: ProximityPrompt): number?
@@ -41,21 +46,41 @@ local function plotOf(prompt: ProximityPrompt): number?
 	return if index then tonumber(index) else nil
 end
 
--- Scrolls the water textures of the flowing aqueducts (none while streamed out).
-local function scrollAqueducts(dt: number)
+-- Finds the aqueducts and their water textures once each (again only after one streams out).
+local function findFlows()
 	local scenery = workspace:FindFirstChild("Map")
 	local town = scenery and scenery:FindFirstChild("Town")
-	if not town then
-		return
-	end
 	for _, side in SIDES do
-		local aqueduct = town:FindFirstChild(`Aqueduct_{side}`)
-		local water = aqueduct and aqueduct:GetAttribute("Flowing") == true and aqueduct:FindFirstChild("Water")
+		local flow = flows[side]
+		if flow and flow.aqueduct:IsDescendantOf(workspace) then
+			continue
+		end
+		flows[side] = nil
+		local aqueduct = town and town:FindFirstChild(`Aqueduct_{side}`)
+		local water = aqueduct and aqueduct:FindFirstChild("Water")
 		if water then
+			local textures = {}
 			for _, texture in water:GetChildren() do
 				if texture:IsA("Texture") then
-					texture.OffsetStudsV += FLOW_SPEED * dt
+					table.insert(textures, texture)
 				end
+			end
+			flows[side] = { aqueduct = aqueduct :: Instance, textures = textures }
+		end
+	end
+end
+
+-- Scrolls the water textures of the flowing aqueducts (none while streamed out).
+local function scrollAqueducts(dt: number)
+	local now = os.clock()
+	if now >= nextFind then
+		nextFind = now + FIND_SECONDS
+		findFlows()
+	end
+	for _, flow in flows do
+		if flow.aqueduct:GetAttribute("Flowing") == true then
+			for _, texture in flow.textures do
+				texture.OffsetStudsV = (texture.OffsetStudsV + FLOW_SPEED * dt) % texture.StudsPerTileV
 			end
 		end
 	end
@@ -97,13 +122,13 @@ function Buildings.start()
 		end
 	end
 
-	-- What a building costs now: whether its area is open and the money covers it.
-	local function offer(item): (boolean, boolean)
-		local onSale = item.area <= Ladder.openAreas(Config, Hud.gatesOpen())
-		return onSale, onSale and (player:GetAttribute("Money") or 0) + 1e-6 >= item.price
+	-- Whether a building is on sale (its area is open) and buildable now, by the server's check.
+	local function offer(item, openAreas: number): (boolean, boolean)
+		local ok, reason = BuildingRules.buildable(item, openAreas, player:GetAttribute("Money") or 0)
+		return reason ~= "locked", ok
 	end
 
-	local options = {}
+	local options: { [any]: { button: GuiButton, price: TextLabel, coin: GuiObject } } = {}
 	local order = 0
 	for _, item in Config.items do
 		if item.kind == "building" then
@@ -116,8 +141,8 @@ function Buildings.start()
 			set(Hud.find(option, "Rate"), "Text", `{Hud.short(item.rate)} L/s`)
 			Hud.pressable(option, Hud.find(option, "Press"))
 			option.Activated:Connect(function()
-				local onSale, affordable = offer(item)
-				if not (onSale and affordable and plot) then
+				local _, buildable = offer(item, Ladder.openAreas(Config, Hud.gatesOpen()))
+				if not (buildable and plot) then
 					Purchase.deny(option)
 					return
 				end
@@ -125,7 +150,7 @@ function Buildings.start()
 				setOpen(false)
 			end)
 			option.Parent = list
-			options[item] = option
+			options[item] = { button = option, price = Hud.find(option, "PriceRow.Price"), coin = Hud.find(option, "PriceRow.Coin") }
 		end
 	end
 
@@ -155,13 +180,13 @@ function Buildings.start()
 			setOpen(false)
 			return
 		end
+		local openAreas = Ladder.openAreas(Config, Hud.gatesOpen())
 		for item, option in options do
-			local onSale, affordable = offer(item)
-			local price = Hud.find(option, "PriceRow.Price")
-			set(option, "ImageColor3", if onSale then colors.shallowWater else colors.locked)
-			set(Hud.find(option, "PriceRow.Coin"), "Visible", onSale)
-			set(price, "Text", if onSale then Hud.money(item.price) else `Opens with {Areas.byId(Config, item.area).name}`)
-			set(price, "TextColor3", if onSale and not affordable then colors.buyCoral else colors.foam)
+			local onSale, buildable = offer(item, openAreas)
+			set(option.button, "ImageColor3", if onSale then colors.shallowWater else colors.locked)
+			set(option.coin, "Visible", onSale)
+			set(option.price, "Text", if onSale then Hud.money(item.price) else `Opens with {Areas.byId(Config, item.area).name}`)
+			set(option.price, "TextColor3", if onSale and not buildable then colors.buyCoral else colors.foam)
 		end
 	end)
 end

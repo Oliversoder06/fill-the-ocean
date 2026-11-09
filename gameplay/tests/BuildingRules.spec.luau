@@ -91,6 +91,27 @@ function tests.build_checks_plot_area_and_money(t)
 	t.expectEq(check(5, pump, 5, 1e12), "ok", "the same building on several plots")
 end
 
+-- One money tolerance for every building price (build, TAB level, the picker).
+function tests.affords_tolerates_pour_rounding(t)
+	t.expectEq(BuildingRules.affords(150000 - 1e-9, 150000), true, "pour rounding still buys it")
+	t.expectEq(BuildingRules.affords(150000, 150000), true)
+	t.expectEq(BuildingRules.affords(149999, 150000), false)
+end
+
+-- The picker's offer: on sale once its area is open, buildable when the money covers it too.
+function tests.buildable_checks_area_and_money(t)
+	local pump = Items.get(Config, "pump")
+	local function check(openAreas, money)
+		local ok, reason = BuildingRules.buildable(pump, openAreas, money)
+		return if ok then "ok" else reason
+	end
+	t.expectEq(check(2, pump.price), "ok")
+	t.expectEq(check(2, pump.price - 1e-9), "ok", "pour rounding still builds it")
+	t.expectEq(check(1, 1e12), "locked")
+	t.expectEq(check(2, pump.price - 1), "money")
+	t.expectEq(check(1, 0), "locked", "a closed area shows as locked, not as too dear")
+end
+
 -- The shop side is +X, the staff side -X (the plots sit at x +-62).
 function tests.aqueduct_side_by_x(t)
 	t.expectEq(BuildingRules.side(62), "ShopSide")

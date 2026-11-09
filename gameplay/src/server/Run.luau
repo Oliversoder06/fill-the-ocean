@@ -498,6 +498,7 @@ local function endRun()
 	local save = run.save :: RunSave.Save
 	local map = run.map :: Maps.Map
 	save.finished = true
+	Buildings.payNow()
 	if run.key then
 		local key = run.key
 		if not saveNow("ocean full", END_SAVE_SECONDS) then
@@ -687,6 +688,7 @@ local function onPlayerAdded(player: Player)
 		sendToLobby({ player }, "not part of a run from the lobby")
 		return
 	end
+	Buildings.payNow() -- what the buildings made before they came is the others'
 	states[player] = {
 		money = 0,
 		carried = 0, -- litres in the tool
@@ -1318,6 +1320,7 @@ function Run.start(oceanModel: Model)
 		Vehicles.leave(player)
 		local state = states[player]
 		if state then
+			Buildings.payNow() -- the leaver keeps their share
 			keepPlayer(player, state)
 			states[player] = nil
 			task.spawn(saveRun, `{player.Name} left`)
@@ -1329,6 +1332,7 @@ function Run.start(oceanModel: Model)
 		if not run.key or run.lockLost then
 			return
 		end
+		Buildings.payNow()
 		if saveNow("server closing", CLOSE_SAVE_SECONDS) then
 			local ok, err = RunStore.unlock(run.key, serverId)
 			if not ok then

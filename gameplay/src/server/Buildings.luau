@@ -32,7 +32,6 @@ local TICK = 1 -- seconds between output ticks
 local PAY_SECONDS = 10 -- seconds between paydays
 local MAX_BUILDS_PER_SECOND = 2
 local MAX_UNCLOGS_PER_SECOND = 2
-local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 149999.9999999 must still buy a 150,000 level
 local SIDES = { "ShopSide", "StaffSide" }
 
 export type Hooks = {
@@ -197,7 +196,8 @@ local function onBuild(player: Player, index: unknown, id: unknown)
 end
 
 -- TAB's Buy(id) for a building id: the buyer pays the next level of that building for the whole
--- team (Items.buildingOffer). True when `id` is a building (handled here, bought or not).
+-- team (Items.buildingOffer). True when `id` is a building (handled here, bought or not). A level
+-- needs one standing on a plot: a saved one the place lost (Buildings.load) makes nothing.
 function Buildings.buy(player: Player, state, id: string): boolean
 	local item = Items.get(Config, id)
 	if not item or item.kind ~= "building" then
@@ -207,7 +207,15 @@ function Buildings.buy(player: Player, state, id: string): boolean
 		return true
 	end
 	local level, status = Items.buildingOffer(Config, save.buildings, id, hooks.openAreas())
-	if status ~= "buy" or state.money + MONEY_EPSILON < level.cost then
+	if status ~= "buy" or not BuildingRules.affords(state.money, level.cost) then
+		return true
+	end
+	local standing = false
+	for _, building in placed do
+		standing = standing or building.item.id == id
+	end
+	if not standing then
+		hooks.tell(player, `Build a {item.name} on a plot first`)
 		return true
 	end
 	state.money = math.max(0, state.money - level.cost)
@@ -237,8 +245,9 @@ end
 
 local owed = 0 -- coins made since the last payday
 
--- Splits what the buildings made between the players present.
-local function payday()
+-- Splits what the buildings made between the players present. server/Run also pays out before a
+-- player joins or leaves and before its last saves, so no coins wait in `owed` across those.
+function Buildings.payNow()
 	local present = {}
 	for player in hooks.states do
 		table.insert(present, player)
@@ -315,7 +324,7 @@ function Buildings.start(runHooks: Hooks, buildRemote: RemoteEvent)
 			sinceTick = 0
 		end
 		if sincePay >= PAY_SECONDS then
-			payday()
+			Buildings.payNow()
 			sincePay = 0
 		end
 	end)

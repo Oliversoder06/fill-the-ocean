@@ -30,10 +30,26 @@ function BuildingRules.clogDelay(config, r: number): number
 	return clog.minSeconds + r * (clog.maxSeconds - clog.minSeconds)
 end
 
+-- Whether `money` covers `price` (a build or a TAB level of a building).
+function BuildingRules.affords(money: number, price: number): boolean
+	return money + MONEY_EPSILON >= price
+end
+
+-- Whether building `item` can be built now with `openAreas` areas open (Ladder.openAreas) and
+-- `money`, plot aside. The reason when not: "locked" (its area is closed) or "money".
+function BuildingRules.buildable(item, openAreas: number, money: number): (boolean, string?)
+	if item.area > openAreas then
+		return false, "locked"
+	elseif not BuildingRules.affords(money, item.price) then
+		return false, "money"
+	end
+	return true, nil
+end
+
 -- Whether `item` may be built on plot `index` (1..plotCount; a remote value) now, with `plots` the
 -- save's plots (plot number as a string -> building id), `openAreas` areas open (Ladder.openAreas)
 -- and `money`. The reason when not: "plot" (no such plot), "taken", "unknown" (not a building),
--- "locked" (its area is closed) or "money".
+-- or buildable's "locked" / "money".
 function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, index: any, item, openAreas: number, money: number): (boolean, string?)
 	if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > plotCount then
 		return false, "plot"
@@ -41,12 +57,8 @@ function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, 
 		return false, "taken"
 	elseif not item or item.kind ~= "building" then
 		return false, "unknown"
-	elseif item.area > openAreas then
-		return false, "locked"
-	elseif money + MONEY_EPSILON < item.price then
-		return false, "money"
 	end
-	return true, nil
+	return BuildingRules.buildable(item, openAreas, money)
 end
 
 -- The aqueduct a plot's water runs down (Town.Aqueduct_<side>): the shop side is +X.
