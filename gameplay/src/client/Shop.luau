@@ -584,11 +584,14 @@ function Shop.start()
 			set(Hud.find(detail, "About"), "Text", selectedItem.about)
 			set(Hud.find(detail, "MoneyRow.Money"), "Text", Hud.money(money))
 			set(Hud.find(detail, "ItemName"), "Text", if bought then `{selectedItem.name} Lv {bought + 1}` else selectedItem.name)
-			set(Hud.find(detail, "Effect"), "Text", itemEffect(selectedItem, level, bought ~= nil))
+			local effect = itemEffect(selectedItem, level, bought ~= nil)
+			-- the button only fits a word, so the full "where to get it" sentence leads the effect
+			local note = status ~= "buy" and status ~= "max"
+			set(Hud.find(detail, "Effect"), "Text", if note then `{itemNote(selectedItem, status)}\n{effect}` else effect)
 			set(buyCoin, "Visible", status == "buy")
 			set(buyPrice, "Visible", status == "buy")
 			-- the button fits a short word beside the price (a longer one overflows at 150.0K)
-			set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else itemNote(selectedItem, status):upper())
+			set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else itemNote(selectedItem, status, true):upper())
 			if status == "buy" then
 				set(buyPrice, "Text", Hud.money(level.cost))
 			end

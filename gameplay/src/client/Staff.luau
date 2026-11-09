@@ -270,6 +270,34 @@ local function remove(key: string)
 	body.model:Destroy()
 end
 
+-- Outfit pieces (sleeves, props) hang on plain welds; read as joints they'd turn into extra limbs.
+local function outfit(model: Instance): { Instance }
+	local rigParts: { [Instance]: boolean } = {}
+	for _, inst in model:GetDescendants() do
+		if inst:IsA("Motor6D") then
+			if inst.Part0 then
+				rigParts[inst.Part0] = true
+			end
+			if inst.Part1 then
+				rigParts[inst.Part1] = true
+			end
+		end
+	end
+	local list = {}
+	for _, inst in model:GetDescendants() do
+		if (inst:IsA("JointInstance") and not inst:IsA("Motor6D")) or inst:IsA("WeldConstraint") then
+			local a, b = (inst :: any).Part0, (inst :: any).Part1
+			table.insert(list, inst)
+			for _, part in { a, b } do
+				if part and not rigParts[part] then
+					table.insert(list, part)
+				end
+			end
+		end
+	end
+	return list
+end
+
 -- A clone of the kind's rig, ready to be moved and posed: anchored root, nothing to collide with,
 -- touch or aim at, no name tag.
 local function spawnBody(key: string, kind: Kind, item, post: number, lane: number, places)
@@ -286,7 +314,7 @@ local function spawnBody(key: string, kind: Kind, item, post: number, lane: numb
 	local body: Body = {
 		key = key,
 		model = model,
-		anim = AnimPlayer.new(model),
+		anim = AnimPlayer.new(model, { ignore = outfit(model) }),
 		kind = kind,
 		item = item,
 		post = post,
@@ -314,7 +342,7 @@ end
 -- Bakes a kind's clips once, on its first body's rig (a yielding task, a clip at a time).
 local function bake(kind: Kind)
 	kind.baking = true
-	local probe = AnimPlayer.new(kind.template)
+	local probe = AnimPlayer.new(kind.template, { ignore = outfit(kind.template) })
 	local a = probe.anatomy
 	probe:destroy()
 	local baked = {}
