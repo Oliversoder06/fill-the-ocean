@@ -38,6 +38,8 @@ local DRIVE_FORCE = 400 -- the drive's strongest push, studs a second squared ti
 local TURN_TORQUE = 400 -- the turn's strongest twist per unit of mass (also damps rolling)
 local UPRIGHT_TORQUE = 2000 -- per unit of mass: rights a tipped vehicle
 local UPRIGHT_RESPONSIVENESS = 10
+-- A truck held level always hangs flat off the beach slope, so it is only righted once tipped this far.
+local TIP_COS = math.cos(math.rad(45))
 
 export type Hooks = {
 	states: { [Player]: any }, -- server/Run's player states (owned, itemLevels, windows)
@@ -59,6 +61,7 @@ type Out = {
 	model: Model,
 	root: BasePart,
 	seat: VehicleSeat,
+	upright: AlignOrientation,
 	tank: number, -- litres in it
 	value: number, -- their coins (Water.mix: each fill's litres at its area's pay)
 	filling: boolean,
@@ -159,8 +162,9 @@ end
 
 -- The drive the client sets (client/Vehicles): Drive (a LinearVelocity, horizontal for trucks so
 -- gravity keeps them on the road, full for the bomber so it hovers), Turn (an AngularVelocity) and
--- Upright (keeps the top up, free to turn). All start still, which also brakes a parked vehicle.
-local function addDrive(root: BasePart, mass: number, flies: boolean)
+-- Upright (keeps the top up, free to turn: always on the bomber, on a truck only while it is tipped,
+-- see tick). All start still, which also brakes a parked vehicle.
+local function addDrive(root: BasePart, mass: number, flies: boolean): AlignOrientation
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "DriveAttachment"
 	-- Its X axis (an attachment's primary axis) points up, for Upright.
@@ -198,7 +202,9 @@ local function addDrive(root: BasePart, mass: number, flies: boolean)
 	upright.PrimaryAxis = Vector3.yAxis
 	upright.MaxTorque = mass * UPRIGHT_TORQUE
 	upright.Responsiveness = UPRIGHT_RESPONSIVENESS
+	upright.Enabled = flies
 	upright.Parent = root
+	return upright
 end
 
 -- Brings `item` out at the Fire Station for `player`, replacing the one they had out (and its water).
@@ -230,7 +236,7 @@ local function spawn(player: Player, item)
 			end
 		end
 	end
-	addDrive(root, mass, item.flies == true)
+	local upright = addDrive(root, mass, item.flies == true)
 	local _, size = model:GetBoundingBox()
 	model:PivotTo(spawnPart.CFrame * CFrame.new(0, spawnPart.Size.Y / 2 + size.Y / 2 + 0.5, 0))
 	model.Parent = workspace
@@ -241,6 +247,7 @@ local function spawn(player: Player, item)
 		model = model,
 		root = root,
 		seat = seat,
+		upright = upright,
 		tank = 0,
 		value = 0,
 		filling = false,
@@ -365,6 +372,12 @@ local function tick(player: Player, v: Out, step: number)
 	end
 	local now = os.clock()
 	local position = v.root.Position
+	if not v.item.flies then
+		local tipped = v.root.CFrame.UpVector.Y < TIP_COS
+		if v.upright.Enabled ~= tipped then
+			v.upright.Enabled = tipped
+		end
+	end
 	local max = stat(player, v, "tank")
 	local area = if v.item.flies then skimArea(position) else hydrantArea(v, position)
 	v.filling = area ~= nil and v.tank < max

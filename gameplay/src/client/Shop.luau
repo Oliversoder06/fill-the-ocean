@@ -121,12 +121,14 @@ local function boughtLevel(item, itemState: Items.State): number?
 end
 
 -- What an item's tile and detail say instead of a price (Hud.offer's item statuses). Tiles have room
--- for one short word, the detail panel for the full sentence.
+-- for a word or a shop's name, the detail panel for the full sentence.
 local function itemNote(item, status: string?, brief: boolean?): string
 	if status == "max" then
 		return "MAX"
+	elseif brief and status == "stand" then
+		return if item.stand then Config.stands[item.stand] else "At stand"
 	elseif brief then
-		return if status == "replaced" then "Replaced" elseif status == "stand" then "At stand" elseif status == "unbuilt" then "On a plot" else "Locked"
+		return if status == "replaced" then "Replaced" elseif status == "unbuilt" then "On a plot" else "Locked"
 	elseif status == "replaced" then
 		local worn = Items.backpack(Config, Hud.items())
 		return `Replaced by the {if worn then worn.name else "next one"}`
@@ -140,50 +142,65 @@ local function itemNote(item, status: string?, brief: boolean?): string
 	return opensText(item)
 end
 
--- What each gadget does at some level; `stat(name)` reads that level's stats (Config.ItemLevel).
+-- A stat in the effect texts: whole numbers under 1000 as they are (6), the rest short (1.6, 3.0K).
+local function amount(n: number): string
+	return if n == math.floor(n) and n < 1000 then tostring(n) else short(n)
+end
+
+-- Effect texts read stats as `stat(name, unit, format)`: the value and its unit ("6 L/s per plot"),
+-- and " (now 3)" when the text shows the next level (`was` reads the current one) and it changes.
+type Stat = (name: string, unit: string?, format: ((number) -> string)?) -> string
+local function statText(read: (string) -> number, was: ((string) -> number)?): Stat
+	return function(name, unit, format)
+		local show = format or amount
+		local value = read(name)
+		local before = if was then was(name) else value
+		local text = `{show(value)}{unit or ""}`
+		return if before ~= value then `{text} (now {show(before)})` else text
+	end
+end
+
+-- What each gadget does at some level (Config.ItemLevel stats).
 local GADGET_EFFECTS = {
-	waterGun = function(stat)
-		return `Pours from {stat("range")} studs away`
+	waterGun = function(stat: Stat)
+		return `Pours from {stat("range", " studs away")}`
 	end,
-	gardenHose = function(stat)
-		return `Pours {stat("rate")} L/s within {stat("reach")} studs of its tap`
+	gardenHose = function(stat: Stat)
+		return `{stat("rate", " L/s")}, reach {stat("reach", " studs")}`
 	end,
-	heatGloves = function(stat)
-		return `Hot pools fill {stat("hotFill")}x faster`
+	heatGloves = function(stat: Stat)
+		return `Hot pools {stat("hotFill", "x faster")}`
 	end,
-	icePick = function(stat)
-		return `{stat("hits")} hits per ice block`
+	icePick = function(stat: Stat)
+		return stat("hits", " hits per block")
 	end,
-	jetpackTank = function(stat)
-		return `{stat("flightSeconds")}s of flight, holds {short(stat("capacity"))} L`
+	jetpackTank = function(stat: Stat)
+		return `{stat("flightSeconds", "s flight")}, holds {stat("capacity", " L")}`
 	end,
-	cloudNet = function(stat)
-		return `Catches clouds from {stat("range")} studs`
+	cloudNet = function(stat: Stat)
+		return `Catches clouds from {stat("range", " studs")}`
 	end,
 }
 
--- What a vehicle does at some level (as GADGET_EFFECTS): trucks spray, the bomber drops it all at once.
-local function vehicleEffect(stat): string
-	local spray = stat("sprayRate")
-	local use = if spray then `sprays {short(spray)} L/s` else "drops it all at once"
-	return `Holds {short(stat("tank"))} L, fills {short(stat("fillRate"))} L/s, {use}, speed {stat("speed")}`
+-- What a vehicle does at some level (as GADGET_EFFECTS).
+local function vehicleEffect(stat: Stat): string
+	return `{stat("tank", " L tank")}, {stat("fillRate", " L/s fill")}`
 end
 
 -- What a building does at some level (every building: its litres a second).
-local function buildingEffect(stat)
-	return `Makes {short(stat("rate"))} L/s on every plot it stands on`
+local function buildingEffect(stat: Stat): string
+	return stat("rate", " L/s per plot")
 end
 
 -- What a staff does at some level, by its job (Config.items `job`).
-local function staffEffect(stat, item): string
-	local hires = stat("hires")
-	local who = if hires == 1 then "1 hired" else `{hires} hired`
+local function staffEffect(stat: Stat, item): string
+	local who = stat("hires", " hired")
 	if item.job == "area" then
-		return `{who}, each brings {short(stat("carry"))} L every {stat("tripSeconds")}s`
+		return `{who}, each {stat("carry", " L")} every {stat("tripSeconds", "s")}`
 	elseif item.job == "truck" then
-		return `{who}, each empties your vehicle's tank every {stat("tripSeconds")}s`
+		return `{who}, each a tank every {stat("tripSeconds", "s")}`
 	end
-	return `{who}: buildings never clog and make +{math.floor((stat("boost") - 1) * 100 + 0.5)}%`
+	return `{who}, no clogs, {stat("boost", " output", percent)}`
 end
 
 local KIND_EFFECTS = { vehicle = vehicleEffect, building = buildingEffect, staff = staffEffect }
@@ -201,12 +218,11 @@ local function itemEffect(item, level, owned: boolean): string
 		local effect = KIND_EFFECTS[item.kind] or GADGET_EFFECTS[item.id]
 		assert(effect, `Shop has no effect text for {item.id}`)
 		if level then
-			local after = effect(function(name: string): number
+			return effect(statText(function(name: string): number
 				return level[name]
-			end, item)
-			return `Next: {after} (now: {effect(nowStat, item)})`
+			end, nowStat), item)
 		end
-		return effect(nowStat, item)
+		return effect(statText(nowStat), item)
 	end
 	local now = nowStat("capacity")
 	if level then
@@ -571,7 +587,8 @@ function Shop.start()
 			set(Hud.find(detail, "Effect"), "Text", itemEffect(selectedItem, level, bought ~= nil))
 			set(buyCoin, "Visible", status == "buy")
 			set(buyPrice, "Visible", status == "buy")
-			set(buyText, "Text", if status == "buy" then "LEVEL UP" elseif status == "max" then "MAXED" else itemNote(selectedItem, status):upper())
+			-- the button fits a short word beside the price (a longer one overflows at 150.0K)
+			set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else itemNote(selectedItem, status):upper())
 			if status == "buy" then
 				set(buyPrice, "Text", Hud.money(level.cost))
 			end
