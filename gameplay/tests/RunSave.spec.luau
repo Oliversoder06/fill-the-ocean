@@ -183,6 +183,26 @@ function tests.sanitize_items(t)
 	t.expectEq(again.buildings.pump, 2)
 end
 
+-- Which building stands on which plot: plot numbers as string keys, building ids as values.
+function tests.sanitize_plots(t)
+	local save = RunSave.sanitize({
+		mapId = "ocean1",
+		members = { 1 },
+		plots = { ["1"] = "pump", ["3"] = "waterTower", ["0"] = "pump", ["2.5"] = "pump", x = "pump", [4] = "pump", ["5"] = 7, ["6"] = "" },
+	})
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(save.plots["1"], "pump")
+	t.expectEq(save.plots["3"], "waterTower")
+	t.expectEq(count(save.plots), 2, "bad plot entries dropped")
+	local old = RunSave.sanitize({ mapId = "ocean1", members = { 1 } })
+	assert(old, "an old save must load")
+	t.expectEq(count(old.plots), 0, "no plots built in an old save")
+	t.expectEq(count(RunSave.new("ocean1", { 1 }).plots), 0, "a new run has empty plots")
+	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, plots = "all" })
+	assert(broken, "bad plots must not drop the save")
+	t.expectEq(count(broken.plots), 0)
+end
+
 function tests.sanitize_rejects_non_tables(t)
 	t.expectEq(RunSave.sanitize(nil), nil)
 	t.expectEq(RunSave.sanitize("save"), nil)

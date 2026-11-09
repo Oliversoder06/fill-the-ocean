@@ -169,6 +169,41 @@ function tests.team_owned_buildings(t)
 	t.expectEq(Items.teamOwned({ pump = 0 }, "pump"), true, "level 0 is bought")
 end
 
+-- Buildings are built on plots (server/Buildings), never sold at a stand.
+function tests.stands_never_sell_buildings(t)
+	for area = 1, 5 do
+		local state = fresh()
+		repeat
+			local pick = Items.standPick(Config, state, area, 5, 1e12)
+			if pick then
+				t.expectEq(pick.kind ~= "building", true, `area {area}'s stand sold {pick.id}`)
+				own(state, pick.id)
+			end
+		until not pick
+	end
+end
+
+-- TAB levels a building kind the team has built: one level for every plot with it.
+function tests.building_offer_follows_the_team(t)
+	local pump = Items.get(Config, "pump")
+	local level, status = Items.buildingOffer(Config, {}, "pump", 2)
+	t.expectEq(level, nil)
+	t.expectEq(status, "unbuilt")
+	local _, locked = Items.buildingOffer(Config, {}, "pump", 1)
+	t.expectEq(locked, "locked", "its area is closed")
+	level, status = Items.buildingOffer(Config, { pump = 0 }, "pump", 2)
+	t.expectEq(level, pump.levels[1])
+	t.expectEq(status, "buy")
+	level, status = Items.buildingOffer(Config, { pump = #pump.levels }, "pump", 2)
+	t.expectEq(level, nil)
+	t.expectEq(status, "max")
+	local none, other = Items.buildingOffer(Config, { waterGun = 0 }, "waterGun", 5)
+	t.expectEq(none, nil)
+	t.expectEq(other, nil, "not a building")
+	t.expectEq(Items.buildingStat({ pump = 0 }, pump, "rate"), pump.rate)
+	t.expectEq(Items.buildingStat({ pump = 2 }, pump, "rate"), pump.levels[2].rate)
+end
+
 -- 3b: one gadget per area, each with one mechanic (Phase 3 outline).
 function tests.six_gadgets_by_area(t)
 	local want = {

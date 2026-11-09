@@ -21,6 +21,8 @@
 -- behind breakable rocks (1.5x litres a sweep; save.rocksBroken) and the golden spring (3x pay).
 -- Vehicles (server/Vehicles) are bought at the Fire Station (a cove shop) and called, filled, sprayed
 -- and dropped there; their water lands through the same pour as a tool's.
+-- The team's buildings on the cove's plots (server/Buildings): Build(plot, itemId), TAB levels
+-- through Buy(itemId), their water poured on a tick and paid to everyone present.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
@@ -55,6 +57,7 @@ local RunSave = require(ReplicatedStorage.Common.RunSave)
 local RunStore = require(ReplicatedStorage.Common.RunStore)
 local RunTicket = require(ReplicatedStorage.Common.RunTicket)
 local HeldTools = require(script.Parent.HeldTools)
+local Buildings = require(script.Parent.Buildings)
 local Map = require(script.Parent.Map)
 local Mechanics = require(script.Parent.Mechanics)
 local Vehicles = require(script.Parent.Vehicles)
@@ -397,6 +400,7 @@ local function snapshot(): RunSave.Save
 	copy.boostsPlayed = table.clone(save.boostsPlayed)
 	copy.gatesOpen = table.clone(save.gatesOpen)
 	copy.buildings = table.clone(save.buildings)
+	copy.plots = table.clone(save.plots)
 	copy.rocksBroken = table.clone(save.rocksBroken)
 	return copy
 end
@@ -614,6 +618,7 @@ local function startRun()
 	end
 	publishGates()
 	Mechanics.load(save)
+	Buildings.load(save)
 
 	local scale = workspace:GetAttribute("WaterScale") -- Studio test shortcut
 	local studioScale = if RunService:IsStudio() and type(scale) == "number" and scale > 0 then scale else 1
@@ -745,6 +750,9 @@ local function onBuy(player: Player, id: unknown)
 	local state = states[player]
 	if not state or type(id) ~= "string" or run.phase ~= "playing" or not allow(state, "buy", MAX_BUYS_PER_SECOND) then
 		return
+	end
+	if Buildings.buy(player, state, id) then
+		return -- a building: the team's level (server/Buildings)
 	end
 	local isTrack = Config.track(id) ~= nil
 	local level, status
@@ -911,14 +919,20 @@ local function publishAct(player: Player, kind: string)
 	player:SetAttribute("ActAt", workspace:GetServerTimeNow())
 end
 
+-- `litres` land in the ocean: the water rises and a crossed milestone starts its boost. Callers
+-- check that the ocean takes them (Water.pourAmount) and then checkFull.
+local function raise(litres: number)
+	local before = fillOf(run.current)
+	setWater(run.current + litres)
+	checkBoost(before, fillOf(run.current))
+end
+
 -- `litres` worth `value` coins (before the tip and boosts) land in the ocean: pay the player and
 -- raise the water. Callers check that the ocean takes them (Water.pourAmount) and then checkFull.
 local function pourIn(state, litres: number, value: number)
 	state.money += value * boosted(state).coinBonus
 	state.litres += litres
-	local before = fillOf(run.current)
-	setWater(run.current + litres)
-	checkBoost(before, fillOf(run.current))
+	raise(litres)
 end
 
 local function creditPour(state): boolean
@@ -1187,7 +1201,7 @@ end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Fill", 0)
@@ -1206,7 +1220,7 @@ function Run.start(oceanModel: Model)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
 	remotes.Gadget.OnServerEvent:Connect(onGadget)
-	-- What the area mechanics and the vehicles may see and do in the run.
+	-- What the area mechanics, the vehicles and the buildings may see and do in the run.
 	local hooks = {
 		states = states,
 		playing = function()
@@ -1215,6 +1229,7 @@ function Run.start(oceanModel: Model)
 		openIds = function()
 			return Areas.openIds(gatesOpen())
 		end,
+		openAreas = openAreas,
 		rootOf = rootOf,
 		inReach = inReach,
 		card = card,
@@ -1226,6 +1241,7 @@ function Run.start(oceanModel: Model)
 			task.spawn(saveRun, reason)
 		end,
 		allow = allow,
+		publish = publish,
 		nearFlood = function(player)
 			return nearFlood(player)
 		end,
@@ -1236,6 +1252,15 @@ function Run.start(oceanModel: Model)
 			pourIn(states[player], litres, value)
 			publish(player)
 			checkFull()
+		end,
+		-- Building pay is the team's, raw: no Tip Jar or boost (those are a player's own pours).
+		fill = function(litres)
+			local taken = Water.pourAmount(litres, run.current, run.target)
+			if taken > 0 then
+				raise(taken)
+				checkFull()
+			end
+			return taken
 		end,
 		stopHose = function(player)
 			local state = states[player]
@@ -1248,6 +1273,7 @@ function Run.start(oceanModel: Model)
 	}
 	Mechanics.start(ocean, hooks)
 	Vehicles.start(ocean, hooks)
+	Buildings.start(hooks, remotes.Build)
 	RunService.Heartbeat:Connect(function(dt)
 		if run.phase ~= "playing" then
 			return

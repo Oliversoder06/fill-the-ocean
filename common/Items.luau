@@ -156,12 +156,12 @@ end
 -- What a press on area `areaId`'s stand buys: the cheapest item sold there that canBuy allows now,
 -- or nil. `stand`: a cove shop (Config.stands) instead of the area's own stand; each sells only its
 -- own items, whatever their area (the Fire Station's vehicles open with areas 2-5). One prompt per
--- stand, so it picks for the player.
+-- stand, so it picks for the player. Buildings are built on plots instead.
 function Items.standPick(config, state: State, areaId: number, openAreas: number, money: number, stand: string?)
 	local pick = nil
 	for _, item in config.items do
 		local here = if stand then item.stand == stand else item.area == areaId and item.stand == nil
-		if here and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
+		if here and item.kind ~= "building" and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
 			pick = item
 		end
 	end
@@ -171,6 +171,25 @@ end
 -- Whether the team owns building `id` (save.buildings: upgrades bought per building, 0 = just built).
 function Items.teamOwned(buildings: { [string]: number }, id: string): boolean
 	return buildings[id] ~= nil
+end
+
+-- The upgrade TAB offers next for building `id` (a remote value) with the team's `buildings` and
+-- `openAreas` areas open, and its status: "buy", "max", "unbuilt" (build one on a plot first) or
+-- "locked" (its area is closed). Not a building: nil, nil.
+function Items.buildingOffer(config, buildings: { [string]: number }, id: any, openAreas: number)
+	local item = Items.get(config, id)
+	if not item or item.kind ~= "building" then
+		return nil, nil
+	elseif not Items.teamOwned(buildings, item.id) then
+		return nil, if item.area <= openAreas then "unbuilt" else "locked"
+	end
+	local level = item.levels[buildings[item.id] + 1]
+	return level, if level then "buy" else "max"
+end
+
+-- A built building's stat ("rate") at the team's level for it.
+function Items.buildingStat(buildings: { [string]: number }, item, name: string): number
+	return Items.stat({ owned = {}, itemLevels = buildings }, item, name)
 end
 
 return Items

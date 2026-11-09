@@ -23,6 +23,7 @@ export type Save = {
 	boostsPlayed: { string },
 	gatesOpen: { number }, -- area ids whose gate is bought (2-5), in the order they opened
 	buildings: { [string]: number }, -- the team's buildings (D2): upgrades bought per building id
+	plots: { [string]: string }, -- the building id on each built plot, by plot number ("1", "2", ...)
 	rocksBroken: { number }, -- area ids (1-5) whose rock is broken, opening its deeper pool
 	finished: boolean,
 	updatedAt: number,
@@ -112,6 +113,7 @@ function RunSave.new(mapId: string, members: { number }): Save
 		boostsPlayed = {},
 		gatesOpen = {},
 		buildings = {},
+		plots = {},
 		rocksBroken = {},
 		finished = false,
 		updatedAt = 0,
@@ -189,6 +191,14 @@ function RunSave.sanitize(raw: any): Save?
 	end
 	save.gatesOpen = areaIds(raw.gatesOpen, 2, 5)
 	save.buildings = counts(raw.buildings)
+	-- plot numbers stay string keys (DataStores need them); saves from before 3e have none
+	if type(raw.plots) == "table" then
+		for plot, id in raw.plots do
+			if type(plot) == "string" and plot:match("^[1-9]%d*$") and type(id) == "string" and id ~= "" then
+				save.plots[plot] = id
+			end
+		end
+	end
 	save.rocksBroken = areaIds(raw.rocksBroken, 1, 5) -- saves from before 3c have none
 	save.finished = raw.finished == true
 	save.updatedAt = amount(raw.updatedAt)

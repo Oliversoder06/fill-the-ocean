@@ -141,19 +141,36 @@ function Hud.items(): Items.State
 	return { owned = owned, itemLevels = itemLevels }
 end
 
+-- The team's buildings (save.buildings: upgrades bought per building id, only the ones built) from
+-- the server's BuildingLevel_<id> attributes (server/Buildings).
+function Hud.buildings(): { [string]: number }
+	local levels = {}
+	for _, item in Config.items do
+		local level = if item.kind == "building" then ReplicatedStorage:GetAttribute(`BuildingLevel_{item.id}`) else nil
+		if type(level) == "number" then
+			levels[item.id] = level
+		end
+	end
+	return levels
+end
+
 -- What TAB offers next and whether `money` buys it now, with the areas the open gates open (as the
 -- server counts them). A track (`levels`): Ladder.offer's level and "buy" / "locked" / "max". An
 -- item: Items.nextLevel's upgrade and "buy" / "max" / "replaced", or, while unowned, nil and
--- "stand" (buy it at its area's stand) or "locked" (its area is closed).
+-- "stand" (buy it at its area's stand) or "locked" (its area is closed). A building: the team's
+-- Items.buildingOffer ("buy" / "max" / "unbuilt" / "locked").
 function Hud.offer(levels: { [string]: number }, id: string, money: number): (any, string?, boolean)
 	local openAreas = Ladder.openAreas(Config, Hud.gatesOpen())
 	local level, status
+	local item = Items.get(Config, id)
 	if Config.track(id) then
 		level, status = Ladder.offer(Config, levels, id, openAreas)
+	elseif item and item.kind == "building" then
+		level, status = Items.buildingOffer(Config, Hud.buildings(), id, openAreas)
 	else
 		level, status = Items.nextLevel(Config, Hud.items(), id)
 		if status == "unowned" then
-			status = if (Items.get(Config, id) :: Config.Item).area <= openAreas then "stand" else "locked"
+			status = if (item :: Config.Item).area <= openAreas then "stand" else "locked"
 		end
 	end
 	return level, status, status == "buy" and money + MONEY_EPSILON >= level.cost
@@ -253,10 +270,10 @@ function Hud.start()
 		end)
 	end)
 
-	-- Windows (shop, admin) free the cursor. First person locks it to the centre every frame, so
+	-- Windows (shop, admin, build picker) free the cursor. First person locks it to the centre every frame, so
 	-- this runs right after the camera and overrides that while a window is showing. In play the
 	-- mouse icon is hidden and the place's cursor image (StarterGui.Cursor) marks where you aim.
-	local windows = { find(gui, "Shop"), find(gui, "Admin") }
+	local windows = { find(gui, "Shop"), find(gui, "Admin"), find(gui, "BuildPicker") }
 	local crosshair = find(player:WaitForChild("PlayerGui"):WaitForChild("Cursor"), "Cursor")
 	RunService:BindToRenderStep("HudCursor", Enum.RenderPriority.Camera.Value + 3, function()
 		local windowOpen = false

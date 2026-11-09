@@ -46,7 +46,7 @@ export type ItemLevel = {
 	cost: number,
 	capacity: number?, -- backpack, Jetpack Tank: litres it holds
 	range: number?, -- Water Gun: studs it pours from; Cloud Net: studs it scoops the drifting cloud from
-	rate: number?, -- Garden Hose: litres a second it pours
+	rate: number?, -- Garden Hose: litres a second it pours; building: litres a second it makes
 	reach: number?, -- Garden Hose: studs you may walk from its tap
 	flightSeconds: number?, -- Jetpack Tank: seconds of thrust on a full tank
 	hotFill: number?, -- Heat Gloves: sweeps in hot pools take 1 / this of the time
@@ -68,7 +68,8 @@ export type Item = {
 	about: string, -- one line for the shop
 	-- backpack: its Accessory in ReplicatedStorage.ToolModels.Backpacks; gadget: its Model in
 	-- ReplicatedStorage.ToolModels.Gadgets (held in the hand while it is out); vehicle: its Model in
-	-- ReplicatedStorage.Vehicles (server/Vehicles)
+	-- ReplicatedStorage.Vehicles (server/Vehicles); building: its Model in ReplicatedStorage.Buildings
+	-- (placed on a plot)
 	model: string?,
 	-- gadget: how it is used from its hotbar slot; nil = it works on its own once owned (no slot)
 	use: ("pour" | "hose" | "fly")?,
@@ -443,7 +444,45 @@ local vehicles = {
 		{ cost = 50e9, tank = 9e6, speed = 80, fillRate = 450000 },
 	}),
 }
-local buildings = {} -- 3e: Pump, Water Tower, Pipeline, Rain Machine (the team's, save.buildings)
+
+local function building(id: string, name: string, model: string, area: number, price: number, rate: number, about: string, levels: { ItemLevel }): Item
+	return { id = id, name = name, kind = "building", area = area, price = price, about = about, model = model, rate = rate, levels = levels }
+end
+
+-- Buildings: the team's (D2), built on the cove's plots (server/Buildings) once their area is open,
+-- levelled in TAB (a level counts on every plot with that building). Each makes `rate` litres a
+-- second at half the hand pay of the best open area (Config.buildings.payShare), split between the
+-- team. Each is sized to its area's tool like the backpacks: it costs about that tool and makes a
+-- share of that tool's hand rate, so it pays itself back in about 10 minutes when bought, and six
+-- of them make about what one player makes by hand (active play pays about twice idle). A level
+-- doubles the rate for three times the price.
+--   Pump (2): Bathtub (350 L, 62,500), hand ~10 L/s: 3 L/s at 50K = 75 coins/s, 11 min
+--   Water Tower (3): Swimming Pool (9,000 L, 5M), hand ~200 L/s: 60 L/s at 4M = 7,500 coins/s, 9 min
+--   Pipeline (4): Cargo Ship (100,000 L, 225M), hand ~2,000 L/s: 400 L/s at 150M = 250K coins/s, 10 min
+--   Rain Machine (5): The Moon (1M L, 2.57B), hand ~15,000 L/s: 2,000 L/s at 4B = 6.25M coins/s, 11 min
+local buildings = {
+	building("pump", "Pump", "Pump", 2, 50000, 3, "Pumps water up from the ground into the aqueduct, on its own.", {
+		{ cost = 150000, rate = 6 },
+		{ cost = 450000, rate = 12 },
+	}),
+	building("waterTower", "Water Tower", "WaterTower", 3, 4e6, 60, "Stores spring water and lets it down the aqueduct, on its own.", {
+		{ cost = 12e6, rate = 120 },
+		{ cost = 36e6, rate = 240 },
+	}),
+	building("pipeline", "Pipeline", "Pipeline", 4, 150e6, 400, "Pipes meltwater from the Glacier into the aqueduct.", {
+		{ cost = 450e6, rate = 800 },
+		{ cost = 1.35e9, rate = 1600 },
+	}),
+	building("rainMachine", "Rain Machine", "RainMachine", 5, 4e9, 2000, "Makes it rain into the aqueduct.", {
+		{ cost = 12e9, rate = 4000 },
+		{ cost = 36e9, rate = 8000 },
+	}),
+} :: { Item }
+
+-- Buildings (server/Buildings): a building litre pays `payShare` of the hand pay of the best open
+-- area. Every minSeconds-maxSeconds of play a building clogs and makes `factor` of its rate until
+-- someone holds its Unclog prompt.
+Config.buildings = { payShare = 0.5, clog = { minSeconds = 240, maxSeconds = 420, factor = 0.5 } }
 local staff = {} -- 3f: Helper, Lifeguard, Firefighter, Plumber
 
 -- Cove shops that sell items instead of the cove's stand (Item.stand), whatever the items' area: the

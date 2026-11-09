@@ -44,6 +44,9 @@
         },
         "Vehicle": {
           "$className": "RemoteEvent"
+        },
+        "Build": {
+          "$className": "RemoteEvent"
         }
       }
     },

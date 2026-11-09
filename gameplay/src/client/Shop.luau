@@ -4,10 +4,10 @@
 -- Boosts panels, from Config.tracks); clicking a tile shows it in the detail panel, whose Buy button
 -- sends Buy(trackId). The server checks every buy.
 -- Tabs (Body.Tabs): Tools (the tracks), Gear (one tile per backpack and gadget in GearPanel), Vehicles
--- (one tile per vehicle in VehiclePanel), and Buildings and Staff, which show ComingSoon until their
--- items exist. Items are bought once
--- at their area's stand; here an owned one shows its level and its Buy button sends Buy(itemId) to
--- level it up, and an unowned one says where to buy it.
+-- (one tile per vehicle in VehiclePanel), Buildings (one tile per building in BuildingPanel: the
+-- team's levels, server/Buildings), and Staff, which shows ComingSoon until its items exist. Items are
+-- bought once at their area's stand (buildings on a plot); here an owned one shows its level and its
+-- Buy button sends Buy(itemId) to level it up, and an unowned one says where to buy it.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,9 +44,16 @@ local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = 
 local PANEL_NAMES = { tool = "Tool", boosts = "Boosts" }
 -- Tabs in order and the Content panels each shows; a tab without panels shows ComingSoon.
 local TABS = { "Tools", "Gear", "Vehicles", "Buildings", "Staff" }
-local TAB_PANELS = { Tools = { "ToolPanel", "BoostPanel" }, Gear = { "GearPanel" }, Vehicles = { "VehiclePanel" } }
-local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel", vehicle = "VehiclePanel" } -- the tab panel holding each kind's tiles
-local ITEM_CATEGORIES = { vehicle = "Vehicle" } -- the detail panel's category line; the rest say "Gear"
+local TAB_PANELS = {
+	Tools = { "ToolPanel", "BoostPanel" },
+	Gear = { "GearPanel" },
+	Vehicles = { "VehiclePanel" },
+	Buildings = { "BuildingPanel" },
+}
+-- the tab panel holding each kind's tiles
+local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel", vehicle = "VehiclePanel", building = "BuildingPanel" }
+-- the detail panel's category line; the rest say "Gear"
+local ITEM_CATEGORIES = { vehicle = "Vehicle", building = "Building" }
 
 -- Tiles take their panel's tag colour, so the colour says which group an upgrade belongs to.
 local function panelColor(track): Color3
@@ -89,16 +96,37 @@ local function opensText(level): string
 	return `Opens with {Areas.byId(Config, level.area).name}`
 end
 
+-- The tab showing an item's tile.
+local function tabOf(item): string
+	for name, panels in TAB_PANELS do
+		if table.find(panels, ITEM_PANELS[item.kind]) then
+			return name
+		end
+	end
+	error(`Shop has no tab for {item.kind} items`)
+end
+
+-- Upgrades bought on an item, or nil while it isn't owned: the player's own, or the team's for a
+-- building (Hud.buildings).
+local function boughtLevel(item, itemState: Items.State): number?
+	if item.kind == "building" then
+		return Hud.buildings()[item.id]
+	end
+	return if Items.owned(itemState, item.id) then itemState.itemLevels[item.id] else nil
+end
+
 -- What an item's tile and detail say instead of a price (Hud.offer's item statuses). Tiles have room
 -- for one short word, the detail panel for the full sentence.
 local function itemNote(item, status: string?, brief: boolean?): string
 	if status == "max" then
 		return "MAX"
 	elseif brief then
-		return if status == "replaced" then "Replaced" elseif status == "stand" then "At stand" else "Locked"
+		return if status == "replaced" then "Replaced" elseif status == "stand" then "At stand" elseif status == "unbuilt" then "On a plot" else "Locked"
 	elseif status == "replaced" then
 		local worn = Items.backpack(Config, Hud.items())
 		return `Replaced by the {if worn then worn.name else "next one"}`
+	elseif status == "unbuilt" then
+		return "Build one on a plot in town"
 	elseif status == "stand" and item.stand then
 		return `Buy at the {Config.stands[item.stand]}`
 	elseif status == "stand" then
@@ -136,13 +164,24 @@ local function vehicleEffect(stat): string
 	return `Holds {short(stat("tank"))} L, fills {short(stat("fillRate"))} L/s, {use}, speed {stat("speed")}`
 end
 
--- What an item does now and after its next upgrade: a backpack's litres, a gadget's or vehicle's stats.
+-- What a building does at some level (every building: its litres a second).
+local function buildingEffect(stat)
+	return `Makes {short(stat("rate"))} L/s on every plot it stands on`
+end
+
+local KIND_EFFECTS = { vehicle = vehicleEffect, building = buildingEffect }
+
+-- What an item does now and after its next upgrade: a backpack's litres, a gadget's, vehicle's or
+-- building's stats.
 local function itemEffect(item, level, owned: boolean): string
 	local function nowStat(name: string): number
-		return if owned then Items.stat(Hud.items(), item, name) else item[name]
+		if not owned then
+			return item[name]
+		end
+		return if item.kind == "building" then Items.buildingStat(Hud.buildings(), item, name) else Items.stat(Hud.items(), item, name)
 	end
-	if item.kind == "gadget" or item.kind == "vehicle" then
-		local effect = if item.kind == "vehicle" then vehicleEffect else GADGET_EFFECTS[item.id]
+	if item.kind == "gadget" or KIND_EFFECTS[item.kind] then
+		local effect = KIND_EFFECTS[item.kind] or GADGET_EFFECTS[item.id]
 		assert(effect, `Shop has no effect text for {item.id}`)
 		if level then
 			local after = effect(function(name: string): number
@@ -317,11 +356,8 @@ function Shop.start()
 	-- A tab shows its panels and selects its first tile.
 	local firstTile = { Tools = "tool" }
 	for _, item in Config.items do
-		for name, panels in TAB_PANELS do
-			if table.find(panels, ITEM_PANELS[item.kind]) and not firstTile[name] then
-				firstTile[name] = item.id
-			end
-		end
+		local name = tabOf(item)
+		firstTile[name] = firstTile[name] or item.id
 	end
 	for name, button in tabButtons do
 		pressable(button, button.Press)
@@ -389,7 +425,7 @@ function Shop.start()
 		for _, item in Config.items do
 			local holder = itemTiles[item.id]
 			local button = Hud.find(holder, "Button")
-			local owned = Items.owned(itemState, item.id)
+			local bought = boughtLevel(item, itemState)
 			local level, status, affordable = Hud.offer(levels, item.id, money)
 			local grey = status == "locked" or status == "replaced"
 			set(button, "ImageColor3", if grey then colors.locked else colors.shallowWater)
@@ -400,7 +436,7 @@ function Shop.start()
 			set(Hud.find(button, "ItemName"), "Text", item.name)
 			set(Hud.find(button, "Pips"), "Visible", false)
 			set(Hud.find(button, "Level"), "Visible", true)
-			set(Hud.find(button, "Level"), "Text", if owned then `Lv {itemState.itemLevels[item.id] + 1}` else "")
+			set(Hud.find(button, "Level"), "Text", if bought then `Lv {bought + 1}` else "")
 			local priceText = Hud.find(holder, "PriceRow.Price")
 			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
 			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) else itemNote(item, status, true))
@@ -455,7 +491,7 @@ function Shop.start()
 		local selectedItem = Items.get(Config, selected)
 		if selectedItem then
 			local level, status, canLevel = Hud.offer(levels, selected, money)
-			local owned = Items.owned(itemState, selected)
+			local bought = boughtLevel(selectedItem, itemState)
 			set(Hud.find(detail, "Category"), "Text", ITEM_CATEGORIES[selectedItem.kind] or "Gear")
 			set(detailArt, "ImageColor3", if status == "locked" or status == "replaced" then colors.locked else colors.shallowWater)
 			set(Hud.find(detailArt, "Icon"), "Visible", true)
@@ -463,8 +499,8 @@ function Shop.start()
 			set(Hud.find(detailArt, "Icon"), "Image", if status == "locked" then images.lock else images.unknown)
 			set(Hud.find(detail, "About"), "Text", selectedItem.about)
 			set(Hud.find(detail, "MoneyRow.Money"), "Text", Hud.money(money))
-			set(Hud.find(detail, "ItemName"), "Text", if owned then `{selectedItem.name} Lv {itemState.itemLevels[selected] + 1}` else selectedItem.name)
-			set(Hud.find(detail, "Effect"), "Text", itemEffect(selectedItem, level, owned))
+			set(Hud.find(detail, "ItemName"), "Text", if bought then `{selectedItem.name} Lv {bought + 1}` else selectedItem.name)
+			set(Hud.find(detail, "Effect"), "Text", itemEffect(selectedItem, level, bought ~= nil))
 			set(buyCoin, "Visible", status == "buy")
 			set(buyPrice, "Visible", status == "buy")
 			set(buyText, "Text", if status == "buy" then "LEVEL UP" elseif status == "max" then "MAXED" else itemNote(selectedItem, status):upper())

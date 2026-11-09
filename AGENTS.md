@@ -49,6 +49,9 @@ Server (`src/server/`):
   `CallPrompt` brings the best owned one out (`Vehicle_<UserId>`), owner-only `DrivePrompt`, driver
   network ownership, collision groups, hydrant fill, truck hose spray, bomber skim and drop; `Run`
   starts it with the same hooks as `Mechanics` and calls `leave` / `stop`.
+- `Buildings.luau`: the team's buildings on `workspace.Map.Plots.PlotN` (`Build` remote, TAB levels
+  via `Buy`, output on a tick paid to everyone present, clogs, aqueduct flow); `Run` starts it with
+  hooks. 3f's Plumber hook: `Buildings.setPlumber(scale, keepClear)`, `Buildings.unclog(plot)`.
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
@@ -92,6 +95,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `hoseReady` (on foot by
   your truck with water: Action sprays it) and `gauge` (Hotbar shows the tank).
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
+- `Buildings.luau`: the build picker (`Hud.BuildPicker`, options cloned from
+  `Hud.Templates.BuildOption`) opened by a plot's prompt; scrolls flowing aqueducts' water.
 - `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
   tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
@@ -111,7 +116,7 @@ Shared (`src/shared/`, pure unless noted):
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
-  numbers for `Bodies`):
+  numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check):
   maths, all Lune-tested (`Cues` too).
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
@@ -119,11 +124,12 @@ Shared (`src/shared/`, pure unless noted):
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
 
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
-- `RunSave.luau` (pure): a team's saved run, its key, and the exact-team check (`sameTeam`).
+- `RunSave.luau` (pure): a team's saved run (its `buildings` levels and `plots`), its key, and the exact-team check (`sameTeam`).
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
   `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus` (plus the Jetpack Tank's),
-  `standPick` (an area's stand or a cove shop in `Config.stands`), `gadgetStat`, `slots` (hotbar
-  gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`.
+  `standPick` (an area's stand or a cove shop in `Config.stands`; never a building), `gadgetStat`,
+  `slots` (hotbar gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`,
+  `buildingOffer` / `buildingStat` (the team's building levels).
 - `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore).
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps.
@@ -140,7 +146,8 @@ The server publishes state as attributes; the client only reads them.
   (running boost id or `""`) and `BoostEndsAt` (server time), `RocksBroken` (`"1,3"`), `Golden`
   (area id of the golden spring, 0 for none) and `GoldenEndsAt`; vent parts carry `VentState`
   (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the
-  boost applied.
+  boost applied. `BuildingLevel_<id>` (the team's upgrades per building, nil until built); a placed
+  building (`Plots.PlotN.Building`) carries `Clogged`; `Town.Aqueduct_<side>` carries `Flowing`.
 - Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
   `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, and
   `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...); `Owned` (item ids,
@@ -152,7 +159,9 @@ The server publishes state as attributes; the client only reads them.
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
   Vehicles (server/Vehicles): `Vehicle` (item id out or `""`), `Tank`, `TankMax` (whole litres),
   `Filling`, `VehicleSpraying`; the vehicle model carries `Owner` (UserId), `ItemId`, `Speed`, `Flies`.
-- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it),
+- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it,
+  or a built building's id to level it for the team),
+  `Build` (plot number, building id; server checks plot empty, area open, price, reach, rate),
   `Equip` (boolean for the tool, or an owned hotbar gadget's id), `Act` (`"scoop"` or `"pour"`, sent
   when an action starts; the server credits a scoop ActSeconds later and a pour at once; with the
   Water Gun out a pour reaches its range), `Gadget` (`"clip"`, `"spray", on`, `"fly", on`;
@@ -167,7 +176,7 @@ The server publishes state as attributes; the client only reads them.
 
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Shop, Card, Waiting, Progress,
-  Admin).
+  Admin, BuildPicker).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.
