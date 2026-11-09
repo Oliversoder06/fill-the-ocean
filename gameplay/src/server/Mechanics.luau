@@ -5,6 +5,8 @@
 -- Clients only show: every vent part gets VentState ("warn" | "burst") and VentAt (server time) for
 -- client/Mechanics to play its emitters; ReplicatedStorage gets RocksBroken ("1,3"), Golden (an
 -- area id, 0 for none) and GoldenEndsAt (server time). The cloud's Source moves by a server tween.
+-- Vents, the cloud's drift and the golden spring run only between Mechanics.play and Mechanics.stop
+-- (server/Run: while the phase is "playing").
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -42,6 +44,9 @@ local save: RunSave.Save? = nil -- the run's save once loaded (the same table se
 local golden: { id: number, token: number }? = nil
 local goldenToken = 0
 local rng = Random.new()
+local active = false -- between play and stop
+local generation = 0 -- each play's loops run only while it is the current one
+local tweens: { Tween } = {} -- the running cloud drifts
 
 -- The area ids whose rock is broken (their deeper pool is open); none before the save is loaded.
 function Mechanics.rocksBroken(): { number }
@@ -105,6 +110,10 @@ local function startVents(area)
 	local last = workspace:GetServerTimeNow()
 	RunService.Heartbeat:Connect(function()
 		local now = workspace:GetServerTimeNow()
+		if not active then
+			last = now
+			return
+		end
 		for i, vent in vents do
 			local warned, burstNow = AreaRules.ventEvents(last, now, AreaRules.ventOffset(i, #vents, Config.steam.period), Config.steam)
 			if warned or burstNow then
@@ -119,18 +128,20 @@ local function startVents(area)
 	end)
 end
 
--- The cloud's Source drifts from point to point of its CloudPath, round and round.
-local function startCloud(area)
+-- The cloud's Source drifts from point to point of its CloudPath, round and round, until stop.
+local function startCloud(area, run: number)
 	local source = Zones.areaPart(ocean, area, "Source") :: BasePart
 	local path = Map.cloudPath(ocean, area)
 	local leg = TweenInfo.new(Config.cloud.legSeconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 	task.spawn(function()
 		local i = 1
-		while true do
+		while generation == run do
 			local goal = source.CFrame.Rotation + path[i].Position
 			local tween = TweenService:Create(source, leg, { CFrame = goal })
+			table.insert(tweens, tween)
 			tween:Play()
 			tween.Completed:Wait()
+			table.remove(tweens, table.find(tweens, tween))
 			i = i % #path + 1
 		end
 	end)
@@ -162,6 +173,10 @@ local function onRock(player: Player, area, prompt: ProximityPrompt)
 	end
 	state.rockAt = now
 	if table.find(save.rocksBroken, area.id) or not table.find(hooks.openIds(), area.id) or not hooks.inReach(player, prompt) then
+		return
+	end
+	if not state.equipped then -- the tool must be in hand, not a gadget or nothing
+		hooks.tell(player, "Take your tool out to break the rock")
 		return
 	end
 	if not AreaRules.canBreak(Config, state.levels, area.id) then
@@ -196,6 +211,45 @@ local function startGolden()
 	task.delay(g.seconds, endGolden, token)
 end
 
+-- Play starts (or resumes): vents puff and burst, clouds drift and golden springs come every
+-- goldenDelay seconds.
+function Mechanics.play()
+	if active then
+		return
+	end
+	active = true
+	generation += 1
+	local run = generation
+	for _, area in Config.areas do
+		if area.mechanic == "cloud" then
+			startCloud(area, run)
+		end
+	end
+	task.spawn(function()
+		while true do
+			task.wait(AreaRules.goldenDelay(Config, rng:NextNumber()))
+			if generation ~= run then
+				return
+			end
+			if not golden then
+				startGolden()
+			end
+		end
+	end)
+end
+
+-- Play ended: the vents go quiet, the clouds stop and a golden spring ends at once (no new one).
+function Mechanics.stop()
+	active = false
+	generation += 1
+	for _, tween in table.clone(tweens) do
+		tween:Cancel()
+	end
+	if golden then
+		endGolden(golden.token)
+	end
+end
+
 function Mechanics.start(oceanModel: Model, runHooks: Hooks)
 	ocean, hooks = oceanModel, runHooks
 	ReplicatedStorage:SetAttribute("Golden", 0)
@@ -207,8 +261,6 @@ function Mechanics.start(oceanModel: Model, runHooks: Hooks)
 		end)
 		if area.mechanic == "steam" then
 			startVents(area)
-		elseif area.mechanic == "cloud" then
-			startCloud(area)
 		end
 	end
 
@@ -221,19 +273,10 @@ function Mechanics.start(oceanModel: Model, runHooks: Hooks)
 		end
 	end)
 
-	-- The golden spring comes back every goldenDelay seconds while the run plays.
-	task.spawn(function()
-		while true do
-			task.wait(AreaRules.goldenDelay(Config, rng:NextNumber()))
-			if hooks.playing() and not golden then
-				startGolden()
-			end
-		end
-	end)
 	-- Studio-only test shortcut: set workspace attribute StudioGolden to true to start one now.
 	if RunService:IsStudio() then
 		workspace:GetAttributeChangedSignal("StudioGolden"):Connect(function()
-			if workspace:GetAttribute("StudioGolden") == true and hooks.playing() then
+			if workspace:GetAttribute("StudioGolden") == true and active then
 				workspace:SetAttribute("StudioGolden", nil)
 				startGolden()
 			end

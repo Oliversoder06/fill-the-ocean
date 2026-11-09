@@ -191,7 +191,8 @@ end
 local function ensureMechanics(ocean: Model, area)
 	local where = (Zones.areaModel(ocean, area) :: Instance):GetFullName()
 	assert(Zones.areaPart(ocean, area, "DeepPool"), `{where} is missing part DeepPool (the deeper pool, server/Mechanics)`)
-	Map.rockPrompt(Map.rock(ocean, area))
+	local holder = Map.rockPrompt(Map.rock(ocean, area)).Parent
+	assert(holder and (holder:IsA("BasePart") or holder:IsA("Attachment")), `{where}.Rock's Prompt must sit in a part or an Attachment (its reach is checked from there)`)
 	if area.mechanic == "steam" then
 		assert(#Map.vents(ocean, area) > 0, `{where}.Vents needs vent parts`)
 	elseif area.mechanic == "cloud" then

@@ -252,11 +252,15 @@ local function setWater(current: number)
 end
 
 -- Leaving "playing" also stops every jetpack lift and takes every hose off its tap (the gadget
--- ticks only run while playing, so nothing else would end them).
+-- ticks only run while playing, so nothing else would end them) and stops the area mechanics
+-- (server/Mechanics: vents, the cloud's drift, the golden spring); "playing" starts them.
 local function setPhase(phase: string)
 	run.phase = phase
 	setGlobal("Phase", phase)
-	if phase ~= "playing" then
+	if phase == "playing" then
+		Mechanics.play()
+	else
+		Mechanics.stop()
 		for player, state in states do
 			if state.flying or state.hose then
 				state.flying, state.hose = false, nil
@@ -889,6 +893,7 @@ local function creditScoop(state, area, deep: boolean)
 	if scale <= 0 then
 		return
 	end
+	-- A freed ice block or a deep pool's bigger sweep only fills the room left in the tool (accepted).
 	local litres = Water.scoopAmount(state.carried, state.stats.capacity, boosted(state).sweeps / scale)
 	local pay = Config.ocean.coinsPerLitre * area.payMultiplier * AreaRules.payScale(Config, area.id, deep, Mechanics.goldenId())
 	state.carried += litres

@@ -81,14 +81,14 @@ function tests.sweeps_chip_ice_and_deep_pools_give_more(t)
 	t.expectEq(scale, Config.ice.blockSweeps)
 	hits, scale = AreaRules.sweep(Config, ice, false, 0, nil)
 	t.expectEq(hits, 1, "no pick: Config.ice.hits needed")
-	hits, scale = AreaRules.sweep(Config, cove, false, 0, nil)
-	t.expectEq(hits, 0)
+	hits, scale = AreaRules.sweep(Config, cove, false, 2, nil)
+	t.expectEq(hits, 0, "scooping anywhere else drops the half-chipped block")
 	t.expectEq(scale, 1)
 	hits, scale = AreaRules.sweep(Config, cove, true, 0, nil)
 	t.expectEq(scale, Config.deepPool.sweepScale)
 	t.expectEq(Config.deepPool.sweepScale, 1.5)
 	hits, scale = AreaRules.sweep(Config, ice, true, 2, nil)
-	t.expectEq(hits, 2, "the Glacier's deep pool is water, not ice")
+	t.expectEq(hits, 0, "the Glacier's deep pool is water, not ice: the block is dropped")
 	t.expectEq(scale, Config.deepPool.sweepScale)
 end
 
@@ -97,8 +97,7 @@ function tests.snow_slows_walking(t)
 	t.expectEq(AreaRules.walkSpeed(Config, 20, false), 20)
 end
 
--- The rock needs the area's top tool: the first level of the last tool model its area opens.
--- Areas with no tool levels of their own (4, 5 for now) need the top tool opened before them.
+-- The rock needs the area's tool (Config.areas rockTool): the first level of that tool model.
 function tests.rock_needs_the_areas_top_tool(t)
 	local track = Config.track("tool")
 	assert(track, "tool track")
@@ -108,17 +107,12 @@ function tests.rock_needs_the_areas_top_tool(t)
 	t.expectEq(AreaRules.canBreak(Config, { tool = index - 1 }, 1), false)
 	t.expectEq(AreaRules.canBreak(Config, { tool = index }, 1), true)
 	t.expectEq(AreaRules.canBreak(Config, {}, 1), false, "the Spoon breaks nothing")
-	local _, two = AreaRules.rockTool(Config, 2)
-	t.expectEq(two.model, "KiddiePool")
-	local top = 0
-	for i, l in track.levels do
-		if l.area <= 5 then
-			top = i
-		end
+	for areaId, model in { "Bucket", "KiddiePool", "SwimmingPool", "CargoShip", "TheMoon" } do
+		local i, level = AreaRules.rockTool(Config, areaId)
+		t.expectEq(level.model, model, `area {areaId}'s rock tool`)
+		t.expectEq(track.levels[i], level)
+		t.expectEq(track.levels[i - 1].model ~= model, true, `area {areaId}: the first {model} level`)
 	end
-	local last, lastLevel = AreaRules.rockTool(Config, 5)
-	t.expectEq(lastLevel.model, track.levels[top].model)
-	t.expectEq(last <= top, true)
 end
 
 function tests.golden_waits_between_min_and_max(t)

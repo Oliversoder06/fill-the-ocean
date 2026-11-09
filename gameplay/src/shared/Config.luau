@@ -29,6 +29,7 @@ export type Area = {
 	-- its area mechanic (shared/AreaRules, server/Mechanics): "steam" vents knock you back and Heat
 	-- Gloves speed up its pools; "ice": its Source gives ice blocks you chip; "cloud": its Source drifts
 	mechanic: ("steam" | "ice" | "cloud")?,
+	rockTool: string, -- the tool model whose first level breaks the rock in front of its deeper pool
 }
 
 export type Track = {
@@ -118,19 +119,19 @@ Config.ocean = {
 -- (10/50/250) so the upgrade prices still fit. Gate prices are the money tools/simulate holds when
 -- the ocean reaches the gate's fill, rounded down to 2 significant figures.
 Config.areas = {
-	{ id = 1, name = "Cove Well", payMultiplier = 1, scoopFactor = 1 },
-	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 }, model = "MountainSpring" },
-	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 }, model = "HotSprings", mechanic = "steam" },
-	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 }, model = "Glacier", mechanic = "ice" },
+	{ id = 1, name = "Cove Well", payMultiplier = 1, scoopFactor = 1, rockTool = "Bucket" },
+	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 }, model = "MountainSpring", rockTool = "KiddiePool" },
+	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 }, model = "HotSprings", mechanic = "steam", rockTool = "SwimmingPool" },
+	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 }, model = "Glacier", mechanic = "ice", rockTool = "CargoShip" },
 	-- Up in the clouds: only players with a Jetpack Tank get there.
-	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher", needs = "jetpackTank", mechanic = "cloud" },
+	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher", needs = "jetpackTank", mechanic = "cloud", rockTool = "TheMoon" },
 } :: { Area }
 
 -- Area mechanics (shared/AreaRules, server/Mechanics).
 -- Steam (Hot Springs): each vent puffs `warnSeconds` before it bursts, every `period` seconds
 -- (vents staggered); a burst pushes a player within `radius` studs away at `push` and up at `lift`
--- studs a second for `pushSeconds`. Heat Gloves stop the push, and their hotFill (1.25 / 1.5 / 2,
--- Config.items) divides the sweep time in hot pools: 25 / 50 / 100 % faster.
+-- studs a second for `pushSeconds`. Heat Gloves stop the push, and their hotFill (1.25 / 1.4 / 1.6,
+-- Config.items) divides the sweep time in hot pools: 25 / 40 / 60 % faster.
 Config.steam = { period = 6, warnSeconds = 1, radius = 6, push = 60, lift = 35, pushSeconds = 0.25 }
 -- Ice (Glacier): every sweep at the Source is a hit; the `hits`-th frees a block worth `blockSweeps`
 -- normal sweeps of litres (carried like water, melted when poured). Bare hands (6 hits for 4 sweeps)
@@ -141,7 +142,8 @@ Config.snow = { walkFactor = 0.8 }
 -- Cloud (Cloud Catcher): the Source drifts between its CloudPath points, `legSeconds` per leg. The
 -- Cloud Net scoops it from the net's range instead of Zones.REACH.
 Config.cloud = { legSeconds = 25 }
--- A deeper pool in every area behind a rock that the area's top tool breaks (AreaRules.rockTool):
+-- A deeper pool in every area behind a rock that the area's tool (its `rockTool`, the plan's tool per
+-- area) breaks (AreaRules.rockTool):
 -- a sweep there brings `sweepScale` sweeps of litres. Broken rocks stay broken for the team (save).
 Config.deepPool = { sweepScale = 1.5 }
 -- Golden spring: every minSeconds-maxSeconds of play one open area's Source pays `pay` times for
@@ -334,7 +336,7 @@ local gadgets = {
 		about = "Steam can't knock you back, and hot pools fill faster.",
 		model = "HeatGloves",
 		hotFill = 1.25,
-		levels = { { cost = 6e6, hotFill = 1.5 }, { cost = 20e6, hotFill = 2 } },
+		levels = { { cost = 6e6, hotFill = 1.4 }, { cost = 20e6, hotFill = 1.6 } },
 	},
 	{
 		id = "icePick",

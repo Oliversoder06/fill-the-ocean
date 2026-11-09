@@ -40,12 +40,13 @@ end
 -- One credited sweep at `area` (deep: at its deeper pool). Returns the hits on the current ice block
 -- afterwards and how many normal sweeps' litres it brings. At an ice Source each sweep is a hit and
 -- only the one that frees the block brings litres (Config.ice.blockSweeps); a deep pool brings
--- Config.deepPool.sweepScale; anywhere else 1.
+-- Config.deepPool.sweepScale; anywhere else 1. A sweep anywhere but an ice Source drops the block
+-- being chipped (its hits go back to 0).
 function AreaRules.sweep(config, area, deep: boolean, iceHits: number, pickHits: number?): (number, number)
 	if deep then
-		return iceHits, config.deepPool.sweepScale
+		return 0, config.deepPool.sweepScale
 	elseif area.mechanic ~= "ice" then
-		return iceHits, 1
+		return 0, 1
 	end
 	local hits = iceHits + 1
 	if hits >= AreaRules.iceHits(config, pickHits) then
@@ -59,22 +60,21 @@ function AreaRules.walkSpeed(config, base: number, onSnow: boolean): number
 	return if onSnow then base * config.snow.walkFactor else base
 end
 
--- The tool that breaks area `areaId`'s rock: the first level of the last tool model whose levels
--- that area (or, for an area that opens no tool levels, an earlier one) opens. Returns its index in
--- the tool track and the level.
+-- The tool that breaks area `areaId`'s rock: the first tool level of the area's `rockTool` model.
+-- Returns its index in the tool track and the level.
 function AreaRules.rockTool(config, areaId: number)
-	local levels = config.track("tool").levels
-	local top = 1
-	for i, level in levels do
-		if level.area <= areaId then
-			top = i
+	local model = nil
+	for _, area in config.areas do
+		if area.id == areaId then
+			model = area.rockTool
 		end
 	end
-	local first = top
-	while first > 1 and levels[first - 1].model == levels[top].model do
-		first -= 1
+	for i, level in config.track("tool").levels do
+		if level.model == model then
+			return i, level
+		end
 	end
-	return first, levels[first]
+	error(`area {areaId}'s rockTool {model} is not a tool model`)
 end
 
 -- Whether a player with these track levels may break area `areaId`'s rock.
