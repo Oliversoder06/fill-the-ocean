@@ -30,7 +30,8 @@ function BuildingRules.clogDelay(config, r: number): number
 	return clog.minSeconds + r * (clog.maxSeconds - clog.minSeconds)
 end
 
--- Whether `money` covers `price` (a build or a TAB level of a building).
+-- Whether `money` covers `price` (a build or a TAB level of a building), for buildable. Server code
+-- uses common/Items.affords, the same check: pure modules can't require each other.
 function BuildingRules.affords(money: number, price: number): boolean
 	return money + MONEY_EPSILON >= price
 end

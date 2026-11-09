@@ -128,12 +128,12 @@ local function tabOf(item): string
 end
 
 -- Upgrades bought on an item, or nil while it isn't owned: the player's own, or the team's for a
--- building (Hud.buildings).
-local function boughtLevel(item, itemState: Items.State): number?
+-- building (Hud.buildings). `snap`: Hud.snapshot.
+local function boughtLevel(item, snap: Hud.Snapshot): number?
 	if item.kind == "building" then
-		return Hud.buildings()[item.id]
+		return snap.buildings[item.id]
 	end
-	return if Items.owned(itemState, item.id) then itemState.itemLevels[item.id] else nil
+	return if Items.owned(snap.items, item.id) then snap.items.itemLevels[item.id] else nil
 end
 
 -- Per tab: the first tile `money` buys in TAB now (nil for none) and whether anything there is on
@@ -143,8 +143,9 @@ local function tabStates(levels: { [string]: number }, money: number): { [string
 	for _, name in TABS do
 		states[name] = { afford = nil, any = false }
 	end
+	local snap = Hud.snapshot()
 	local function check(name: string, id: string)
-		local _, status, affordable = Hud.offer(levels, id, money)
+		local _, status, affordable = Hud.offer(levels, id, money, snap)
 		local s = states[name]
 		s.any = s.any or status == "buy" or status == "stand" or status == "unbuilt"
 		if affordable and not s.afford then
@@ -162,11 +163,11 @@ end
 
 -- Levels bought of track or item `id` as the server has published them (-1 while an item isn't
 -- owned), to tell when a buy has landed.
-local function boughtCount(id: string): number
+local function boughtCount(id: string, snap: Hud.Snapshot): number
 	if Config.track(id) then
 		return levelsOf()[id]
 	end
-	return boughtLevel(Items.get(Config, id), Hud.items()) or -1
+	return boughtLevel(Items.get(Config, id), snap) or -1
 end
 
 -- What an unowned or maxed item's detail says (Hud.offer's item statuses): where to get it and its
@@ -519,12 +520,13 @@ function Shop.start()
 	local pending: { id: string, have: number, at: number }? = nil
 	onPress(buyButton, function()
 		local now = os.clock()
-		local have = boughtCount(selected)
+		local snap = Hud.snapshot()
+		local have = boughtCount(selected, snap)
 		local waiting = pending and pending.id == selected and pending.have == have and now - pending.at < PENDING_SECONDS
 		if now < guardUntil or waiting then
 			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
 		end
-		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0)
+		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0, snap)
 		if not canBuy then
 			Purchase.deny(buyButton)
 			return
@@ -581,7 +583,7 @@ function Shop.start()
 	local shownLevels: { [string]: number } = {}
 	local tabInfo = tabStates(levelsOf(), 0)
 	local tabsAt = 0
-	local shownSelected, shownHave = selected, boughtCount(selected)
+	local shownSelected, shownHave = selected, boughtCount(selected, Hud.snapshot())
 	RunService.RenderStepped:Connect(function()
 		if open and not inRun() then
 			setOpen(false)
@@ -607,10 +609,11 @@ function Shop.start()
 		end
 		local money = player:GetAttribute("Money") or 0
 		local levels = levelsOf()
+		local snap = Hud.snapshot()
 		local now = Ladder.stats(Config, levels)
 
 		-- A buy landing (the selected tile's bought count goes up) holds Buy back for a moment too.
-		local boughtNow = boughtCount(selected)
+		local boughtNow = boughtCount(selected, snap)
 		if selected == shownSelected and boughtNow ~= shownHave then
 			guardUntil = clock + BUY_GUARD
 		end
@@ -628,12 +631,11 @@ function Shop.start()
 		set(detail, "Visible", TAB_PANELS[tab] ~= nil)
 
 		-- Item tiles: the level you own, and the next upgrade's price or the item's own
-		local itemState = Hud.items()
 		for _, item in Config.items do
 			local holder = itemTiles[item.id]
 			local button = Hud.find(holder, "Button")
-			local bought = boughtLevel(item, itemState)
-			local level, status = Hud.offer(levels, item.id, money)
+			local bought = boughtLevel(item, snap)
+			local level, status = Hud.offer(levels, item.id, money, snap)
 			local grey = status == "locked" or status == "replaced"
 			set(button, "ImageColor3", if grey then colors.locked else colors.shallowWater)
 			set(Hud.find(button, "Ring"), "Visible", item.id == selected)
@@ -653,7 +655,7 @@ function Shop.start()
 			local holder = tiles[id]
 			local button = Hud.find(holder, "Button")
 			local have = levels[id]
-			local level, status = Hud.offer(levels, id, money)
+			local level, status = Hud.offer(levels, id, money, snap)
 			local grey = status == "locked" or status == "useless"
 			set(button, "ImageColor3", if grey then colors.locked else panelColor(track))
 			set(Hud.find(button, "Ring"), "Visible", id == selected)
@@ -693,8 +695,8 @@ function Shop.start()
 		-- Detail panel: the selected item's next upgrade
 		local selectedItem = Items.get(Config, selected)
 		if selectedItem then
-			local level, status, canLevel = Hud.offer(levels, selected, money)
-			local bought = boughtLevel(selectedItem, itemState)
+			local level, status, canLevel = Hud.offer(levels, selected, money, snap)
+			local bought = boughtLevel(selectedItem, snap)
 			set(Hud.find(detail, "Category"), "Text", ITEM_CATEGORIES[selectedItem.kind] or "Gear")
 			set(detailArt, "ImageColor3", if status == "locked" or status == "replaced" then colors.locked else colors.shallowWater)
 			set(Hud.find(detailArt, "Icon"), "Visible", true)
@@ -728,7 +730,7 @@ function Shop.start()
 		set(assignButton, "Visible", false)
 		local track = Config.track(selected) :: Config.Track
 		local have = levels[selected]
-		local level, status, canBuy = Hud.offer(levels, selected, money)
+		local level, status, canBuy = Hud.offer(levels, selected, money, snap)
 		set(Hud.find(detail, "Category"), "Text", PANEL_NAMES[track.panel])
 		set(detailArt, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
 		set(Hud.find(detail, "About"), "Text", track.about)

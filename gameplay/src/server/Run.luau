@@ -79,7 +79,6 @@ local MAX_BUYS_PER_SECOND = 5
 local MAX_EQUIPS_PER_SECOND = 5 -- each one swaps the model in hand (server/HeldTools)
 local MAX_GADGET_PER_SECOND = 10 -- clip / spray / fly toggles; water and fuel follow server time, not these
 local HOSE_TICK = 0.5 -- seconds between the hose's credits while it sprays
-local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
 local STAND_COOLDOWN = 0.5 -- seconds between accepted stand prompts per player (exploits can fire prompts)
@@ -781,7 +780,7 @@ local function onBuy(player: Player, id: unknown)
 	else
 		level, status = Items.nextLevel(Config, state, id)
 	end
-	if status ~= "buy" or state.money + MONEY_EPSILON < level.cost then
+	if status ~= "buy" or not Items.affords(state.money, level.cost) then
 		return
 	end
 	state.money = math.max(0, state.money - level.cost)
@@ -1048,7 +1047,7 @@ local function onGate(player: Player, area)
 		return
 	end
 	local nextId, onSale = Areas.nextGate(Config, save.gatesOpen, fillOf(run.current))
-	if nextId ~= area.id or not onSale or state.money + MONEY_EPSILON < area.gate.price then
+	if nextId ~= area.id or not onSale or not Items.affords(state.money, area.gate.price) then
 		return
 	end
 	if not inReach(player, Map.gatePrompt(Map.gate(ocean, area))) then

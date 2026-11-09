@@ -9,6 +9,7 @@
 -- Uses the game's own modules. Pass "quiet" to print only the 10% times.
 local process = require("@lune/process")
 local Areas = require("../../common/Areas")
+local Items = require("../../common/Items")
 local Config = require("../src/shared/Config")
 local Ladder = require("../src/shared/Ladder")
 local Water = require("../src/shared/Water")
@@ -26,12 +27,12 @@ local money, carried, carriedValue = 0, 0, 0
 local gatesOpen = {}
 local area = Config.areas[1] -- where the player scoops: the furthest open area
 
--- The cheapest track this player can buy right now, or nil.
+-- The cheapest track this player can buy right now that changes something (Ladder.helps), or nil.
 local function cheapest(areas: number)
 	local bestTrack, bestLevel = nil, nil
 	for _, track in Config.tracks do
 		local level, status = Ladder.offer(Config, levels, track.id, areas)
-		if status == "buy" and money + 1e-6 >= level.cost and (not bestLevel or level.cost < bestLevel.cost) then
+		if status == "buy" and Ladder.helps(Config, levels, track.id) and Items.affords(money, level.cost) and (not bestLevel or level.cost < bestLevel.cost) then
 			bestTrack, bestLevel = track, level
 		end
 	end
@@ -76,7 +77,7 @@ while current < target - 1e-6 do
 	end
 	local gateId, onSale = Areas.nextGate(Config, gatesOpen, fill)
 	local gate = if gateId then Areas.byId(Config, gateId) else nil
-	if gate and onSale and money + 1e-6 >= gate.gate.price then
+	if gate and onSale and Items.affords(money, gate.gate.price) then
 		money -= gate.gate.price
 		table.insert(gatesOpen, gate.id)
 		area = gate

@@ -76,11 +76,13 @@ function Format.standName(config, stand: string?, area): string
 end
 
 -- A stand prompt's action for Items.standOffer's `item` and `status` (`area`: the item's area).
-function Format.standAction(item, status: string, money: number, area): string
+-- `money` nil leaves out what you have (the prompt, which would otherwise change on every pour).
+function Format.standAction(item, status: string, money: number?, area): string
 	if status == "buy" then
 		return `Buy {item.name} ({Format.money(item.price)})`
 	elseif status == "money" then
-		return `Need {Format.money(item.price)} for the {item.name} (you have {Format.money(money)})`
+		local need = `Need {Format.money(item.price)} for the {item.name}`
+		return if money then `{need} (you have {Format.money(money)})` else need
 	elseif status == "locked" then
 		return `{item.name} opens with {area.name}`
 	end

@@ -12,7 +12,6 @@ local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Format = require(ReplicatedStorage.Shared.Format)
-local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
@@ -63,9 +62,14 @@ function Stands.prompt(stand: Stand): ProximityPrompt?
 	return holder and Zones.standPrompt(holder)
 end
 
--- What the stand shows this player now (Items.standOffer, as the server picks it).
-function Stands.offer(stand: Stand, items: Items.State, money: number)
-	return Items.standOffer(Config, items, stand.area.id, Ladder.openAreas(Config, Hud.gatesOpen()), money, stand.shop)
+-- What the stand shows this player now (Items.standOffer, as the server picks it). `snap`: Hud.snapshot.
+function Stands.offer(stand: Stand, snap: Hud.Snapshot, money: number)
+	return Items.standOffer(Config, snap.items, stand.area.id, snap.openAreas, money, stand.shop)
+end
+
+-- Whether this player can get to the stand (Items.reachable: Cloud Catcher's needs the Jetpack Tank).
+function Stands.reachable(stand: Stand, items: Items.State): boolean
+	return Items.reachable(Config, items, { stand.area.id })[1] ~= nil
 end
 
 local LINE_COLORS = { buy = colors.speedTag, money = colors.buyCoral, locked = colors.drySand, owned = colors.foam }
@@ -87,7 +91,7 @@ function Stands.start()
 			return
 		end
 		nextAt = now + REFRESH_SECONDS
-		local items = Hud.items()
+		local snap = Hud.snapshot()
 		local money = player:GetAttribute("Money") or 0
 		for _, stand in stands do
 			local prompt = prompts[stand.key]
@@ -103,18 +107,19 @@ function Stands.start()
 				sign.Parent = gui
 				signs[stand.key] = sign
 			end
+			local shown = if prompt and Stands.reachable(stand, snap.items) then prompt else nil
 			local s = sign :: BillboardGui
-			set(s, "Adornee", if prompt then prompt.Parent else nil)
-			set(s, "Enabled", prompt ~= nil)
-			if prompt then
-				local item, status = Stands.offer(stand, items, money)
+			set(s, "Adornee", if shown then shown.Parent else nil)
+			set(s, "Enabled", shown ~= nil)
+			if shown then
+				local item, status = Stands.offer(stand, snap, money)
 				local area = item and Areas.byId(Config, item.area)
 				local title, line = Format.standSign(item, status, area, stand.place)
 				set(Hud.find(s, "Title"), "Text", title)
 				set(Hud.find(s, "Line"), "Text", line)
 				set(Hud.find(s, "Line"), "TextColor3", LINE_COLORS[status])
-				set(prompt, "ObjectText", stand.place)
-				set(prompt, "ActionText", Format.standAction(item, status, money, area))
+				set(shown, "ObjectText", stand.place)
+				set(shown, "ActionText", Format.standAction(item, status, nil, area))
 			end
 		end
 		-- Calling a vehicle out needs one to call.
@@ -124,7 +129,7 @@ function Stands.start()
 			callPrompt = if found and found:IsA("ProximityPrompt") then found else nil
 		end
 		if callPrompt then
-			set(callPrompt, "Enabled", Items.furthest(Config, items, "vehicle") ~= nil)
+			set(callPrompt, "Enabled", Items.furthest(Config, snap.items, "vehicle") ~= nil)
 		end
 	end)
 end

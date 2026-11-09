@@ -27,47 +27,6 @@ local set = Hud.set
 
 local Goal = {}
 
--- Everything on sale now, as NextGoal offers. Targets are keys: "tab:<id>", "stand:<key>", "plots".
-local function offers(money: number): { NextGoal.Offer }
-	local list = {}
-	local levels = Hud.levels(0) :: { [string]: number }
-	local items = Hud.items()
-	local buildings = Hud.buildings()
-	for _, track in Config.tracks do
-		local level, status, affordable = Hud.offer(levels, track.id, money)
-		if status == "buy" then
-			local name = Shop.levelName(track, levels[track.id] + 1, level)
-			table.insert(list, { name = name, cost = level.cost, place = "in UPGRADES", affordable = affordable, target = `tab:{track.id}` })
-		end
-	end
-	for _, item in Config.items do
-		local level, status, affordable = Hud.offer(levels, item.id, money)
-		if status == "buy" then
-			local bought = if item.kind == "building" then buildings[item.id] else items.itemLevels[item.id]
-			table.insert(list, { name = `{item.name} Lv {bought + 2}`, cost = level.cost, place = "in UPGRADES", affordable = affordable, target = `tab:{item.id}` })
-		elseif status == "unbuilt" then
-			table.insert(list, { verb = "Build", name = item.name, cost = item.price, place = "on a town plot", affordable = Items.affords(money, item.price), target = "plots" })
-		end
-	end
-	for _, stand in Stands.list() do
-		local item, status = Stands.offer(stand, items, money)
-		if status == "buy" or status == "money" then
-			table.insert(list, { name = item.name, cost = item.price, place = `at the {stand.place}`, affordable = status == "buy", target = `stand:{stand.key}` })
-		end
-	end
-	return list
-end
-
--- The next closed gate, as NextGoal reads it.
-local function nextGate(money: number, fill: number): NextGoal.Gate?
-	local id, onSale = Areas.nextGate(Config, Hud.gatesOpen(), fill)
-	local area = id and Areas.byId(Config, id)
-	if not area then
-		return nil
-	end
-	return { name = area.name, fill = area.gate.fill, price = area.gate.price, onSale = onSale, affordable = Items.affords(money, area.gate.price), target = `gate:{area.id}` }
-end
-
 -- The first plot without a building (workspace.Map.Plots.PlotN.Base), or nil.
 local function emptyPlot(): Instance?
 	local scenery = workspace:FindFirstChild("Map")
@@ -81,6 +40,50 @@ local function emptyPlot(): Instance?
 		end
 	end
 	return nil
+end
+
+-- Everything on sale now, as NextGoal offers. Targets are keys: "tab:<id>", "stand:<key>", "plots".
+-- Only stands that are in the place and the player can reach, and builds while a plot is free.
+local function offers(money: number): { NextGoal.Offer }
+	local list = {}
+	local levels = Hud.levels(0) :: { [string]: number }
+	local snap = Hud.snapshot()
+	local plotFree = emptyPlot() ~= nil
+	for _, track in Config.tracks do
+		local level, status, affordable = Hud.offer(levels, track.id, money, snap)
+		if status == "buy" then
+			local name = Shop.levelName(track, levels[track.id] + 1, level)
+			table.insert(list, { name = name, cost = level.cost, place = "in UPGRADES", affordable = affordable, target = `tab:{track.id}` })
+		end
+	end
+	for _, item in Config.items do
+		local level, status, affordable = Hud.offer(levels, item.id, money, snap)
+		if status == "buy" then
+			local bought = if item.kind == "building" then snap.buildings[item.id] else snap.items.itemLevels[item.id]
+			table.insert(list, { name = `{item.name} Lv {bought + 2}`, cost = level.cost, place = "in UPGRADES", affordable = affordable, target = `tab:{item.id}` })
+		elseif status == "unbuilt" and plotFree then
+			table.insert(list, { verb = "Build", name = item.name, cost = item.price, place = "on a town plot", affordable = Items.affords(money, item.price), target = "plots" })
+		end
+	end
+	for _, stand in Stands.list() do
+		if Stands.reachable(stand, snap.items) and Stands.prompt(stand) then
+			local item, status = Stands.offer(stand, snap, money)
+			if status == "buy" or status == "money" then
+				table.insert(list, { name = item.name, cost = item.price, place = `at the {stand.place}`, affordable = status == "buy", target = `stand:{stand.key}` })
+			end
+		end
+	end
+	return list
+end
+
+-- The next closed gate, as NextGoal reads it.
+local function nextGate(money: number, fill: number): NextGoal.Gate?
+	local id, onSale = Areas.nextGate(Config, Hud.gatesOpen(), fill)
+	local area = id and Areas.byId(Config, id)
+	if not area then
+		return nil
+	end
+	return { name = area.name, fill = area.gate.fill, price = area.gate.price, onSale = onSale, affordable = Items.affords(money, area.gate.price), target = `gate:{area.id}` }
 end
 
 -- Where a world target is, or nil while it isn't streamed in.

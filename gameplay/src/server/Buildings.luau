@@ -207,7 +207,7 @@ function Buildings.buy(player: Player, state, id: string): boolean
 		return true
 	end
 	local level, status = Items.buildingOffer(Config, save.buildings, id, hooks.openAreas())
-	if status ~= "buy" or not BuildingRules.affords(state.money, level.cost) then
+	if status ~= "buy" or not Items.affords(state.money, level.cost) then
 		return true
 	end
 	local standing = false
