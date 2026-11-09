@@ -103,6 +103,8 @@ Shared (`src/shared/`, pure unless noted):
 
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `RunSave.luau` (pure): a team's saved run, its key, and the exact-team check (`sameTeam`).
+- `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
+  `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus`, `standPick`, `teamOwned`.
 - `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore).
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps.
@@ -120,9 +122,11 @@ The server publishes state as attributes; the client only reads them.
   boost applied.
 - Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
   `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, and
-  `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...); `ActKind` + `ActAt`
+  `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...); `Owned` (item ids,
+  `"backpackTank,bigTank"`), `ItemLevel_<itemId>` per item and `Backpack` (the worn pack's model or
+  `""`); `Capacity` includes the pack; `ActKind` + `ActAt`
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
-- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id),
+- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it),
   `Equip` (boolean), `Act` (`"scoop"` or `"pour"`, sent when an action starts; the server credits
   a scoop ActSeconds later and a pour at once), `Look` (camera pitch in degrees, range-checked and
   rate-limited), `Admin` (a fill fraction 0-1; the server checks `shared/Admins` and only jumps

@@ -4,7 +4,9 @@
 -- out as attributes. The server checks the distance and, for scoops, the pace (one per ActSeconds
 -- x the area's scoopFactor) when an action starts. A scoop is credited when it ends; a pour is
 -- instant. Gates (Config.areas) are bought through their ProximityPrompt and open for the whole
--- team (save.gatesOpen, published as GatesOpen); pads move players between open areas. Each
+-- team (save.gatesOpen, published as GatesOpen); pads move players between open areas. Items
+-- (Config.items, common/Items) are bought once through their area's stand prompt and levelled with
+-- Buy(itemId); a worn backpack adds to Capacity. Each
 -- accepted action is published as ActKind + ActAt (server time) so other clients can play it on
 -- that player's body (client/Bodies).
 -- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
@@ -31,6 +33,7 @@ local Water = require(ReplicatedStorage.Shared.Water)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Session = require(ReplicatedStorage.Shared.Session)
 local Areas = require(ReplicatedStorage.Common.Areas)
+local Items = require(ReplicatedStorage.Common.Items)
 local Maps = require(ReplicatedStorage.Common.Maps)
 local Places = require(ReplicatedStorage.Common.Places)
 local PlayerData = require(ReplicatedStorage.Common.PlayerData)
@@ -48,6 +51,7 @@ local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still 
 local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
 local PAD_COOLDOWN = 2 -- seconds after a pad move before a pad moves the same player again
+local STAND_COOLDOWN = 0.5 -- seconds between accepted stand prompts per player (exploits can fire prompts)
 local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action pace check (mobile lag spikes)
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
@@ -96,6 +100,11 @@ local function boosted(state)
 	return Boosts.apply(Config, state.stats, run.boost and run.boost.id)
 end
 
+-- What a player's levels and gear add up to (a worn backpack adds to the tool's capacity).
+local function statsOf(state)
+	return Items.withGear(Config, state, Ladder.stats(Config, state.levels))
+end
+
 local function remote(name: string): RemoteEvent
 	local folder = ReplicatedStorage:WaitForChild("Remotes")
 	local r = folder:WaitForChild(name, 10)
@@ -126,6 +135,14 @@ local function publish(player: Player)
 	for _, track in Config.tracks do
 		player:SetAttribute(`Level_{track.id}`, state.levels[track.id] or 0)
 	end
+	-- Items bought ("backpackTank,bigTank"), each one's upgrades ("ItemLevel_bigTank") and the worn
+	-- backpack's model ("" for none; server/HeldTools puts it on the back).
+	player:SetAttribute("Owned", table.concat(state.owned, ","))
+	for _, item in Config.items do
+		player:SetAttribute(`ItemLevel_{item.id}`, state.itemLevels[item.id] or 0)
+	end
+	local worn = Items.backpack(Config, state)
+	player:SetAttribute("Backpack", if worn then worn.model else "")
 end
 
 local function applyWalkSpeed(player: Player)
@@ -291,6 +308,8 @@ local function keepPlayer(player: Player, state)
 			money = state.money,
 			levels = table.clone(state.levels),
 			litres = state.litres,
+			owned = table.clone(state.owned),
+			itemLevels = table.clone(state.itemLevels),
 		}
 	end
 end
@@ -309,6 +328,7 @@ local function snapshot(): RunSave.Save
 	copy.players = table.clone(save.players)
 	copy.boostsPlayed = table.clone(save.boostsPlayed)
 	copy.gatesOpen = table.clone(save.gatesOpen)
+	copy.buildings = table.clone(save.buildings)
 	return copy
 end
 
@@ -473,7 +493,8 @@ local function applySaved(player: Player)
 	if saved then
 		local state = states[player]
 		state.money, state.levels, state.litres = saved.money, table.clone(saved.levels), saved.litres
-		state.stats = Ladder.stats(Config, state.levels)
+		state.owned, state.itemLevels = table.clone(saved.owned), table.clone(saved.itemLevels)
+		state.stats = statsOf(state)
 	end
 end
 
@@ -596,6 +617,8 @@ local function onPlayerAdded(player: Player)
 		carried = 0, -- litres in the tool
 		carriedValue = 0, -- their coins before coinBonus (Water.mix: each area's litres at its pay)
 		levels = {} :: { [string]: number },
+		owned = {} :: { string }, -- item ids bought at the stands (common/Items)
+		itemLevels = {} :: { [string]: number },
 		stats = Ladder.stats(Config, {}),
 		litres = 0,
 		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
@@ -603,6 +626,7 @@ local function onPlayerAdded(player: Player)
 		buysInWindow = 0,
 		lastLookAt = 0, -- os.clock() of the last accepted Look
 		padAt = 0, -- os.clock() of the last pad move
+		standAt = 0, -- os.clock() of the last accepted stand prompt
 		equipped = true,
 	}
 	if run.save then
@@ -619,10 +643,11 @@ local function onPlayerAdded(player: Player)
 	end
 end
 
--- Buy the next level of one upgrade track. Only levels of the open areas can be bought.
-local function onBuy(player: Player, trackId: unknown)
+-- Buy the next level of one upgrade track (only levels of the open areas), or the next upgrade of
+-- an owned item (TAB). Items themselves are bought at their stand (onStand).
+local function onBuy(player: Player, id: unknown)
 	local state = states[player]
-	if not state or type(trackId) ~= "string" or run.phase ~= "playing" then
+	if not state or type(id) ~= "string" or run.phase ~= "playing" then
 		return
 	end
 	local now = os.clock()
@@ -633,13 +658,20 @@ local function onBuy(player: Player, trackId: unknown)
 		return
 	end
 	state.buysInWindow += 1
-	local level, status = Ladder.offer(Config, state.levels, trackId, openAreas())
+	local isTrack = Config.track(id) ~= nil
+	local level, status
+	if isTrack then
+		level, status = Ladder.offer(Config, state.levels, id, openAreas())
+	else
+		level, status = Items.nextLevel(Config, state, id)
+	end
 	if status ~= "buy" or state.money + MONEY_EPSILON < level.cost then
 		return
 	end
 	state.money = math.max(0, state.money - level.cost)
-	state.levels[trackId] = (state.levels[trackId] or 0) + 1
-	state.stats = Ladder.stats(Config, state.levels)
+	local bought = if isTrack then state.levels else state.itemLevels
+	bought[id] = (bought[id] or 0) + 1
+	state.stats = statsOf(state)
 	applyWalkSpeed(player)
 	publish(player)
 end
@@ -693,6 +725,18 @@ end
 local function rootOf(player: Player): BasePart?
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	return if root and root:IsA("BasePart") then root else nil
+end
+
+-- Whether the player stands within a prompt's reach (with latency slack). The prompt sits in a
+-- part or an attachment.
+local function inReach(player: Player, prompt: ProximityPrompt): boolean
+	local root = rootOf(player)
+	local holder = prompt.Parent
+	local at = if holder and holder:IsA("BasePart")
+		then holder.Position
+		elseif holder and holder:IsA("Attachment") then holder.WorldPosition
+		else nil
+	return root ~= nil and at ~= nil and (root.Position - at).Magnitude <= prompt.MaxActivationDistance + DISTANCE_SLACK
 end
 
 -- The open area whose Source (scoop) or Pour (pour) the player stands by, and that part.
@@ -811,10 +855,7 @@ local function onGate(player: Player, area)
 	if nextId ~= area.id or not onSale or state.money + MONEY_EPSILON < area.gate.price then
 		return
 	end
-	local prompt = Map.gatePrompt(Map.gate(ocean, area))
-	local root = rootOf(player)
-	local at = (prompt.Parent :: BasePart).Position
-	if not root or (root.Position - at).Magnitude > prompt.MaxActivationDistance + DISTANCE_SLACK then
+	if not inReach(player, Map.gatePrompt(Map.gate(ocean, area))) then
 		return
 	end
 	state.money = math.max(0, state.money - area.gate.price)
@@ -824,6 +865,33 @@ local function onGate(player: Player, area)
 	publish(player)
 	card(`{player.DisplayName} opened {area.name}!`)
 	task.spawn(saveRun, `gate {area.id} opened`)
+end
+
+-- The stand prompt of `area`: buys the cheapest item sold there that the player can buy now
+-- (Items.standPick; one prompt per stand until 3b adds a picker). The area must be open, the item
+-- not owned and affordable, and the player by the stand.
+local function onStand(player: Player, area, prompt: ProximityPrompt)
+	local state = states[player]
+	local now = os.clock()
+	if not state or run.phase ~= "playing" or now - state.standAt < STAND_COOLDOWN then
+		return
+	end
+	state.standAt = now
+	if not Areas.open(gatesOpen())[area.id] or not inReach(player, prompt) then
+		return
+	end
+	local item = Items.standPick(Config, state, area.id, openAreas(), state.money)
+	if not item then
+		remotes.Card:FireClient(player, "Nothing here you can buy yet", CARD_SECONDS)
+		return
+	end
+	state.money = math.max(0, state.money - item.price)
+	table.insert(state.owned, item.id)
+	state.itemLevels[item.id] = 0
+	state.stats = statsOf(state)
+	publish(player)
+	remotes.Card:FireClient(player, `You bought the {item.name}!`, CARD_SECONDS)
+	task.spawn(saveRun, `{player.Name} bought {item.id}`)
 end
 
 -- A pad in an open area moves the player to the next open area's Spawn, in area order, the last
@@ -904,6 +972,15 @@ function Run.start(oceanModel: Model)
 		areaPart(area, "Pad").Touched:Connect(function(hit)
 			onPad(area, hit)
 		end)
+		local stand = Map.stand(ocean, area)
+		local prompt = stand and Map.standPrompt(stand)
+		if prompt then
+			prompt.Triggered:Connect(function(player)
+				onStand(player, area, prompt)
+			end)
+		else
+			warn(`[Run] {area.name}'s stand has no ProximityPrompt "Prompt" (Studio); its items can't be bought yet`)
+		end
 	end
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do

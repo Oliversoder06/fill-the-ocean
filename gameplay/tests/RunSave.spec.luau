@@ -124,6 +124,54 @@ function tests.sanitize_gates(t)
 	t.expectEq(table.concat(again.gatesOpen, ","), "2,3")
 end
 
+-- Bought items (per player) and the team's buildings: ids are strings, levels whole and never negative.
+function tests.sanitize_items(t)
+	local save = RunSave.sanitize({
+		mapId = "ocean1",
+		members = { 1 },
+		players = {
+			["1"] = {
+				money = 5,
+				levels = {},
+				litres = 0,
+				owned = { "backpackTank", 7, "bigTank", "backpackTank", true },
+				itemLevels = { backpackTank = 2.7, bigTank = -1, [3] = 1, twinTanks = "x" },
+			},
+		},
+		buildings = { pump = 1, tower = -4, [2] = 1, rain = 0 / 0 },
+	})
+	assert(save, "sanitize returned nil for a repairable save")
+	local player = save.players["1"]
+	t.expectEq(table.concat(player.owned, ","), "backpackTank,bigTank", "strings, each once")
+	t.expectEq(player.itemLevels.backpackTank, 2)
+	t.expectEq(player.itemLevels.bigTank, 0, "negative level clamped")
+	t.expectEq(count(player.itemLevels), 2, "bad level entries dropped")
+	t.expectEq(save.buildings.pump, 1)
+	t.expectEq(save.buildings.tower, 0)
+	t.expectEq(save.buildings.rain, 0, "NaN level")
+	t.expectEq(count(save.buildings), 3, "bad building entries dropped")
+
+	-- A save from before items loads with none.
+	local old = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { money = 5, levels = { tool = 1 }, litres = 2 } } })
+	assert(old, "an old save must load")
+	t.expectEq(#old.players["1"].owned, 0)
+	t.expectEq(count(old.players["1"].itemLevels), 0)
+	t.expectEq(count(old.buildings), 0)
+	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { owned = "all", itemLevels = 3 } }, buildings = "many" })
+	assert(broken, "bad item fields must not drop the save")
+	t.expectEq(#broken.players["1"].owned, 0)
+	t.expectEq(count(broken.buildings), 0)
+
+	local fresh = RunSave.new("ocean1", { 1 })
+	fresh.players["1"] = { money = 1, levels = {}, litres = 0, owned = { "bigTank" }, itemLevels = { bigTank = 1 } }
+	fresh.buildings = { pump = 2 }
+	local again = RunSave.sanitize(fresh)
+	assert(again, "a valid save must survive sanitize")
+	t.expectEq(again.players["1"].owned[1], "bigTank")
+	t.expectEq(again.players["1"].itemLevels.bigTank, 1)
+	t.expectEq(again.buildings.pump, 2)
+end
+
 function tests.sanitize_rejects_non_tables(t)
 	t.expectEq(RunSave.sanitize(nil), nil)
 	t.expectEq(RunSave.sanitize("save"), nil)
@@ -151,6 +199,7 @@ function tests.new_save_starts_empty(t)
 	t.expectEq(save.introSeen, false)
 	t.expectEq(#save.boostsPlayed, 0)
 	t.expectEq(#save.gatesOpen, 0, "no gate open")
+	t.expectEq(count(save.buildings), 0, "no building")
 	t.expectEq(save.finished, false)
 	t.expectEq(save.updatedAt, 0)
 end

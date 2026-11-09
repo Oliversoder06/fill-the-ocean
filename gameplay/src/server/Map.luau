@@ -16,7 +16,8 @@
 --   Gate      Model: Blocker and Boards (parts, or models of parts) that close the way in, Sign
 --             (a SurfaceGui with a TextLabel "Label", client/Gates) and a part Prompt holding a
 --             ProximityPrompt "Prompt" (buys the gate)
---   Stand     the area's shop stand
+--   Stand     the area's shop stand (a part or Model) holding a ProximityPrompt "Prompt" that buys
+--             the area's items (server/Run); the cove's is workspace.Map.Beach.BackpackStand
 --   Pad       touching it moves you to the next open area's Spawn
 --   Spawn     where players appear in the area
 
@@ -64,6 +65,24 @@ function Map.gatePrompt(gate: Instance): ProximityPrompt
 	local prompt = child(child(gate, "Prompt"), "Prompt")
 	assert(prompt:IsA("ProximityPrompt"), `{prompt:GetFullName()} must be a ProximityPrompt`)
 	return prompt
+end
+
+-- An area's stand: workspace.Areas.<model>.Stand, the cove's workspace.Map.Beach.BackpackStand.
+-- Nil when the place doesn't have it yet.
+function Map.stand(ocean: Model, area): Instance?
+	if area.model then
+		local model = Zones.areaModel(ocean, area)
+		return model and model:FindFirstChild("Stand")
+	end
+	local scenery = workspace:FindFirstChild("Map")
+	local beach = scenery and scenery:FindFirstChild("Beach")
+	return beach and beach:FindFirstChild("BackpackStand")
+end
+
+-- A stand's ProximityPrompt "Prompt" (anywhere inside it), or nil when it has none yet.
+function Map.standPrompt(stand: Instance): ProximityPrompt?
+	local prompt = stand:FindFirstChild("Prompt", true)
+	return if prompt and prompt:IsA("ProximityPrompt") then prompt else nil
 end
 
 -- An area's Gate model (checked by Map.ensure).

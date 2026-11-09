@@ -3,6 +3,10 @@
 -- then its parts appear layer by layer). One tile per upgrade track (Tool and
 -- Boosts panels, from Config.tracks); clicking a tile shows it in the detail panel, whose Buy button
 -- sends Buy(trackId). The server checks every buy.
+-- Tabs (Body.Tabs): Tools (the tracks), Gear (one tile per backpack and gadget in GearPanel), and
+-- Vehicles, Buildings and Staff, which show ComingSoon until their items exist. Items are bought once
+-- at their area's stand; here an owned one shows its level and its Buy button sends Buy(itemId) to
+-- level it up, and an unowned one says where to buy it.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +18,7 @@ local UserInputService = game:GetService("UserInputService")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Areas = require(ReplicatedStorage.Common.Areas)
+local Items = require(ReplicatedStorage.Common.Items)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 local Hud = require(script.Parent.Hud)
@@ -36,6 +41,10 @@ local Shop = {}
 -- Art for each track until real upgrade icons are drawn (the tool shows its 3D model instead).
 local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = "unknown", tip = "coin" }
 local PANEL_NAMES = { tool = "Tool", boosts = "Boosts" }
+-- Tabs in order and the Content panels each shows; a tab without panels shows ComingSoon.
+local TABS = { "Tools", "Gear", "Vehicles", "Buildings", "Staff" }
+local TAB_PANELS = { Tools = { "ToolPanel", "BoostPanel" }, Gear = { "GearPanel" } }
+local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel" } -- the tab panel holding each kind's tiles
 
 -- Tiles take their panel's tag colour, so the colour says which group an upgrade belongs to.
 local function panelColor(track): Color3
@@ -75,6 +84,28 @@ local function opensText(level): string
 	return `Opens with {Areas.byId(Config, level.area).name}`
 end
 
+-- What an item's tile and detail say instead of a price (Hud.offer's item statuses).
+local function itemNote(item, status: string?): string
+	if status == "max" then
+		return "MAX"
+	elseif status == "replaced" then
+		local worn = Items.backpack(Config, Hud.items())
+		return `Replaced by the {if worn then worn.name else "next one"}`
+	elseif status == "stand" then
+		return `Buy at the {Areas.byId(Config, item.area).name} stand`
+	end
+	return opensText(item)
+end
+
+-- What a backpack holds now and after its next upgrade.
+local function itemEffect(item, level, owned: boolean): string
+	local now = if owned then Items.stat(Hud.items(), item, "capacity") else item.capacity
+	if level then
+		return `Holds {short(level.capacity)} L on your back (now {short(now)} L)`
+	end
+	return `Holds {short(now)} L on your back, on top of your tool`
+end
+
 -- The next level's display name: tools have their own, the rest are "<track> <n>".
 local function levelName(track, n: number, level): string
 	if track.id == "tool" then
@@ -106,7 +137,22 @@ function Shop.start()
 		local panel = if track.panel == "tool" then "ToolPanel" else "BoostPanel"
 		tiles[track.id] = Hud.find(content, `{panel}.Tiles.{track.id}`)
 	end
+	local itemTiles = {}
+	for _, item in Config.items do
+		local panel = ITEM_PANELS[item.kind]
+		assert(panel, `Shop has no panel for {item.kind} items yet`)
+		itemTiles[item.id] = Hud.find(content, `{panel}.Tiles.{item.id}`)
+	end
+	local tabButtons = {}
+	for _, name in TABS do
+		tabButtons[name] = Hud.find(gui, `Shop.Body.Tabs.{name}`)
+		for _, panel in TAB_PANELS[name] or {} do
+			Hud.find(content, panel) -- fail at start, not on the first tab switch
+		end
+	end
+	local comingSoon = Hud.find(content, "ComingSoon")
 	local selected = "tool"
+	local tab = "Tools"
 
 	-- Tab would also toggle Roblox's player list; the game has its own Board, so hide that list.
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
@@ -205,11 +251,27 @@ function Shop.start()
 	onPress(closeButton, function()
 		setOpen(false)
 	end)
-	for id, holder in tiles do
-		local button = Hud.find(holder, "Button")
+	for _, list in { tiles, itemTiles } do
+		for id, holder in list do
+			local button = Hud.find(holder, "Button")
+			pressable(button, button.Press)
+			button.Activated:Connect(function()
+				selected = id
+			end)
+		end
+	end
+	-- A tab shows its panels and selects its first tile.
+	local firstTile = { Tools = "tool" }
+	for _, item in Config.items do
+		if ITEM_PANELS[item.kind] == "GearPanel" and not firstTile.Gear then
+			firstTile.Gear = item.id
+		end
+	end
+	for name, button in tabButtons do
 		pressable(button, button.Press)
 		button.Activated:Connect(function()
-			selected = id
+			tab = name
+			selected = firstTile[name] or selected
 		end)
 	end
 	onPress(buyButton, function()
@@ -256,6 +318,39 @@ function Shop.start()
 		local levels = levelsOf()
 		local now = Ladder.stats(Config, levels)
 
+		-- Tabs: the open one is shallow blue, the rest sand; ComingSoon stands in for missing panels.
+		for name, button in tabButtons do
+			set(button, "ImageColor3", if name == tab then colors.shallowWater else colors.drySand)
+			for _, panel in TAB_PANELS[name] or {} do
+				set(Hud.find(content, panel), "Visible", name == tab)
+			end
+		end
+		set(comingSoon, "Visible", TAB_PANELS[tab] == nil)
+		set(detail, "Visible", TAB_PANELS[tab] ~= nil)
+
+		-- Item tiles: the level of an owned one, else where it is bought
+		local itemState = Hud.items()
+		for _, item in Config.items do
+			local holder = itemTiles[item.id]
+			local button = Hud.find(holder, "Button")
+			local owned = Items.owned(itemState, item.id)
+			local level, status, affordable = Hud.offer(levels, item.id, money)
+			local grey = status == "locked" or status == "replaced"
+			set(button, "ImageColor3", if grey then colors.locked else colors.shallowWater)
+			set(Hud.find(button, "Ring"), "Visible", item.id == selected)
+			set(Hud.find(button, "Icon"), "Visible", true)
+			set(Hud.find(button, "View"), "Visible", false)
+			set(Hud.find(button, "Icon"), "Image", if status == "locked" then images.lock else images.unknown)
+			set(Hud.find(button, "ItemName"), "Text", item.name)
+			set(Hud.find(button, "Pips"), "Visible", false)
+			set(Hud.find(button, "Level"), "Visible", true)
+			set(Hud.find(button, "Level"), "Text", if owned then `Lv {itemState.itemLevels[item.id] + 1}` else "")
+			local priceText = Hud.find(holder, "PriceRow.Price")
+			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
+			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) else itemNote(item, status))
+			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
+		end
+
 		for _, track in Config.tracks do
 			local id = track.id
 			local holder = tiles[id]
@@ -298,6 +393,30 @@ function Shop.start()
 			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
 			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) elseif status == "max" then "MAX" else opensText(level))
 			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
+		end
+
+		-- Detail panel: the selected item's next upgrade
+		local selectedItem = Items.get(Config, selected)
+		if selectedItem then
+			local level, status, canLevel = Hud.offer(levels, selected, money)
+			local owned = Items.owned(itemState, selected)
+			set(Hud.find(detail, "Category"), "Text", "Gear")
+			set(detailArt, "ImageColor3", if status == "locked" or status == "replaced" then colors.locked else colors.shallowWater)
+			set(Hud.find(detailArt, "Icon"), "Visible", true)
+			set(Hud.find(detailArt, "View"), "Visible", false)
+			set(Hud.find(detailArt, "Icon"), "Image", if status == "locked" then images.lock else images.unknown)
+			set(Hud.find(detail, "About"), "Text", selectedItem.about)
+			set(Hud.find(detail, "MoneyRow.Money"), "Text", Hud.money(money))
+			set(Hud.find(detail, "ItemName"), "Text", if owned then `{selectedItem.name} Lv {itemState.itemLevels[selected] + 1}` else selectedItem.name)
+			set(Hud.find(detail, "Effect"), "Text", itemEffect(selectedItem, level, owned))
+			set(buyCoin, "Visible", status == "buy")
+			set(buyPrice, "Visible", status == "buy")
+			set(buyText, "Text", if status == "buy" then "LEVEL UP" elseif status == "max" then "MAXED" else itemNote(selectedItem, status):upper())
+			if status == "buy" then
+				set(buyPrice, "Text", Hud.money(level.cost))
+			end
+			set(buyButton, "ImageColor3", if canLevel then colors.buyCoral else colors.locked)
+			return
 		end
 
 		-- Detail panel: the selected track's next level

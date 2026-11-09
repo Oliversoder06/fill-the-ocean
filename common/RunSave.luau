@@ -2,7 +2,14 @@
 -- A team's saved run: its shape, its key and the exact-team check. Pure: Lune-tested.
 -- RunStore does the DataStore calls; the gameplay server is the only writer.
 
-export type PlayerState = { money: number, levels: { [string]: number }, litres: number }
+-- owned: item ids bought at the stands (common/Items); itemLevels: upgrades bought per owned item.
+export type PlayerState = {
+	money: number,
+	levels: { [string]: number },
+	litres: number,
+	owned: { string },
+	itemLevels: { [string]: number },
+}
 
 -- players is keyed by user id as a string: DataStores need string keys.
 export type Save = {
@@ -15,6 +22,7 @@ export type Save = {
 	introSeen: boolean,
 	boostsPlayed: { string },
 	gatesOpen: { number }, -- area ids whose gate is bought (2-5), in the order they opened
+	buildings: { [string]: number }, -- the team's buildings (D2): upgrades bought per building id
 	finished: boolean,
 	updatedAt: number,
 }
@@ -47,16 +55,35 @@ local function amount(value: any): number
 	return math.max(0, value)
 end
 
-local function sanitizePlayer(raw: { [any]: any }): PlayerState
+-- Levels by id (tracks, items, buildings): string ids, whole numbers, never negative.
+local function counts(raw: any): { [string]: number }
 	local levels = {}
-	if type(raw.levels) == "table" then
-		for trackId, level in raw.levels do
-			if type(trackId) == "string" and type(level) == "number" then
-				levels[trackId] = math.floor(amount(level))
+	if type(raw) == "table" then
+		for id, level in raw do
+			if type(id) == "string" and type(level) == "number" then
+				levels[id] = math.floor(amount(level))
 			end
 		end
 	end
-	return { money = amount(raw.money), levels = levels, litres = amount(raw.litres) }
+	return levels
+end
+
+local function sanitizePlayer(raw: { [any]: any }): PlayerState
+	local owned = {}
+	if type(raw.owned) == "table" then
+		for _, id in raw.owned do
+			if type(id) == "string" and not table.find(owned, id) then
+				table.insert(owned, id)
+			end
+		end
+	end
+	return {
+		money = amount(raw.money),
+		levels = counts(raw.levels),
+		litres = amount(raw.litres),
+		owned = owned,
+		itemLevels = counts(raw.itemLevels),
+	}
 end
 
 function RunSave.new(mapId: string, members: { number }): Save
@@ -70,6 +97,7 @@ function RunSave.new(mapId: string, members: { number }): Save
 		introSeen = false,
 		boostsPlayed = {},
 		gatesOpen = {},
+		buildings = {},
 		finished = false,
 		updatedAt = 0,
 	}
@@ -151,6 +179,7 @@ function RunSave.sanitize(raw: any): Save?
 			end
 		end
 	end
+	save.buildings = counts(raw.buildings)
 	save.finished = raw.finished == true
 	save.updatedAt = amount(raw.updatedAt)
 	return save

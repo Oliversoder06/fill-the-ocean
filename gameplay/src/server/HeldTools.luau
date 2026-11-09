@@ -2,6 +2,9 @@
 -- Follows the player attributes ToolModel, Carried and Equipped that Run publishes. The tool hangs
 -- from a Motor6D (HeldGrip) at the bottom of the hand; client/Bodies turns it in the hand to suit
 -- how the tool is carried.
+-- The worn backpack (player attribute Backpack, a model name or "") goes on the back: a clone of the
+-- Accessory ReplicatedStorage.ToolModels.Backpacks.<name>, whose Handle holds an Attachment
+-- "BodyBackAttachment" so Humanoid:AddAccessory welds it to the back.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -10,6 +13,7 @@ local ToolView = require(ReplicatedStorage.Shared.ToolView)
 
 local HELD_NAME = "HeldTool"
 local GRIP_NAME = "HeldGrip"
+local PACK_NAME = "WornBackpack"
 
 local HeldTools = {}
 
@@ -89,6 +93,46 @@ local function refresh(player: Player)
 	ToolModels.setWater(held :: Model, (player:GetAttribute("Carried") or 0) > 0)
 end
 
+-- Puts the worn backpack on the character's back, swapping it when a bigger one is bought.
+local function refreshPack(player: Player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local modelName = player:GetAttribute("Backpack")
+	if not (character and humanoid and type(modelName) == "string") then
+		return
+	end
+	local worn = character:FindFirstChild(PACK_NAME)
+	if worn and worn:GetAttribute("ModelName") == modelName then
+		return
+	end
+	if worn then
+		worn:Destroy()
+	end
+	if modelName == "" then
+		return
+	end
+	local folder = ReplicatedStorage:FindFirstChild("ToolModels")
+	local packs = folder and folder:FindFirstChild("Backpacks")
+	local template = packs and packs:FindFirstChild(modelName)
+	if not (template and template:IsA("Accessory")) then
+		warn(`[HeldTools] ReplicatedStorage.ToolModels.Backpacks.{modelName} is missing (an Accessory); {player.Name}'s backpack isn't shown`)
+		return
+	end
+	local pack = template:Clone()
+	pack.Name = PACK_NAME
+	pack:SetAttribute("ModelName", modelName)
+	for _, d in pack:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = false
+			d.CanCollide = false
+			d.CanQuery = false
+			d.CanTouch = false
+			d.Massless = true
+		end
+	end
+	humanoid:AddAccessory(pack)
+end
+
 local function track(player: Player)
 	player:GetAttributeChangedSignal("ToolModel"):Connect(function()
 		refresh(player)
@@ -99,11 +143,17 @@ local function track(player: Player)
 	player:GetAttributeChangedSignal("Equipped"):Connect(function()
 		refresh(player)
 	end)
+	player:GetAttributeChangedSignal("Backpack"):Connect(function()
+		refreshPack(player)
+	end)
 	player.CharacterAdded:Connect(function(character)
 		character:WaitForChild("RightHand", 5)
 		refresh(player)
+		character:WaitForChild("Humanoid", 5)
+		refreshPack(player)
 	end)
 	refresh(player)
+	refreshPack(player)
 end
 
 function HeldTools.start(config)

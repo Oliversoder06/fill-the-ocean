@@ -13,6 +13,7 @@ local Ease = require(ReplicatedStorage.Shared.Ease)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
+local Items = require(ReplicatedStorage.Common.Items)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 
 local player = Players.LocalPlayer
@@ -118,10 +119,38 @@ function Hud.gatesOpen(): { number }
 	return ids
 end
 
--- A track's next level, its status (Ladder.offer, with the areas the open gates open, as the server
--- counts them) and whether `money` buys it now.
-function Hud.offer(levels: { [string]: number }, id: string, money: number): (any, Ladder.Status?, boolean)
-	local level, status = Ladder.offer(Config, levels, id, Ladder.openAreas(Config, Hud.gatesOpen()))
+-- The player's items (common/Items state) from the Owned and ItemLevel_<id> attributes.
+function Hud.items(): Items.State
+	local owned = {}
+	local text = player:GetAttribute("Owned")
+	if type(text) == "string" then
+		for id in text:gmatch("[^,]+") do
+			table.insert(owned, id)
+		end
+	end
+	local itemLevels = {}
+	for _, item in Config.items do
+		local level = player:GetAttribute(`ItemLevel_{item.id}`)
+		itemLevels[item.id] = if type(level) == "number" then level else 0
+	end
+	return { owned = owned, itemLevels = itemLevels }
+end
+
+-- What TAB offers next and whether `money` buys it now, with the areas the open gates open (as the
+-- server counts them). A track (`levels`): Ladder.offer's level and "buy" / "locked" / "max". An
+-- item: Items.nextLevel's upgrade and "buy" / "max" / "replaced", or, while unowned, nil and
+-- "stand" (buy it at its area's stand) or "locked" (its area is closed).
+function Hud.offer(levels: { [string]: number }, id: string, money: number): (any, string?, boolean)
+	local openAreas = Ladder.openAreas(Config, Hud.gatesOpen())
+	local level, status
+	if Config.track(id) then
+		level, status = Ladder.offer(Config, levels, id, openAreas)
+	else
+		level, status = Items.nextLevel(Config, Hud.items(), id)
+		if status == "unowned" then
+			status = if (Items.get(Config, id) :: Config.Item).area <= openAreas then "stand" else "locked"
+		end
+	end
 	return level, status, status == "buy" and money + MONEY_EPSILON >= level.cost
 end
 

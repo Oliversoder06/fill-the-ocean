@@ -35,6 +35,25 @@ export type Track = {
 	levels: { Level },
 }
 
+-- One upgrade of a bought item (TAB): its cost and the stat it gives from then on.
+export type ItemLevel = {
+	cost: number,
+	capacity: number?, -- backpack: litres it holds
+}
+
+-- A thing bought once at its area's stand (common/Items), then levelled in TAB.
+export type Item = {
+	id: string,
+	name: string,
+	kind: "backpack" | "gadget" | "vehicle" | "building" | "staff",
+	area: number, -- sold at this area's stand once it is open
+	price: number, -- the first buy, at the stand
+	about: string, -- one line for the shop
+	model: string?, -- backpack: its Accessory in ReplicatedStorage.ToolModels.Backpacks
+	capacity: number?, -- backpack: litres it holds when bought
+	levels: { ItemLevel }, -- upgrades in order, after the first buy
+}
+
 local function tool(name: string, model: string, cost: number, capacity: number, area: number): Level
 	return { name = name, model = model, cost = cost, capacity = capacity, area = area }
 end
@@ -174,6 +193,64 @@ Config.tracks = {
 		},
 	},
 } :: { Track }
+
+local function backpack(id: string, name: string, model: string, area: number, price: number, capacity: number, levels: { ItemLevel }): Item
+	return {
+		id = id,
+		name = name,
+		kind = "backpack",
+		area = area,
+		price = price,
+		about = "Carries water on your back: scooping fills it once your tool is full.",
+		model = model,
+		capacity = capacity,
+		levels = levels,
+	}
+end
+
+-- Backpacks: extra litres on top of the tool, filled at the tool's pace (same litres per sweep,
+-- more sweeps), so a pack saves walking, not scooping. Each one is worn instead of the last and is
+-- bigger than a fully levelled earlier one. Each sizes to its area's matching tool: bought it holds
+-- about one trip's worth of that tool and fully levelled about two (50 L to 120 L next to a 60 L
+-- Bucket Lv2), and it costs about what that tool costs, so it competes with the next tool level:
+--   1 Backpack Tank: Bucket Lv2 (60 L, 1,136): 50 / 80 / 120 L
+--   2 Big Tank: Bathtub (350 L, 62,500): 300 / 500 / 700 L
+--   3 Twin Tanks: Swimming Pool (9,000 L, 5M): 8,000 / 12,000 / 18,000 L
+--   4 Insulated Tank: Cargo Ship (100,000 L, 225M): 80,000 / 130,000 / 200,000 L
+--   5 Cloud Bag: The Moon (1M L, 2.57B): 800,000 / 1.3M / 2M L
+-- Phase 4 retunes them with the ladder (tools/simulate).
+local backpacks = {
+	backpack("backpackTank", "Backpack Tank", "BackpackTank", 1, 1200, 50, {
+		{ cost = 2500, capacity = 80 },
+		{ cost = 5000, capacity = 120 },
+	}),
+	backpack("bigTank", "Big Tank", "BigTank", 2, 60000, 300, {
+		{ cost = 150000, capacity = 500 },
+		{ cost = 400000, capacity = 700 },
+	}),
+	backpack("twinTanks", "Twin Tanks", "TwinTanks", 3, 5e6, 8000, {
+		{ cost = 12e6, capacity = 12000 },
+		{ cost = 40e6, capacity = 18000 },
+	}),
+	backpack("insulatedTank", "Insulated Tank", "InsulatedTank", 4, 200e6, 80000, {
+		{ cost = 450e6, capacity = 130000 },
+		{ cost = 1e9, capacity = 200000 },
+	}),
+	backpack("cloudBag", "Cloud Bag", "CloudBag", 5, 2.5e9, 800000, {
+		{ cost = 5e9, capacity = 1.3e6 },
+		{ cost = 12e9, capacity = 2e6 },
+	}),
+}
+local gadgets = {} -- 3b: Water Gun, Garden Hose, Heat Gloves, Ice Pick, Jetpack Tank, Cloud Net
+local vehicles = {} -- 3d: Fire Truck, Tanker, Snowcat Tanker, Water Bomber
+local buildings = {} -- 3e: Pump, Water Tower, Pipeline, Rain Machine (the team's, save.buildings)
+local staff = {} -- 3f: Helper, Lifeguard, Firefighter, Plumber
+
+-- Everything bought once at a stand beyond the tool ladder, by kind (common/Items).
+Config.items = {} :: { Item }
+for _, list in { backpacks, gadgets, vehicles, buildings, staff } do
+	table.move(list, 1, #list, #Config.items + 1, Config.items)
+end
 
 function Config.track(id: string): Track?
 	for _, track in Config.tracks do
