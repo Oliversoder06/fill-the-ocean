@@ -8,7 +8,12 @@ Read this first in every new session. Then read CLAUDE.md, AGENTS.md and
   area mechanics, vehicles, buildings, staff).
   The owner's checkout `C:/RobloxDev/games/fill the ocean` is on `main`; Rojo serves it to Studio
   (gameplay port 34675, lobby 34674), so whatever is on `main` runs in Studio.
-- Phase 3 is done. **Next: Phase 4** (write its step-by-step tasks into the plan first), then 5-9.
+- Phase 3 is done, and a UX round after it (ux/b1-b4, 2026-11-09): hotbar info per held item,
+  tutorial at the top with ground chevrons and a click hand, third-person driving, lobby Create Party +
+  Saved Runs side by side (New Game replaces the team's save), admin Reset run / Reset my profile,
+  pads removed (owner: no teleporting at all), pour basins + channel waves to the ocean, prices and
+  real reasons at every stand, a Next goal line (G), clearer shop. **Next: Phase 4** (write its
+  step-by-step tasks into the plan first), then 5-9.
 - Restarting `rojo serve` drops Studio's Rojo connection; only the owner can click Connect again.
 - Phase 2 leftovers (do with 3b or later): per-area ambience/music, guide hint toward the next gate, a
   gate-burst VFX.
@@ -192,4 +197,8 @@ water texture; `Run.publish` writes unused `ItemLevel_<id>` for buildings; the m
 lives in Items, Hud and BuildingRules; 2-player pay split not play tested. 3f: bodies walk straight
 lines (can clip through props); clips linted on the stand-in R15 only; Firefighter/Plumber bodies and
 30-body perf not play tested; the Staff tiles clip "Lifeguard Tower" to "Lifeguard"; the vendored
-animation runtime's LICENSE needs the owner's written OK for use in this game.
+animation runtime's LICENSE needs the owner's written OK for use in this game. UX round: the lobby
+screen, New Game, Delete and profile reset are not play tested (lobby Rojo needed a reconnect); the
+place has no water texture, so channel/aqueduct trickles don't scroll; the tutorial doesn't replay
+after an admin reset; the Water Gun sits low-right in first person; the simulator fills the ocean in
+16 minutes (Phase 4).
