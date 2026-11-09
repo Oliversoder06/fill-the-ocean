@@ -184,4 +184,5 @@ textures owned by user 62763090 not the group; a spoon + backpack needs ~50 scoo
 the "unknown" icon until icons are drawn. 3c: no ice/steam/golden sounds, no ice-chip VFX, carried ice
 looks like water; rocks of areas 4-5 use the ladder's Cargo Ship/The Moon, whose levels still sit in
 area 3 (Phase 4); the golden timer counts server time; Cloud Net not play tested (needs 3e9 coins);
-Run.luau is 1312 lines.
+Run.luau is 1312 lines. 3d: the truck hose is proximity-based (within hoseReach of your truck), not a
+tethered tool you take off it.

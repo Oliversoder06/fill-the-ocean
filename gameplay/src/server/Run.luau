@@ -1085,6 +1085,9 @@ local function onGadget(player: Player, action: unknown, on: unknown)
 			publish(player)
 		end
 	elseif action == "spray" and type(on) == "boolean" and state.hose and state.hose.spraying ~= on then
+		if on then
+			Vehicles.stopSpray(player) -- never both hoses at once
+		end
 		state.hose.spraying, state.hose.due = on, 0
 		publish(player)
 	elseif action == "fly" and type(on) == "boolean" and state.gadget == "jetpackTank" and state.flying ~= on then
@@ -1233,6 +1236,13 @@ function Run.start(oceanModel: Model)
 			pourIn(states[player], litres, value)
 			publish(player)
 			checkFull()
+		end,
+		stopHose = function(player)
+			local state = states[player]
+			if state and state.hose and state.hose.spraying then
+				state.hose.spraying = false
+				publish(player)
+			end
 		end,
 		vehicle = remotes.Vehicle,
 	}

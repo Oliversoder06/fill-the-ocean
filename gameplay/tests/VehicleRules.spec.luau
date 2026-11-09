@@ -111,14 +111,14 @@ end
 -- A call brings the owned vehicle of the furthest area.
 function tests.best_vehicle(t)
 	local state = fresh()
-	t.expectEq(VehicleRules.best(Config, state.owned), nil, "none owned")
+	t.expectEq(Items.furthest(Config, state, "vehicle"), nil, "none owned")
 	own(state, "waterGun")
-	t.expectEq(VehicleRules.best(Config, state.owned), nil, "gadgets aren't vehicles")
+	t.expectEq(Items.furthest(Config, state, "vehicle"), nil, "gadgets aren't vehicles")
 	own(state, "fireTruck")
-	t.expectEq(VehicleRules.best(Config, state.owned), Items.get(Config, "fireTruck"))
+	t.expectEq(Items.furthest(Config, state, "vehicle"), Items.get(Config, "fireTruck"))
 	own(state, "snowcatTanker")
 	own(state, "tanker")
-	t.expectEq(VehicleRules.best(Config, state.owned), Items.get(Config, "snowcatTanker"))
+	t.expectEq(Items.furthest(Config, state, "vehicle"), Items.get(Config, "snowcatTanker"))
 end
 
 function tests.fill_until_full(t)
@@ -151,12 +151,31 @@ function tests.skims_low_over_a_pool(t)
 	t.expectEq(VehicleRules.skims(rules, 10, -rules.skimHeight - 1), false, "far below it")
 end
 
--- A refill bay (no area: the cove) pays the vehicle's own area; an area's hydrant pays that area.
+-- A refill bay (no area: the cove) pays the vehicle's own area; an area's hydrant pays that area, but
+-- never more than the vehicle's own (a truck teleported to a later area's hydrant earns no more).
 function tests.hydrant_pay_area(t)
 	t.expectEq(VehicleRules.payArea(2, nil), 2)
 	t.expectEq(VehicleRules.payArea(3, nil), 3)
 	t.expectEq(VehicleRules.payArea(3, 2), 2)
-	t.expectEq(VehicleRules.payArea(2, 4), 4)
+	t.expectEq(VehicleRules.payArea(2, 4), 2, "capped at the vehicle's area")
+	t.expectEq(VehicleRules.payArea(4, 4), 4)
+end
+
+-- The cove's well sits in the ocean's own water, so the bomber never skims it.
+function tests.cove_is_not_skimmable(t)
+	t.expectEq(VehicleRules.skimmable(1), false)
+	for id = 2, 5 do
+		t.expectEq(VehicleRules.skimmable(id), true, `area {id}`)
+	end
+end
+
+-- The bomber drops a load only over the ocean, after a plausible trip, and never in a tick it skims.
+function tests.bomber_drops(t)
+	t.expectEq(VehicleRules.drops(100, false, true, true), true)
+	t.expectEq(VehicleRules.drops(100, true, true, true), false, "skimming this tick: no fill and drop at once")
+	t.expectEq(VehicleRules.drops(0, false, true, true), false, "empty")
+	t.expectEq(VehicleRules.drops(100, false, false, true), false, "no plausible trip")
+	t.expectEq(VehicleRules.drops(100, false, true, false), false, "not over the ocean")
 end
 
 return tests

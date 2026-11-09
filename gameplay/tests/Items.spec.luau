@@ -98,6 +98,19 @@ function tests.backpack_replaces_smaller(t)
 	t.expectEq(level, Items.get(Config, "twinTanks").levels[1])
 end
 
+-- The owned item of a kind from the furthest area, whatever order they were bought in; other kinds don't count.
+function tests.furthest_owned_of_a_kind(t)
+	local state = fresh()
+	t.expectEq(Items.furthest(Config, state, "backpack"), nil, "none owned")
+	own(state, "waterGun")
+	own(state, "fireTruck")
+	t.expectEq(Items.furthest(Config, state, "backpack"), nil, "other kinds don't count")
+	own(state, "twinTanks")
+	own(state, "bigTank")
+	t.expectEq(Items.furthest(Config, state, "backpack"), Items.get(Config, "twinTanks"))
+	t.expectEq(Items.furthest(Config, state, "vehicle"), Items.get(Config, "fireTruck"))
+end
+
 function tests.next_level_until_max(t)
 	local state = fresh()
 	local item = Items.get(Config, "backpackTank")

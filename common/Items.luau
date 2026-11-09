@@ -28,15 +28,20 @@ function Items.owned(state: State, id: string): boolean
 	return table.find(state.owned, id) ~= nil
 end
 
--- The backpack worn: the owned one of the furthest area (each replaces the earlier ones). Nil = none.
-function Items.backpack(config, state: State)
+-- The owned item of `kind` from the furthest area (a later one replaces the earlier ones). Nil = none.
+function Items.furthest(config, state: State, kind: string)
 	local best = nil
 	for _, item in config.items do
-		if item.kind == "backpack" and Items.owned(state, item.id) and (not best or item.area > best.area) then
+		if item.kind == kind and Items.owned(state, item.id) and (not best or item.area > best.area) then
 			best = item
 		end
 	end
 	return best
+end
+
+-- The backpack worn: the owned one of the furthest area. Nil = none.
+function Items.backpack(config, state: State)
+	return Items.furthest(config, state, "backpack")
 end
 
 -- Whether a bigger worn backpack replaces `item`.

@@ -10,7 +10,8 @@
 -- at the water sprays (Gadget remote; the server pours while it sprays). The jetpack's hint shows here
 -- too (client/Jetpack flies it).
 -- Standing on foot by your own truck with water in it (client/Vehicles.hoseReady), by the ocean, the
--- same input sprays its hose instead (Vehicle remote; the server pours from the tank while it sprays).
+-- same input sprays its hose instead (Vehicle remote; the server pours from the tank while it sprays),
+-- unless the tool is out with water in it: then it pours the tool.
 -- Area mechanics (shared/AreaRules): a deep pool behind a broken rock and, with the Cloud Net, the
 -- drifting cloud from the net's range are scooped like a Source (Hud.scoopSpot); at the Glacier's
 -- Source each sweep chips the ice block (IceHits); Heat Gloves shorten sweeps in hot pools.
@@ -309,10 +310,11 @@ function Action.start()
 			and not windowOpen
 		local kind, hit, area, deep = nil, nil, nil, false
 		local text, title = nil, nil
+		local toolFull = player:GetAttribute("Equipped") ~= false and (player:GetAttribute("Carried") or 0) > 0
 		if ready and gadget == "gardenHose" then
 			setTruckSpray(false)
 			text, title = hoseStep(ocean, root, character, camera)
-		elseif ready and Vehicles.hoseReady(root.Position) and Hud.nearPour(ocean, root.Position) then
+		elseif ready and not toolFull and Vehicles.hoseReady(root.Position) and Hud.nearPour(ocean, root.Position) then
 			setSpray(false)
 			text, title = truckStep(ocean, root, character, camera)
 		else

@@ -8,8 +8,9 @@
 -- and each other (collision groups).
 -- Water follows the server's clock. A truck parked by a hydrant (Map.hydrants) fills at its fillRate,
 -- worth VehicleRules.payArea's pay; its owner, on foot within hoseReach of it by the water, sprays it
--- into the ocean at sprayRate while holding the act input (Vehicle remote: "spray", on). The Water
--- Bomber fills skimming low over an open area's Source and drops the whole tank once over the ocean.
+-- into the ocean at sprayRate while holding the act input (Vehicle remote: "spray", on); it and the
+-- Garden Hose never spray at once (turning one on stops the other). The Water Bomber fills skimming
+-- low over an open area's Source (not the cove's well) and drops the whole tank once over the ocean.
 -- Spraying and dropping wait until the vehicle could have got there from its last fill
 -- (VehicleRules.plausible), so a client that teleports its vehicle gains no water.
 -- Out to clients: player attributes Vehicle (item id or ""), Tank and TankMax (whole litres), Filling
@@ -29,6 +30,7 @@ local Map = require(script.Parent.Map)
 local TICK = 0.25 -- seconds between fills, sprays and attribute updates
 local CALL_COOLDOWN = 2 -- seconds between accepted calls per player (exploits can fire prompts)
 local MAX_VEHICLE_PER_SECOND = 10 -- spray toggles; the water follows server time, not these
+local MAX_NOT_YOURS_PER_SECOND = 1 -- "not your vehicle" cards (exploits can fire prompts)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the hose's reach
 local VEHICLE_GROUP, CHARACTER_GROUP = "Vehicles", "Characters"
 local FRICTION = 0.05 -- vehicles slide on the drive constraint, not on wheels
@@ -48,6 +50,7 @@ export type Hooks = {
 	nearFlood: (Player) -> boolean, -- the player stands where they may pour into the ocean
 	water: () -> (number, number), -- the ocean's current and target litres
 	pour: (Player, number, number) -> (), -- litres worth coins land in the ocean, paid to the player
+	stopHose: (Player) -> (), -- the Garden Hose stops spraying (server/Run)
 	vehicle: RemoteEvent, -- ReplicatedStorage.Remotes.Vehicle
 }
 
@@ -123,7 +126,10 @@ local function watchSeat(player: Player, model: Model, seat: VehicleSeat)
 	prompt.Triggered:Connect(function(who)
 		local h = who.Character and who.Character:FindFirstChildOfClass("Humanoid")
 		if who ~= player then
-			hooks.tell(who, `This is {player.DisplayName}'s vehicle`)
+			local state = hooks.states[who]
+			if state and hooks.allow(state, "notYours", MAX_NOT_YOURS_PER_SECOND) then
+				hooks.tell(who, `This is {player.DisplayName}'s vehicle`)
+			end
 		elseif h and h.Health > 0 and not seat.Occupant and hooks.playing() and hooks.inReach(who, prompt) then
 			seat:Sit(h)
 		end
@@ -245,7 +251,7 @@ local function spawn(player: Player, item)
 	publish(player)
 end
 
--- The CallPrompt: brings out the player's best owned vehicle (VehicleRules.best).
+-- The CallPrompt: brings out the player's best owned vehicle (the furthest area's, Items.furthest).
 local function onCall(player: Player, prompt: ProximityPrompt)
 	local state = hooks.states[player]
 	local now = os.clock()
@@ -256,13 +262,19 @@ local function onCall(player: Player, prompt: ProximityPrompt)
 	if not hooks.inReach(player, prompt) then
 		return
 	end
-	local item = VehicleRules.best(Config, state.owned)
+	local item = Items.furthest(Config, state, "vehicle")
 	if not item then
 		hooks.tell(player, "Buy a vehicle here at the Fire Station first")
 		return
 	end
 	spawn(player, item)
 	hooks.tell(player, `Your {item.name} is out front!`)
+end
+
+local function setSpray(player: Player, v: Out, on: boolean)
+	v.spraying = on
+	showSpray(player, v)
+	publish(player)
 end
 
 -- Vehicle remote: "spray", on: the truck's hose sprays (credited in tick) while the act input is held.
@@ -273,9 +285,18 @@ local function onVehicle(player: Player, action: unknown, on: unknown)
 		return
 	end
 	if action == "spray" and type(on) == "boolean" and not v.item.flies and v.spraying ~= on then
-		v.spraying = on
-		showSpray(player, v)
-		publish(player)
+		if on then
+			hooks.stopHose(player)
+		end
+		setSpray(player, v, on)
+	end
+end
+
+-- The truck's hose stops spraying (the Garden Hose turned on: server/Run).
+function Vehicles.stopSpray(player: Player)
+	local v = out[player]
+	if v and v.spraying then
+		setSpray(player, v, false)
 	end
 end
 
@@ -295,11 +316,11 @@ local function hydrantArea(v: Out, position: Vector3)
 	return nil
 end
 
--- The open area whose Source the bomber skims (VehicleRules.skims), or nil.
+-- The open area whose Source the bomber skims (VehicleRules.skims, VehicleRules.skimmable), or nil.
 local function skimArea(position: Vector3)
 	for _, id in hooks.openIds() do
 		local area = Areas.byId(Config, id)
-		local source = Zones.areaPart(ocean, area, "Source")
+		local source = VehicleRules.skimmable(id) and Zones.areaPart(ocean, area, "Source")
 		if source then
 			local offset = position - source.Position
 			if VehicleRules.skims(Config.vehicle, Vector3.new(offset.X, 0, offset.Z).Magnitude, offset.Y) then
@@ -338,7 +359,7 @@ local function empty(player: Player, v: Out, want: number)
 end
 
 local function tick(player: Player, v: Out, step: number)
-	if not hooks.states[player] or not v.model:IsDescendantOf(workspace) then
+	if not hooks.states[player] or not v.root:IsDescendantOf(workspace) then
 		remove(player) -- fell out of the world, or its owner is gone
 		return
 	end
@@ -361,7 +382,7 @@ local function tick(player: Player, v: Out, step: number)
 	end
 	local travelled = VehicleRules.plausible(Config.vehicle, (position - v.filledPos).Magnitude, now - v.filledAt, speed)
 	if v.item.flies then
-		if v.tank > 0 and travelled and Zones.overWater(ocean, position) then
+		if VehicleRules.drops(v.tank, area ~= nil, travelled, Zones.overWater(ocean, position)) then
 			empty(player, v, v.tank)
 		end
 	elseif v.spraying then

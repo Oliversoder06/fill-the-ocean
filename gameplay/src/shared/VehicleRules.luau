@@ -4,17 +4,6 @@
 
 local VehicleRules = {}
 
--- The vehicle a call at the Fire Station brings out: the owned one of the furthest area, or nil.
-function VehicleRules.best(config, owned: { string })
-	local best = nil
-	for _, item in config.items do
-		if item.kind == "vehicle" and table.find(owned, item.id) and (not best or item.area > best.area) then
-			best = item
-		end
-	end
-	return best
-end
-
 -- The tank after `dt` seconds filling at `rate` litres a second, never above `max`.
 function VehicleRules.fill(tank: number, max: number, rate: number, dt: number): number
 	return math.min(max, tank + rate * dt)
@@ -36,11 +25,23 @@ function VehicleRules.skims(rules, horizontal: number, height: number): boolean
 	return horizontal <= rules.skimRadius and math.abs(height) <= rules.skimHeight
 end
 
--- The area whose pay a hydrant's water carries. An area's Hydrant pays that area. The cove's refill
+-- Whether the bomber may skim area `areaId`'s Source: never the cove's well, which lies in the ocean.
+function VehicleRules.skimmable(areaId: number): boolean
+	return areaId ~= 1
+end
+
+-- Whether the bomber drops its load now: water in it, over the ocean, after a plausible trip, and not
+-- skimming this tick (or it could fill and drop where a pool meets the ocean without a trip).
+function VehicleRules.drops(tank: number, skimming: boolean, travelled: boolean, overWater: boolean): boolean
+	return tank > 0 and not skimming and travelled and overWater
+end
+
+-- The area whose pay a hydrant's water carries. An area's Hydrant pays that area, never more than the
+-- vehicle's own (a truck moved to a later area's hydrant earns no more). The cove's refill
 -- bays (`hydrantArea` nil) pay the vehicle's own area: trucks can't drive behind the cliffs to the
 -- areas, so bay water at cove pay would make every vehicle worth 1/5 to 1/625 of hand water.
 function VehicleRules.payArea(vehicleArea: number, hydrantArea: number?): number
-	return hydrantArea or vehicleArea
+	return if hydrantArea then math.min(hydrantArea, vehicleArea) else vehicleArea
 end
 
 return VehicleRules
