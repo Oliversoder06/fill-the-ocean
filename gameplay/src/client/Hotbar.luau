@@ -5,6 +5,8 @@
 -- Gadget slots (Hotbar.Gadgets.<itemId>, one per hotbar gadget in Config.items, built like Slot):
 -- shown once owned; press 2, 3, 4 (in config order), gamepad DPadRight (next one) or click a slot to
 -- take that gadget out instead of the tool, again to put it away. The server decides (Equip remote).
+-- While the player drives their vehicle or stands by its hose (client/Vehicles.gauge), the fill bar
+-- shows its tank instead.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,6 +19,7 @@ local Items = require(ReplicatedStorage.Common.Items)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Hud = require(script.Parent.Hud)
+local Vehicles = require(script.Parent.Vehicles)
 
 local player = Players.LocalPlayer
 local colors, motion = Theme.colors, Theme.motion
@@ -168,19 +171,22 @@ function Hotbar.start()
 		set(slot, "ImageColor3", if equipped then colors.toolTag else colors.locked)
 		set(ring, "Visible", equipped)
 		local jetpack = out == "jetpackTank"
-		set(fillBar, "Visible", equipped or (type(out) == "string" and out ~= ""))
+		local tank, tankMax = Vehicles.gauge()
+		set(fillBar, "Visible", tank ~= nil or equipped or (type(out) == "string" and out ~= ""))
 		if fillBar.Visible then
-			-- The jetpack's fuel while it is out, else the water carried.
+			-- The vehicle's tank, else the jetpack's fuel while it is out, else the water carried.
 			local carried = player:GetAttribute("Carried") or 0
 			local capacity = player:GetAttribute("Capacity") or 0
-			if jetpack then
+			if tank then
+				carried, capacity = tank, tankMax :: number
+			elseif jetpack then
 				carried = player:GetAttribute("Fuel") or 0
 				capacity = Items.gadgetStat(Config, itemState, "jetpackTank", "flightSeconds") or 0
 			end
 			local ratio = if capacity > 0 then math.clamp(carried / capacity, 0, 1) else 0
 			local now = os.clock()
 			if ratio ~= to then
-				if ratio > to and not jetpack then -- refuelling rises every frame: no swell for it
+				if ratio > to and not jetpack and not tank then -- refuelling and hydrants rise every tick: no swell
 					fillPop.Scale = FILL_POP_SCALE
 					TweenService:Create(fillPop, FILL_POP, { Scale = 1 }):Play()
 				end
@@ -189,7 +195,7 @@ function Hotbar.start()
 			shown = math.clamp(Ease.pop(from, to, now - changedAt), 0, 1)
 			set(fill, "Size", UDim2.fromScale(shown, 1))
 			set(fill, "Visible", shown > 0)
-			set(fillLabel, "Text", if jetpack then `Fuel {string.format("%.1f", carried)}s` else `{litres(carried)} / {litres(capacity)}`)
+			set(fillLabel, "Text", if tank then `Tank {litres(carried)} / {litres(capacity)}` elseif jetpack then `Fuel {string.format("%.1f", carried)}s` else `{litres(carried)} / {litres(capacity)}`)
 		end
 	end)
 end

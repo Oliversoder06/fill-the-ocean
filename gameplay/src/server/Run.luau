@@ -19,6 +19,8 @@
 -- Cloud Net scoops it from its range), ice blocks at the Glacier's Source (each sweep is a hit; the
 -- last one frees a block of litres), Heat Gloves' faster sweeps in hot pools, the deeper pools
 -- behind breakable rocks (1.5x litres a sweep; save.rocksBroken) and the golden spring (3x pay).
+-- Vehicles (server/Vehicles) are bought at the Fire Station (a cove shop) and called, filled, sprayed
+-- and dropped there; their water lands through the same pour as a tool's.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
@@ -55,6 +57,7 @@ local RunTicket = require(ReplicatedStorage.Common.RunTicket)
 local HeldTools = require(script.Parent.HeldTools)
 local Map = require(script.Parent.Map)
 local Mechanics = require(script.Parent.Mechanics)
+local Vehicles = require(script.Parent.Vehicles)
 
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
 local PARTY_WAIT = 20 -- party: start when everyone is in, or this long after the first arrival
@@ -253,7 +256,8 @@ end
 
 -- Leaving "playing" also stops every jetpack lift and takes every hose off its tap (the gadget
 -- ticks only run while playing, so nothing else would end them) and stops the area mechanics
--- (server/Mechanics: vents, the cloud's drift, the golden spring); "playing" starts them.
+-- (server/Mechanics: vents, the cloud's drift, the golden spring) and puts every vehicle away;
+-- "playing" starts the mechanics.
 local function setPhase(phase: string)
 	run.phase = phase
 	setGlobal("Phase", phase)
@@ -261,6 +265,7 @@ local function setPhase(phase: string)
 		Mechanics.play()
 	else
 		Mechanics.stop()
+		Vehicles.stop()
 		for player, state in states do
 			if state.flying or state.hose then
 				state.flying, state.hose = false, nil
@@ -922,7 +927,7 @@ local function creditPour(state): boolean
 		return false
 	end
 	-- The poured share of the carried value (all of it, unless the ocean takes less than the tool holds).
-	local value = state.carriedValue * litres / state.carried
+	local value = Water.share(state.carriedValue, state.carried, litres)
 	state.carried -= litres
 	state.carriedValue = if state.carried > 0 then state.carriedValue - value else 0
 	pourIn(state, litres, value)
@@ -1179,7 +1184,7 @@ end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Fill", 0)
@@ -1198,7 +1203,8 @@ function Run.start(oceanModel: Model)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
 	remotes.Gadget.OnServerEvent:Connect(onGadget)
-	Mechanics.start(ocean, {
+	-- What the area mechanics and the vehicles may see and do in the run.
+	local hooks = {
 		states = states,
 		playing = function()
 			return run.phase == "playing"
@@ -1216,7 +1222,22 @@ function Run.start(oceanModel: Model)
 		save = function(reason)
 			task.spawn(saveRun, reason)
 		end,
-	})
+		allow = allow,
+		nearFlood = function(player)
+			return nearFlood(player)
+		end,
+		water = function()
+			return run.current, run.target
+		end,
+		pour = function(player, litres, value)
+			pourIn(states[player], litres, value)
+			publish(player)
+			checkFull()
+		end,
+		vehicle = remotes.Vehicle,
+	}
+	Mechanics.start(ocean, hooks)
+	Vehicles.start(ocean, hooks)
 	RunService.Heartbeat:Connect(function(dt)
 		if run.phase ~= "playing" then
 			return
@@ -1258,6 +1279,7 @@ function Run.start(oceanModel: Model)
 		onPlayerAdded(player)
 	end
 	Players.PlayerRemoving:Connect(function(player)
+		Vehicles.leave(player)
 		local state = states[player]
 		if state then
 			keepPlayer(player, state)

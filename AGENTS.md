@@ -45,6 +45,10 @@ Server (`src/server/`):
 - `Mechanics.luau`: area mechanics (steam vents and their knockback, snow, the drifting cloud, the
   rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
   `rocksBroken` and `goldenId` when it credits a scoop.
+- `Vehicles.luau`: vehicles (Fire Truck, Tanker, Snowcat Tanker, Water Bomber): the Fire Station's
+  `CallPrompt` brings the best owned one out (`Vehicle_<UserId>`), owner-only `DrivePrompt`, driver
+  network ownership, collision groups, hydrant fill, truck hose spray, bomber skim and drop; `Run`
+  starts it with the same hooks as `Mechanics` and calls `leave` / `stop`.
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
@@ -84,6 +88,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
   with `Ease.pop`; the jetpack's fuel while it is out).
 - `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
+- `Vehicles.luau`: drives your own vehicle while seated (sets its `Drive` / `Turn` constraints from
+  the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `hoseReady` (on foot by
+  your truck with water: Action sprays it) and `gauge` (Hotbar shows the tank).
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
 - `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
@@ -106,6 +113,9 @@ Shared (`src/shared/`, pure unless noted):
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`):
   maths, all Lune-tested (`Cues` too).
+- `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
+  have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
+  vehicle's own area). Numbers in `Config.vehicle`; `Water.share` splits a tank's value.
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
 
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
@@ -140,11 +150,14 @@ The server publishes state as attributes; the client only reads them.
   `Spraying`, `Flying` and `Fuel` (jetpack seconds left, only once owned), `IceHits` (hits on the
   current Glacier ice block); `ActKind` + `ActAt`
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
+  Vehicles (server/Vehicles): `Vehicle` (item id out or `""`), `Tank`, `TankMax` (whole litres),
+  `Filling`, `VehicleSpraying`; the vehicle model carries `Owner` (UserId), `ItemId`, `Speed`, `Flies`.
 - Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it),
   `Equip` (boolean for the tool, or an owned hotbar gadget's id), `Act` (`"scoop"` or `"pour"`, sent
   when an action starts; the server credits a scoop ActSeconds later and a pour at once; with the
   Water Gun out a pour reaches its range), `Gadget` (`"clip"`, `"spray", on`, `"fly", on`;
-  rate-limited, water and fuel follow the server's clock), `Look` (camera pitch in degrees, range-checked and
+  rate-limited, water and fuel follow the server's clock), `Vehicle` (`"spray", on`: the truck's hose
+  while on foot within reach of your own truck by the water; rate-limited), `Look` (camera pitch in degrees, range-checked and
   rate-limited), `Admin` (a fill fraction 0-1; the server checks `shared/Admins` and only jumps
   while Phase is `playing`), `Card` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish`. A new remote: add it to

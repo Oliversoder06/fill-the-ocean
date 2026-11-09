@@ -51,6 +51,10 @@ export type ItemLevel = {
 	flightSeconds: number?, -- Jetpack Tank: seconds of thrust on a full tank
 	hotFill: number?, -- Heat Gloves: sweeps in hot pools take 1 / this of the time
 	hits: number?, -- Ice Pick: hits to chip one ice block loose
+	tank: number?, -- vehicle: litres it holds
+	speed: number?, -- vehicle: top speed, studs a second
+	fillRate: number?, -- vehicle: litres a second at a hydrant (the bomber: skimming a pool)
+	sprayRate: number?, -- truck: litres a second its hose sprays (the bomber drops its load at once)
 }
 
 -- A thing bought once at its area's stand (common/Items), then levelled in TAB.
@@ -63,7 +67,8 @@ export type Item = {
 	price: number, -- the first buy, at the stand
 	about: string, -- one line for the shop
 	-- backpack: its Accessory in ReplicatedStorage.ToolModels.Backpacks; gadget: its Model in
-	-- ReplicatedStorage.ToolModels.Gadgets (held in the hand while it is out)
+	-- ReplicatedStorage.ToolModels.Gadgets (held in the hand while it is out); vehicle: its Model in
+	-- ReplicatedStorage.Vehicles (server/Vehicles)
 	model: string?,
 	-- gadget: how it is used from its hotbar slot; nil = it works on its own once owned (no slot)
 	use: ("pour" | "hose" | "fly")?,
@@ -76,6 +81,11 @@ export type Item = {
 	hits: number?,
 	riseSpeed: number?, -- Jetpack Tank: studs a second it climbs (every level)
 	rechargeSeconds: number?, -- Jetpack Tank: seconds on the ground from empty to full (every level)
+	tank: number?,
+	speed: number?,
+	fillRate: number?,
+	sprayRate: number?,
+	flies: boolean?, -- vehicle: the Water Bomber flies, skims pools and drops its load on the ocean
 	levels: { ItemLevel }, -- upgrades in order, after the first buy
 }
 
@@ -379,13 +389,86 @@ local gadgets = {
 		levels = { { cost = 7e9, range = 30 }, { cost = 15e9, range = 45 } },
 	},
 } :: { Item }
-local vehicles = {} -- 3d: Fire Truck, Tanker, Snowcat Tanker, Water Bomber
+local function vehicle(id: string, name: string, model: string, area: number, price: number, about: string, stats, levels: { ItemLevel }): Item
+	return {
+		id = id,
+		name = name,
+		kind = "vehicle",
+		area = area,
+		stand = "FireStation",
+		price = price,
+		about = about,
+		model = model,
+		tank = stats.tank,
+		speed = stats.speed,
+		fillRate = stats.fillRate,
+		sprayRate = stats.sprayRate,
+		flies = stats.flies,
+		levels = levels,
+	}
+end
+
+-- Vehicles (server/Vehicles): bought at the Fire Station once their area is open, called out there,
+-- filled at a hydrant in about 30 s (tank / fillRate), driven to the beach and sprayed into the ocean
+-- by hand, so their water pays the full rate. A trip (30 s filling, the drive both ways, 20-30 s of
+-- spraying) takes about 2.5 hand trips, so each tank holds about 2.5x its area's matching tool and
+-- earns about that tool's hand rate; since you scoop by hand while it fills, it roughly doubles
+-- income, so it costs about the next tool level. Levels raise all four stats and keep the fill near
+-- 30 s; each vehicle holds more than a maxed earlier one and its water pays its own area (refill bays,
+-- VehicleRules.payArea), so the next vehicle is the upgrade. Phase 4 retunes them (tools/simulate).
+--   Fire Truck (2): Bathtub Lv2 (800 L, 291K) / Kiddie Pool (1,800 L, 375K): 2,000 L for 300K
+--   Tanker (3): Swimming Pool (9,000 L, 5M) / Lv2 (20,000 L, 22.5M): 25,000 L for 20M
+--   Snowcat Tanker (4): Cargo Ship (100,000 L, 225M), Insulated Tank 200M: 250,000 L for 400M
+--   Water Bomber (5): The Moon (1M L, 2.57B): 2.5M L for 6B; it skims a pool instead of a hydrant
+--     and drops the whole tank at once, a shorter trip, so it sprays nothing
+local vehicles = {
+	vehicle("fireTruck", "Fire Truck", "FireTruck", 2, 300000, "Fill it at a hydrant, drive to the beach and spray the ocean from its hose.", { tank = 2000, speed = 40, fillRate = 70, sprayRate = 100 }, {
+		{ cost = 600000, tank = 3000, speed = 44, fillRate = 110, sprayRate = 150 },
+		{ cost = 1.1e6, tank = 4500, speed = 48, fillRate = 180, sprayRate = 230 },
+		{ cost = 1.8e6, tank = 6500, speed = 52, fillRate = 300, sprayRate = 330 },
+	}),
+	vehicle("tanker", "Tanker", "Tanker", 3, 20e6, "A huge tank on wheels: fill it at a hydrant and spray the ocean.", { tank = 25000, speed = 36, fillRate = 850, sprayRate = 1250 }, {
+		{ cost = 45e6, tank = 40000, speed = 40, fillRate = 1500, sprayRate = 2000 },
+		{ cost = 90e6, tank = 60000, speed = 44, fillRate = 2400, sprayRate = 3000 },
+		{ cost = 160e6, tank = 90000, speed = 48, fillRate = 4000, sprayRate = 4500 },
+	}),
+	vehicle("snowcatTanker", "Snowcat Tanker", "SnowcatTanker", 4, 400e6, "A tracked tanker that carries a glacier's worth of water.", { tank = 250000, speed = 32, fillRate = 8500, sprayRate = 12500 }, {
+		{ cost = 900e6, tank = 400000, speed = 36, fillRate = 15000, sprayRate = 20000 },
+		{ cost = 1.8e9, tank = 600000, speed = 40, fillRate = 24000, sprayRate = 30000 },
+		{ cost = 3.5e9, tank = 900000, speed = 44, fillRate = 40000, sprayRate = 45000 },
+	}),
+	vehicle("waterBomber", "Water Bomber", "WaterBomber", 5, 6e9, "Fly low over a pool to fill up, then drop it all on the ocean.", { tank = 2.5e6, speed = 60, fillRate = 100000, flies = true }, {
+		{ cost = 12e9, tank = 4e6, speed = 66, fillRate = 170000 },
+		{ cost = 25e9, tank = 6e6, speed = 72, fillRate = 270000 },
+		{ cost = 50e9, tank = 9e6, speed = 80, fillRate = 450000 },
+	}),
+}
 local buildings = {} -- 3e: Pump, Water Tower, Pipeline, Rain Machine (the team's, save.buildings)
 local staff = {} -- 3f: Helper, Lifeguard, Firefighter, Plumber
 
--- Cove shops that sell items instead of the cove's stand (Item.stand): the shop's model in
--- workspace.Map.Town (holding a ProximityPrompt "Prompt", server/Map.shop) and its name in the shop.
-Config.stands = { ToolShack = "Tool Shack" }
+-- Cove shops that sell items instead of the cove's stand (Item.stand), whatever the items' area: the
+-- shop's model in workspace.Map.Town (holding a ProximityPrompt "Prompt", server/Map.shop) and its
+-- name in the shop.
+Config.stands = { ToolShack = "Tool Shack", FireStation = "Fire Station" }
+
+-- Driving and filling (server/Vehicles, client/Vehicles, shared/VehicleRules), in studs and seconds.
+-- hydrantReach: a truck parked (slower than parkedSpeed) this close to a hydrant fills; hoseReach: its
+-- owner sprays from this close to it; skimRadius / skimHeight: the bomber fills this close to a
+-- Source; accel: studs a second gained per second; turnSpeed: radians a second; climbSpeed: the
+-- bomber's up and down; tripSlack / tripMargin: the server's allowance on how fast a vehicle got from
+-- its last fill to where it sprays or drops (VehicleRules.plausible).
+Config.vehicle = {
+	hydrantReach = 25,
+	parkedSpeed = 3,
+	hoseReach = 20,
+	skimRadius = 40,
+	skimHeight = 20,
+	accel = 30,
+	turnSpeed = 1.6,
+	climbSpeed = 25,
+	tripSlack = 1.5,
+	tripMargin = 30,
+}
 
 -- Everything bought once at a stand beyond the tool ladder, by kind (common/Items).
 Config.items = {} :: { Item }

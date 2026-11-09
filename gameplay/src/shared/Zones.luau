@@ -135,6 +135,12 @@ function Zones.willFlood(ocean: Model, point: Vector3): boolean
 	return point.Y <= fullY + 0.05 and inFootprint(tiles, point)
 end
 
+-- Whether `position` lies over the ocean's water (a Water tile's footprint), at any height: the Water
+-- Bomber drops its load there (server/Vehicles).
+function Zones.overWater(ocean: Model, position: Vector3): boolean
+	return inFootprint((waterTiles(ocean)), position)
+end
+
 -- Whether some ground within `radius` studs (across) of `position` will be under water when the
 -- ocean is full. `ignore` lists what may stand on that ground (characters).
 function Zones.nearFlood(ocean: Model, position: Vector3, radius: number, ignore: { Instance }): boolean

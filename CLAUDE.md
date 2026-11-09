@@ -38,6 +38,9 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     area), `ReplicatedStorage.ToolModels`
     (one Model per hero tool, and `Gadgets.<Model>` per gadget; swap placeholders for real models
     under the same name), `workspace.Map.Town.ToolShack`'s ProximityPrompt `Prompt` (sells the Water Gun),
+    `workspace.Map.Town.FireStation` (`Prompt` sells vehicles, `CallPrompt` and part `VehicleSpawn`
+    bring one out), `ReplicatedStorage.Vehicles.<Model>` (VehicleSeat `Seat` with a `DrivePrompt`),
+    hydrants (`Map.Roads.TruckRefillBay1/2`, `Areas.<Name>.Hydrant`; server/Map),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.

@@ -33,6 +33,10 @@
 --             between (its visible cloud is welded to it, unanchored)
 -- Cove shops that sell their own items (Config.stands): workspace.Map.Town.<name> (a part or Model)
 -- holding a ProximityPrompt "Prompt" (server/Run), e.g. Town.ToolShack sells the Water Gun.
+-- Vehicles (server/Vehicles): Town.FireStation also holds a ProximityPrompt "CallPrompt" (brings the
+-- player's vehicle out) and a part "VehicleSpawn" (where it appears, facing the part's front).
+-- Vehicles fill at hydrants: workspace.Map.Roads.TruckRefillBay1 and TruckRefillBay2 (the cove's) and
+-- a "Hydrant" (a part or Model) in every area model 2-5.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Zones = require(ReplicatedStorage.Shared.Zones)
@@ -108,6 +112,36 @@ function Map.shopPrompt(name: string): ProximityPrompt
 	local prompt = Map.standPrompt(shop)
 	assert(prompt, `{shop:GetFullName()} needs a ProximityPrompt "Prompt"`)
 	return prompt
+end
+
+-- The Fire Station's ProximityPrompt "CallPrompt" and its part "VehicleSpawn" (anywhere inside it).
+function Map.fireStation(): (ProximityPrompt, BasePart)
+	local station = child(child(child(workspace, "Map"), "Town"), "FireStation")
+	local prompt = station:FindFirstChild("CallPrompt", true)
+	assert(prompt and prompt:IsA("ProximityPrompt"), `{station:GetFullName()} needs a ProximityPrompt "CallPrompt"`)
+	local spawn = station:FindFirstChild("VehicleSpawn", true)
+	assert(spawn and spawn:IsA("BasePart"), `{station:GetFullName()} needs a part "VehicleSpawn"`)
+	assert(prompt.Parent and (prompt.Parent:IsA("BasePart") or prompt.Parent:IsA("Attachment")), `{prompt:GetFullName()} must sit in a part or an Attachment (its reach is checked from there)`)
+	return prompt, spawn
+end
+
+-- Where vehicles fill: the cove's refill bays (area nil) and each area model's Hydrant (area 2-5).
+function Map.hydrants(ocean: Model, config): { { area: any?, at: Vector3 } }
+	local roads = child(child(workspace, "Map"), "Roads")
+	local hydrants = {}
+	for _, name in { "TruckRefillBay1", "TruckRefillBay2" } do
+		local bay = child(roads, name)
+		assert(bay:IsA("PVInstance"), `{bay:GetFullName()} must be a part or Model`)
+		table.insert(hydrants, { area = nil, at = bay:GetPivot().Position })
+	end
+	for _, area in config.areas do
+		if area.model then
+			local hydrant = child(Zones.areaModel(ocean, area) :: Instance, "Hydrant")
+			assert(hydrant:IsA("PVInstance"), `{hydrant:GetFullName()} must be a part or Model`)
+			table.insert(hydrants, { area = area, at = hydrant:GetPivot().Position })
+		end
+	end
+	return hydrants
 end
 
 -- A Tap's Attachment "Hose", where the Garden Hose's rope starts (server/HeldTools).

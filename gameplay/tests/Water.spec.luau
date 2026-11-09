@@ -80,6 +80,13 @@ function tests.mix_pays_each_area(t)
 	t.expectEq(Water.mix(value, 0, 50), value, "no new water keeps the value")
 end
 
+-- Pouring part of what a tool or tank holds takes that share of its value.
+function tests.share_of_value(t)
+	t.expectEq(Water.share(340, 10, 10), 340, "all of it")
+	t.expectEq(Water.share(340, 10, 5), 170, "half")
+	t.expectEq(Water.share(340, 10, 0), 0, "none")
+end
+
 function tests.fill_scales_with_players(t)
 	t.expectEq(Water.fill(20, OCEAN, 2), 0.01)
 	t.expectEq(Water.fill(140, OCEAN, 2), 0.03)

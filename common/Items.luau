@@ -150,11 +150,13 @@ end
 
 -- What a press on area `areaId`'s stand buys: the cheapest item sold there that canBuy allows now,
 -- or nil. `stand`: a cove shop (Config.stands) instead of the area's own stand; each sells only its
--- own items. One prompt per stand, so it picks for the player.
+-- own items, whatever their area (the Fire Station's vehicles open with areas 2-5). One prompt per
+-- stand, so it picks for the player.
 function Items.standPick(config, state: State, areaId: number, openAreas: number, money: number, stand: string?)
 	local pick = nil
 	for _, item in config.items do
-		if item.area == areaId and item.stand == stand and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
+		local here = if stand then item.stand == stand else item.area == areaId and item.stand == nil
+		if here and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
 			pick = item
 		end
 	end

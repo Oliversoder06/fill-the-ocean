@@ -41,6 +41,9 @@
         },
         "Gadget": {
           "$className": "RemoteEvent"
+        },
+        "Vehicle": {
+          "$className": "RemoteEvent"
         }
       }
     },

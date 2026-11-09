@@ -3,8 +3,9 @@
 -- then its parts appear layer by layer). One tile per upgrade track (Tool and
 -- Boosts panels, from Config.tracks); clicking a tile shows it in the detail panel, whose Buy button
 -- sends Buy(trackId). The server checks every buy.
--- Tabs (Body.Tabs): Tools (the tracks), Gear (one tile per backpack and gadget in GearPanel), and
--- Vehicles, Buildings and Staff, which show ComingSoon until their items exist. Items are bought once
+-- Tabs (Body.Tabs): Tools (the tracks), Gear (one tile per backpack and gadget in GearPanel), Vehicles
+-- (one tile per vehicle in VehiclePanel), and Buildings and Staff, which show ComingSoon until their
+-- items exist. Items are bought once
 -- at their area's stand; here an owned one shows its level and its Buy button sends Buy(itemId) to
 -- level it up, and an unowned one says where to buy it.
 local ContextActionService = game:GetService("ContextActionService")
@@ -43,8 +44,9 @@ local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = 
 local PANEL_NAMES = { tool = "Tool", boosts = "Boosts" }
 -- Tabs in order and the Content panels each shows; a tab without panels shows ComingSoon.
 local TABS = { "Tools", "Gear", "Vehicles", "Buildings", "Staff" }
-local TAB_PANELS = { Tools = { "ToolPanel", "BoostPanel" }, Gear = { "GearPanel" } }
-local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel" } -- the tab panel holding each kind's tiles
+local TAB_PANELS = { Tools = { "ToolPanel", "BoostPanel" }, Gear = { "GearPanel" }, Vehicles = { "VehiclePanel" } }
+local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel", vehicle = "VehiclePanel" } -- the tab panel holding each kind's tiles
+local ITEM_CATEGORIES = { vehicle = "Vehicle" } -- the detail panel's category line; the rest say "Gear"
 
 -- Tiles take their panel's tag colour, so the colour says which group an upgrade belongs to.
 local function panelColor(track): Color3
@@ -127,13 +129,20 @@ local GADGET_EFFECTS = {
 	end,
 }
 
--- What an item does now and after its next upgrade: a backpack's litres, a gadget's stats.
+-- What a vehicle does at some level (as GADGET_EFFECTS): trucks spray, the bomber drops it all at once.
+local function vehicleEffect(stat): string
+	local spray = stat("sprayRate")
+	local use = if spray then `sprays {short(spray)} L/s` else "drops it all at once"
+	return `Holds {short(stat("tank"))} L, fills {short(stat("fillRate"))} L/s, {use}, speed {stat("speed")}`
+end
+
+-- What an item does now and after its next upgrade: a backpack's litres, a gadget's or vehicle's stats.
 local function itemEffect(item, level, owned: boolean): string
 	local function nowStat(name: string): number
 		return if owned then Items.stat(Hud.items(), item, name) else item[name]
 	end
-	if item.kind == "gadget" then
-		local effect = GADGET_EFFECTS[item.id]
+	if item.kind == "gadget" or item.kind == "vehicle" then
+		local effect = if item.kind == "vehicle" then vehicleEffect else GADGET_EFFECTS[item.id]
 		assert(effect, `Shop has no effect text for {item.id}`)
 		if level then
 			local after = effect(function(name: string): number
@@ -308,8 +317,10 @@ function Shop.start()
 	-- A tab shows its panels and selects its first tile.
 	local firstTile = { Tools = "tool" }
 	for _, item in Config.items do
-		if ITEM_PANELS[item.kind] == "GearPanel" and not firstTile.Gear then
-			firstTile.Gear = item.id
+		for name, panels in TAB_PANELS do
+			if table.find(panels, ITEM_PANELS[item.kind]) and not firstTile[name] then
+				firstTile[name] = item.id
+			end
 		end
 	end
 	for name, button in tabButtons do
@@ -445,7 +456,7 @@ function Shop.start()
 		if selectedItem then
 			local level, status, canLevel = Hud.offer(levels, selected, money)
 			local owned = Items.owned(itemState, selected)
-			set(Hud.find(detail, "Category"), "Text", "Gear")
+			set(Hud.find(detail, "Category"), "Text", ITEM_CATEGORIES[selectedItem.kind] or "Gear")
 			set(detailArt, "ImageColor3", if status == "locked" or status == "replaced" then colors.locked else colors.shallowWater)
 			set(Hud.find(detailArt, "Icon"), "Visible", true)
 			set(Hud.find(detailArt, "View"), "Visible", false)

@@ -56,4 +56,9 @@ function Water.mix(carriedValue: number, litres: number, payPerLitre: number): n
 	return carriedValue + litres * payPerLitre
 end
 
+-- The coin value of `litres` poured out of `carried` litres worth `carriedValue`.
+function Water.share(carriedValue: number, carried: number, litres: number): number
+	return carriedValue * litres / carried
+end
+
 return Water
