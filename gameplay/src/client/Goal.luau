@@ -113,19 +113,6 @@ local function spotOf(target: string): Vector3?
 	return nil
 end
 
--- TODO(ux/b1): ux/b1 adds Guide.pointTo (ground chevrons to a spot, nil clears them); until it is
--- merged a world goal's click only warns once.
-local warned = false
-local function pointTo(position: Vector3?)
-	local show = (Guide :: any).pointTo
-	if show then
-		show(position)
-	elseif not warned then
-		warned = true
-		warn("[Goal] Guide.pointTo is missing (ux/b1 adds it): no chevrons to the goal")
-	end
-end
-
 function Goal.start()
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local line = Hud.find(gui, "Progress.Goal") :: TextButton
@@ -145,7 +132,7 @@ function Goal.start()
 		local at = spotOf(target)
 		if at then
 			pointed = target
-			pointTo(at)
+			Guide.pointTo(at)
 		end
 	end
 	line.Activated:Connect(go)
@@ -176,7 +163,7 @@ function Goal.start()
 		set(line, "Text", text)
 		if pointed and pointed ~= target then -- a new goal: the old way off the ground
 			pointed = nil
-			pointTo(nil)
+			Guide.pointTo(nil)
 		end
 	end)
 end
