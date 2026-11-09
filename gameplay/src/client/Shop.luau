@@ -87,10 +87,13 @@ local function opensText(level): string
 	return `Opens with {Areas.byId(Config, level.area).name}`
 end
 
--- What an item's tile and detail say instead of a price (Hud.offer's item statuses).
-local function itemNote(item, status: string?): string
+-- What an item's tile and detail say instead of a price (Hud.offer's item statuses). Tiles have room
+-- for one short word, the detail panel for the full sentence.
+local function itemNote(item, status: string?, short: boolean?): string
 	if status == "max" then
 		return "MAX"
+	elseif short then
+		return if status == "replaced" then "Replaced" elseif status == "stand" then "At stand" else "Locked"
 	elseif status == "replaced" then
 		local worn = Items.backpack(Config, Hud.items())
 		return `Replaced by the {if worn then worn.name else "next one"}`
@@ -350,7 +353,7 @@ function Shop.start()
 			set(Hud.find(button, "Level"), "Text", if owned then `Lv {itemState.itemLevels[item.id] + 1}` else "")
 			local priceText = Hud.find(holder, "PriceRow.Price")
 			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
-			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) else itemNote(item, status))
+			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) else itemNote(item, status, true))
 			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
 		end
 
