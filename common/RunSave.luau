@@ -132,6 +132,19 @@ function RunSave.new(mapId: string, members: { number }): Save
 	}
 end
 
+-- What erasing a run leaves (the lobby's New Game and Delete, admin resets): a fresh save of the same
+-- map and team, stamped newer than `old` (and no older than `now`) so an older write can't land on it.
+function RunSave.blank(old: Save, now: number): Save
+	local save = RunSave.new(old.mapId, old.members)
+	save.updatedAt = math.max(now, old.updatedAt + 1)
+	return save
+end
+
+-- Nobody has played this save (an erased run): a new party may start over it without asking.
+function RunSave.isBlank(save: Save): boolean
+	return next(save.players) == nil and save.current <= 0 and save.playSeconds <= 0 and not save.finished
+end
+
 -- DataStore keys are at most 50 characters.
 RunSave.KEY_LIMIT = 50
 

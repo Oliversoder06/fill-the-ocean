@@ -62,11 +62,16 @@ local function publishRocks()
 	ReplicatedStorage:SetAttribute("RocksBroken", table.concat(Mechanics.rocksBroken(), ","))
 end
 
--- The run's save is in: its broken rocks stay broken.
+-- The run's save is in: its broken rocks stay broken, and the others stand (an admin reset loads a
+-- blank save over a played one).
 function Mechanics.load(runSave: RunSave.Save)
 	save = runSave
-	for _, id in runSave.rocksBroken do
-		Map.breakRock(ocean, Areas.byId(Config, id))
+	for _, area in Config.areas do
+		if table.find(runSave.rocksBroken, area.id) then
+			Map.breakRock(ocean, area)
+		else
+			Map.mendRock(ocean, area)
+		end
 	end
 	publishRocks()
 end

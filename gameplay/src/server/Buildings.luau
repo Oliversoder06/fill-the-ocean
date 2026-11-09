@@ -146,10 +146,16 @@ local function place(index: number, item)
 	plot.prompt.Enabled = false
 end
 
--- The run's save is in: its buildings stand on their plots again. A plot or building the place or
--- Config no longer has is left in the save (a later fix brings it back) and warned about.
+-- The run's save is in: its buildings stand on their plots again, and nothing else does (an admin
+-- reset loads a blank save over a played one). A plot or building the place or Config no longer has
+-- is left in the save (a later fix brings it back) and warned about.
 function Buildings.load(runSave: RunSave.Save)
 	save = runSave
+	for index, building in placed do
+		building.model:Destroy()
+		plots[index].prompt.Enabled = true
+	end
+	table.clear(placed)
 	for key, id in runSave.plots do
 		local index = tonumber(key) :: number
 		local item = Items.get(Config, id)

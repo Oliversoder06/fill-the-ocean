@@ -1,14 +1,18 @@
 -- Session pads (workspace.Lobby.Pads.Pad1..PadN, built in Studio). Each pad Model has a "Zone" part
 -- and a sign with "Title" and "Status" labels. A pad holds one session:
---   empty       the first player to step on becomes host and gets the pad menu
---   choosing    the host either sets up a new party (Create Party: a map they unlocked, max players,
---               friends-only) or picks one of their saved runs (Saved Runs)
+--   empty       the first player to step on becomes host and gets the pad screen
+--   choosing    one screen: the host either creates a new party (Create Party: a map they unlocked,
+--               max players, friends-only) or loads one of their saved runs (Saved Runs)
 --   open        a new party: others step on to join (rules in Common.SessionRules); it launches when
 --               full or when the host presses Start
 -- A saved run loads only with exactly its team standing on the pad (SessionRules.loadError for the
--- card, RunSave.sameTeam again at launch). At launch the lobby writes a run ticket and teleports the
--- party into a fresh reserved gameplay server. Clients only send SessionAction("view" | "open" |
--- "cancel" | "start" | "load" | "leave"); everything is checked here.
+-- card, RunSave.sameTeam again at launch). One save per map per team (RunSave.key): a new party whose
+-- team already has a save on its map starts over it only if the host confirmed that save (New Game:
+-- "open" with `replace` = its key); it is erased at launch (RunStore.erase: never while a server has it
+-- open). Delete on a card erases a solo run; a team run only leaves the player's list (D5's Leave run),
+-- so one member can't wipe the others' progress. At launch the lobby writes a run ticket and teleports
+-- the party into a fresh reserved gameplay server. Clients only send SessionAction("open" | "cancel" |
+-- "start" | "load" | "delete"); everything is checked here.
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -32,12 +36,9 @@ local POLL = 0.25
 local COOLDOWN = 4 -- after a launch or a failed launch
 local ZONE_HEIGHT = 10
 local ACTIONS_PER_SECOND = 4
-local ACTIONS = { view = true, open = true, cancel = true, start = true, load = true, leave = true }
-local VIEWS = { menu = true, create = true, saved = true }
+local ACTIONS = { open = true, cancel = true, start = true, load = true, delete = true }
 
 local Queue = {}
-
-type View = "menu" | "create" | "saved"
 
 -- One of the host's saved runs as loaded for the Saved Runs panel.
 type SavedRun = { key: string, save: RunSave.Save?, problem: string? }
@@ -48,8 +49,8 @@ type Pad = {
 	title: TextLabel,
 	status: TextLabel,
 	host: Player?,
-	view: View, -- the host's window while choosing
 	settings: SessionRules.Settings?,
+	replaceKey: string?, -- New Game: the host's saved run this party may start over
 	members: { Player }, -- join order, host included
 	declined: { [Player]: boolean }, -- must step off before they can host again
 	told: { [Player]: string },
@@ -65,6 +66,7 @@ local remotes: { [string]: RemoteEvent } = {}
 local pads: { Pad } = {}
 local lastSent: { [Player]: string } = {}
 local actionWindow: { [Player]: { start: number, count: number } } = {}
+local deleting: { [Player]: boolean } = {} -- a Delete is running for this player
 local names: { [number]: string } = {} -- display names of saved-run members, by user id
 
 local function tell(player: Player, text: string)
@@ -125,8 +127,7 @@ local function padOf(player: Player): Pad?
 end
 
 local function reset(pad: Pad)
-	pad.host, pad.settings = nil, nil
-	pad.view = "menu"
+	pad.host, pad.settings, pad.replaceKey = nil, nil, nil
 	pad.members = {}
 	pad.friends = {}
 	pad.saved, pad.savedError = nil, nil
@@ -200,8 +201,8 @@ local function namesOf(ids: { number }): string
 end
 
 -- Loads the host's saved runs for the Saved Runs panel, in the background (it yields).
--- Once per host on the pad: reopening the panel reuses the list (leaveRun keeps it current), so
--- toggling views can't burn the lobby's DataStore read budget.
+-- Once per host on the pad: the list is kept current by deleteRun, so it can't burn the lobby's
+-- DataStore read budget.
 local function loadSaved(pad: Pad, host: Player)
 	if pad.saved or pad.savedLoading then
 		return
@@ -241,12 +242,15 @@ local function loadSaved(pad: Pad, host: Player)
 end
 
 -- What one Saved Runs card shows, and whether its Load button works with these players on the pad.
+-- mapId and memberIds let the Create panel find the save a New Game would start over.
 local function savedCard(run: SavedRun, padIds: { number }): { [string]: any }
 	local save = run.save
 	local card = {
 		key = run.key,
+		mapId = "",
 		mapName = "",
 		members = "",
+		memberIds = {},
 		teamSize = 0,
 		fill = 0,
 		lastPlayed = 0,
@@ -257,8 +261,10 @@ local function savedCard(run: SavedRun, padIds: { number }): { [string]: any }
 		return card
 	end
 	local map = Maps.get(save.mapId)
+	card.mapId = save.mapId
 	card.mapName = mapName(save.mapId)
 	card.members = namesOf(save.members)
+	card.memberIds = save.members
 	card.teamSize = #save.members
 	card.lastPlayed = save.updatedAt
 	if not map then
@@ -283,22 +289,19 @@ local function savedCard(run: SavedRun, padIds: { number }): { [string]: any }
 	return card
 end
 
--- What the host's client shows while choosing.
+-- What the host's client shows while choosing: both panels, the saved runs as cards (nil while they
+-- load) and who stands on the pad (padIds, the host first: the team a New Game would be for).
 local function hostView(pad: Pad, here: { [Player]: boolean }): { [string]: any }
 	local host = pad.host :: Player
-	if pad.view == "saved" then
-		local cards = nil
-		if pad.saved then
-			local ids = userIds(loaders(pad, here))
-			cards = {}
-			for _, run in pad.saved do
-				table.insert(cards, savedCard(run, ids))
-			end
+	local ids = userIds(loaders(pad, here))
+	local cards = nil
+	if pad.saved then
+		cards = {}
+		for _, run in pad.saved do
+			table.insert(cards, savedCard(run, ids))
 		end
-		return { kind = "saved", runs = cards, error = pad.savedError }
 	end
-	local data = Profiles.get(host)
-	return { kind = pad.view, unlocked = Profiles.unlockedMaps(host), saved = if data then #data.runs else nil }
+	return { kind = "choose", unlocked = Profiles.unlockedMaps(host), padIds = ids, runs = cards, error = pad.savedError }
 end
 
 -- Friends-only: is this player friends with the host? Looked up in the background (it yields).
@@ -389,10 +392,14 @@ local function launch(pad: Pad, party: { Player }, title: string, prepare: () ->
 	pad.launching = false
 end
 
--- A new party (Create Party): the same team on the same map always gets the same run key, so a team
--- that already has a save there is sent to Saved Runs (or told it's done) instead of launching.
+-- A new party (Create Party): the same team on the same map always gets the same run key. A team that
+-- already has a save there (one that was played: RunSave.isBlank) is sent to Saved Runs instead of
+-- launching, unless the host confirmed starting over exactly that save (New Game): then it is erased
+-- here, under its lock, and its key leaves every member's list (Progress.forgetRun, so the fresh run's
+-- ending pays again). If the final team isn't the confirmed one, the confirmed save is untouched.
 local function launchParty(pad: Pad)
 	local settings = pad.settings :: SessionRules.Settings
+	local replaceKey = pad.replaceKey
 	local party = table.clone(pad.members)
 	local members = userIds(party)
 	launch(pad, party, mapName(settings.mapId), function()
@@ -401,10 +408,24 @@ local function launchParty(pad: Pad)
 		if err then
 			warn(`[Queue] couldn't check run {key} before a new party: {err}`)
 			return nil, "Couldn't start the run. Please try again."
-		elseif save and save.finished then
-			return nil, "Your team already filled this ocean!"
-		elseif save then
-			return nil, "Your team already has a run on this map. Load it from Saved Runs."
+		elseif save and not RunSave.isBlank(save) and key ~= replaceKey then
+			return nil,
+				if save.finished
+					then "Your team already filled this ocean. Press New Game to play it again."
+					else "Your team already has a run on this map. Load it from Saved Runs."
+		end
+		if save and not RunSave.isBlank(save) then
+			local erased, eraseErr, open = RunStore.erase(key)
+			if not erased then
+				warn(`[Queue] couldn't erase run {key} for a New Game: {eraseErr}`)
+				return nil, if open then "That run is open in another server. Try again in a minute." else "Couldn't start over. Please try again."
+			end
+			for _, p in party do
+				local forgot, forgetErr = Profiles.forgetRun(p, key)
+				if not forgot then
+					warn(`[Queue] erased run {key} is still listed for {p.Name}: {forgetErr}`)
+				end
+			end
 		end
 		return { mapId = settings.mapId, key = key, members = members }, nil
 	end)
@@ -445,15 +466,32 @@ local function launchSaved(pad: Pad, key: string)
 	end)
 end
 
--- "Leave run" on a Saved Runs card (owner decision D5).
-local function leaveRun(pad: Pad, player: Player, key: string)
-	local ok, err = Profiles.leaveRun(player, key)
+-- Delete on a Saved Runs card. A solo run (or a listed key with no save) is erased (RunStore.erase:
+-- never while a server has it open) and forgotten; a team run only leaves this player's list (D5's
+-- Leave run): the others keep it.
+local function deleteRun(pad: Pad, player: Player, key: string)
+	deleting[player] = true
+	local save, err = RunStore.load(key)
+	local solo = save == nil or (#save.members == 1 and save.members[1] == player.UserId)
+	local ok, open = false, false
+	if not err then
+		ok = true
+		if save and solo then
+			ok, err, open = RunStore.erase(key)
+		end
+		if ok and solo then
+			ok, err = Profiles.forgetRun(player, key)
+		elseif ok then
+			ok, err = Profiles.leaveRun(player, key)
+		end
+	end
+	deleting[player] = nil
 	if not ok then
-		warn(`[Queue] {player.Name} couldn't leave run {key}: {err}`)
-		tell(player, "Couldn't leave that run. Please try again.")
+		warn(`[Queue] {player.Name} couldn't delete run {key}: {err}`)
+		tell(player, if open then "That run is open in a server right now. Try again in a minute." else "Couldn't delete that run. Please try again.")
 		return
 	end
-	tell(player, "You left that run.")
+	tell(player, if solo then "Run deleted." else "You left that run. It stays saved for the others.")
 	if pad.host == player and pad.saved then
 		for i, run in pad.saved do
 			if run.key == key then
@@ -464,7 +502,8 @@ local function leaveRun(pad: Pad, player: Player, key: string)
 	end
 end
 
--- Is key one of this player's saved runs? (Load and Leave only take keys from the player's own list.)
+-- Is key one of this player's saved runs? (Load, Delete and New Game only take keys from the
+-- player's own list.)
 local function ownsRun(player: Player, key: unknown): boolean
 	local data = Profiles.get(player)
 	return type(key) == "string" and data ~= nil and table.find(data.runs, key) ~= nil
@@ -476,7 +515,7 @@ local function updateSign(pad: Pad)
 		pad.title.Text = "Open Pad"
 		pad.status.Text = "Step on to host"
 	elseif not settings then
-		pad.title.Text = if pad.view == "saved" then "Loading a run" else "Setting up..."
+		pad.title.Text = "Setting up..."
 		pad.status.Text = (pad.host :: Player).DisplayName
 	else
 		pad.title.Text = mapName(settings.mapId)
@@ -526,7 +565,7 @@ local function update(pad: Pad)
 		end
 	end
 
-	-- Empty pad: the first eligible player on it hosts and gets the pad menu.
+	-- Empty pad: the first eligible player on it hosts and gets the pad screen; their saved runs load.
 	if not pad.host then
 		for p in here do
 			if not pad.declined[p] and not padOf(p) and p:GetAttribute("DataReady") then
@@ -534,6 +573,7 @@ local function update(pad: Pad)
 				pad.members = { p }
 				pad.settings = nil
 				pad.told[p] = "host"
+				loadSaved(pad, p)
 				break
 			end
 		end
@@ -544,11 +584,9 @@ local function update(pad: Pad)
 	local settings = pad.settings
 	for p in here do
 		if not isMember(pad, p) and not padOf(p) and not pad.declined[p] then
-			if not settings and pad.view == "saved" then
+			if not settings then
 				local host = (pad.host :: Player).DisplayName
-				tellOnce(pad, p, "saved", `{host} is loading a saved run. Stay on the pad if you're in it.`)
-			elseif not settings then
-				tellOnce(pad, p, "setup", "The host is setting up this session...")
+				tellOnce(pad, p, "setup", `{host} is setting up. Stay on the pad if you're in their saved run.`)
 			else
 				local friend = if settings.friendsOnly then hostFriend(pad, p) else false
 				if friend ~= nil then
@@ -607,17 +645,12 @@ local function onAction(player: Player, action: unknown, payload: unknown)
 	if not pad or pad.host ~= player or pad.launching then
 		return
 	end
-	if action == "view" and not pad.settings then
-		if type(payload) == "string" and VIEWS[payload] then
-			pad.view = payload :: View
-			if payload == "saved" then
-				loadSaved(pad, player)
-			end
-		end
-	elseif action == "open" and not pad.settings and pad.view == "create" then
+	if action == "open" and not pad.settings then
 		local settings = SessionRules.validate(payload, Profiles.unlockedMaps(player))
-		if settings then
+		local replace = if type(payload) == "table" then (payload :: any).replace else nil
+		if settings and (replace == nil or ownsRun(player, replace)) then
 			pad.settings = settings
+			pad.replaceKey = replace
 			if settings.maxPlayers == 1 then
 				tell(player, "Starting your solo run!")
 			end
@@ -630,10 +663,10 @@ local function onAction(player: Player, action: unknown, payload: unknown)
 		reset(pad)
 	elseif action == "start" and pad.settings then
 		task.spawn(launchParty, pad)
-	elseif action == "load" and not pad.settings and pad.view == "saved" and ownsRun(player, payload) then
+	elseif action == "load" and not pad.settings and ownsRun(player, payload) then
 		task.spawn(launchSaved, pad, payload :: string)
-	elseif action == "leave" and not pad.settings and pad.view == "saved" and ownsRun(player, payload) then
-		task.spawn(leaveRun, pad, player, payload :: string)
+	elseif action == "delete" and not pad.settings and not deleting[player] and ownsRun(player, payload) then
+		task.spawn(deleteRun, pad, player, payload :: string)
 	end
 end
 
@@ -660,8 +693,8 @@ function Queue.start()
 				title = title,
 				status = status,
 				host = nil,
-				view = "menu",
 				settings = nil,
+				replaceKey = nil,
 				members = {},
 				declined = {},
 				told = {},
@@ -679,6 +712,7 @@ function Queue.start()
 	Players.PlayerRemoving:Connect(function(player)
 		lastSent[player] = nil
 		actionWindow[player] = nil
+		deleting[player] = nil
 	end)
 	TeleportService.TeleportInitFailed:Connect(function(player, result, message)
 		warn(`[Queue] teleport failed for {player.Name}: {result} {message}`)

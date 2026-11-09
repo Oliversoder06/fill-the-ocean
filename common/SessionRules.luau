@@ -4,6 +4,7 @@
 -- friends-only. Anyone may join a session the host unlocked (friends get carried). The run starts
 -- when it's full or the host presses Start. If the host leaves, the earliest remaining member hosts.
 -- A saved run loads only with exactly its team on the pad (loadError says who is missing or extra).
+-- One save per map per team: newTeam and savedFor find the save a new party would start over.
 
 export type Settings = { maxPlayers: number, mapId: string, friendsOnly: boolean }
 
@@ -56,6 +57,33 @@ function SessionRules.loadError(saveMembers: { number }, padMembers: { number })
 		return "extra", extra
 	end
 	return nil, {}
+end
+
+-- The team a new party would be for, as far as the pad shows it (padIds: the host first): the host
+-- alone for a solo party, or everyone on the pad when 2 to maxPlayers stand there; nil otherwise.
+function SessionRules.newTeam(maxPlayers: number, padIds: { number }): { number }?
+	if #padIds == 0 then
+		return nil
+	elseif maxPlayers == 1 then
+		return { padIds[1] }
+	elseif #padIds < 2 or #padIds > maxPlayers then
+		return nil
+	end
+	return table.clone(padIds)
+end
+
+-- One save per map per team: the index in `runs` of the saved run a new party of `team` on mapId
+-- would start over (exactly that team on that map), or nil.
+function SessionRules.savedFor(runs: { { mapId: string, memberIds: { number } } }, mapId: string, team: { number }?): number?
+	if not team then
+		return nil
+	end
+	for i, run in runs do
+		if run.mapId == mapId and #run.memberIds == #team and SessionRules.loadError(run.memberIds, team) == nil then
+			return i
+		end
+	end
+	return nil
 end
 
 -- Why a player can't join (nil = they can): "full" or "friends".

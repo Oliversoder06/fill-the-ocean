@@ -93,7 +93,8 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Goal.luau`: the next-goal line `Hud.Progress.Goal` once the guide is gone (`shared/NextGoal`);
   a click or G opens the shop on it or points the way (`Guide.pointTo`, from ux/b1).
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
-  ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote).
+  ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote) and
+  `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`).
 - `Purchase.luau`: the purchase moment: sting, coins fly from your money into the tile, a "BOUGHT!"
   stamp (`StarterGui.Hud.Templates`), Buy-button shake when you can't buy, new-tool swing-up
   sparkles and speed-upgrade whoosh/FOV kick when the shop closes (`Cues.purchase`).
@@ -185,7 +186,8 @@ runtime (pure core + `Roblox/` AnimPlayer etc.; `vendor/LICENSE`, `vendor/PROVEN
 
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `RunSave.luau` (pure): a team's saved run (its `buildings` levels and `plots`; per player `assign`,
-  staff id -> area id), its key, and the exact-team check (`sameTeam`).
+  staff id -> area id), its key, the exact-team check (`sameTeam`), and `blank` / `isBlank` (what
+  erasing a run leaves).
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
   `canBuy`, `affords` (the one money check with the fractional-coin epsilon), `nextLevel`, the
   worn backpack and its `capacityBonus` (plus the Jetpack Tank's), `standPick` (an area's stand or
@@ -194,11 +196,14 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `slots` (hotbar gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`,
   `buildingOffer` / `buildingStat` (the team's building levels), `nextOwned` (the vehicle a Fire
   Station call brings next).
-- `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore).
+- `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore);
+  `erase` (the lobby's New Game / Delete / profile reset) writes a blank save only while holding the lock.
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
-- `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps.
+- `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps
+  (`forgetRun`: an erased run leaves the list and its payment; `reset`: an admin's profile reset).
 - `RunTicket.luau`: the lobby's ticket for a reserved server (`mapId`, run key, members).
-- `SessionRules.luau` (pure): lobby pad rules (create, join, load only with the same team).
+- `SessionRules.luau` (pure): lobby pad rules (create, join, load only with the same team, and
+  `newTeam` / `savedFor`: the save a new party would start over, one per map per team).
 - `Places.luau`: the two place IDs. `Retry.luau`: retries DataStore, MemoryStore and Teleport
   calls, warning on every failure.
 
@@ -235,7 +240,8 @@ The server publishes state as attributes; the client only reads them.
   Water Gun out a pour reaches its range), `Gadget` (`"clip"`, `"spray", on`, `"fly", on`;
   rate-limited, water and fuel follow the server's clock), `Vehicle` (`"spray", on`: the truck's hose
   while on foot within reach of your own truck by the water; rate-limited), `Look` (camera pitch in degrees, range-checked and
-  rate-limited), `Admin` (a fill fraction 0-1; the server checks `shared/Admins` and only jumps
+  rate-limited), `Admin` (a fill fraction 0-1, or `"reset"`: the run starts over live for the same
+  team and map, at most once per 10 s; the server checks `shared/Admins` and only acts
   while Phase is `playing`), `Card` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish`. A new remote: add it to
   `default.project.json` AND to the `remote(...)` list in `Run.start`, validate its arguments, and
@@ -317,7 +323,9 @@ needs a Studio play test).
   pour, once started, always plays out in full.
 - Saves: only the gameplay server writes a run (`UpdateAsync`, never after a failed load), a run is
   open in one server at a time (`RunStore.lock`), and only its exact team may load it
-  (`RunSave.sameTeam`, checked in the lobby and again in the gameplay server).
+  (`RunSave.sameTeam`, checked in the lobby and again in the gameplay server). The lobby only ever
+  erases a run (`RunStore.erase`: a blank save, written while it holds the run's lock, so never
+  while a gameplay server has it open). One save per map per team: a New Game replaces it.
 - For Roblox API facts, check the LihFolk vault:
   `C:\Users\lexru\.claude\plugins\cache\lihfolk\lihfolk\2.5.0\LihFolk Vault V2\` (search it by keyword).
 - The owner's taste and numbers: `C:\RobloxDev\library` (rules in `LIBRARY-RULES.md`).

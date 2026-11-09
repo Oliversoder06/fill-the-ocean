@@ -257,4 +257,56 @@ function tests.new_save_starts_empty(t)
 	t.expectEq(save.updatedAt, 0)
 end
 
+-- Erasing a run (New Game, Delete, admin resets) leaves a blank save of the same map and team,
+-- stamped newer than the old one so an older write can't land over it.
+function tests.blank_keeps_map_and_team_and_is_newer(t)
+	local old = RunSave.new("map1", { 20, 10 })
+	old.current = 500
+	old.players["10"] = { money = 9, levels = { tool = 2 }, litres = 500, owned = { "bigTank" }, itemLevels = {}, assign = {} }
+	old.gatesOpen = { 2 }
+	old.buildings = { pump = 1 }
+	old.plots = { ["1"] = "pump" }
+	old.rocksBroken = { 1 }
+	old.boostsPlayed = { "tide" }
+	old.playSeconds = 3600
+	old.introSeen = true
+	old.finished = true
+	old.updatedAt = 1000
+	local blank = RunSave.blank(old, 900)
+	t.expectEq(blank.mapId, "map1")
+	t.expectEq(table.concat(blank.members, ","), "10,20")
+	t.expectEq(blank.updatedAt, 1001, "newer than the old save even with a clock behind")
+	t.expectEq(RunSave.blank(old, 5000).updatedAt, 5000, "now when the clock is ahead")
+	t.expectEq(blank.current, 0)
+	t.expectEq(count(blank.players), 0)
+	t.expectEq(#blank.gatesOpen, 0)
+	t.expectEq(count(blank.buildings), 0)
+	t.expectEq(count(blank.plots), 0)
+	t.expectEq(#blank.rocksBroken, 0)
+	t.expectEq(#blank.boostsPlayed, 0)
+	t.expectEq(blank.playSeconds, 0)
+	t.expectEq(blank.finished, false)
+	t.expectEq(old.current, 500, "the old save is untouched")
+	t.expectEq(old.players["10"].money, 9)
+end
+
+function tests.only_unplayed_saves_are_blank(t)
+	t.expectEq(RunSave.isBlank(RunSave.new("map1", { 1 })), true)
+	local old = RunSave.new("map1", { 1 })
+	old.updatedAt = 50
+	t.expectEq(RunSave.isBlank(RunSave.blank(old, 60)), true)
+	local played = RunSave.new("map1", { 1 })
+	played.players["1"] = { money = 0, levels = {}, litres = 0, owned = {}, itemLevels = {}, assign = {} }
+	t.expectEq(RunSave.isBlank(played), false, "someone played it")
+	local filled = RunSave.new("map1", { 1 })
+	filled.current = 1
+	t.expectEq(RunSave.isBlank(filled), false, "water in it")
+	local timed = RunSave.new("map1", { 1 })
+	timed.playSeconds = 2
+	t.expectEq(RunSave.isBlank(timed), false, "time played")
+	local done = RunSave.new("map1", { 1 })
+	done.finished = true
+	t.expectEq(RunSave.isBlank(done), false, "finished")
+end
+
 return tests

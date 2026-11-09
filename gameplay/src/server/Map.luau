@@ -51,6 +51,8 @@ local AREA_PARTS = { "Source", "Pour", "Spawn", "Tap" }
 local Map = {}
 
 local baseTransparency: { [BasePart]: number } = {} -- each Water part's look in the place
+-- How each part clear() hid looked and collided in the place, so show() can put it back.
+local hidden: { [BasePart]: { transparency: number, canCollide: boolean, canQuery: boolean, canTouch: boolean } } = {}
 
 -- Sets the visible water height for a fill fraction (0-1). An empty basin shows no water at all,
 -- so a drained ocean looks drained.
@@ -152,10 +154,29 @@ local function clear(piece: Instance)
 	table.insert(parts, piece)
 	for _, part in parts do
 		if part:IsA("BasePart") then
+			if not hidden[part] then
+				hidden[part] = { transparency = part.Transparency, canCollide = part.CanCollide, canQuery = part.CanQuery, canTouch = part.CanTouch }
+			end
 			part.Transparency = 1
 			part.CanCollide = false
 			part.CanQuery = false -- aim rays (client/Action) see through it
 			part.CanTouch = false
+		end
+	end
+end
+
+-- Undoes clear(): `piece` blocks and shows as it did in the place.
+local function show(piece: Instance)
+	local parts = piece:GetDescendants()
+	table.insert(parts, piece)
+	for _, part in parts do
+		if part:IsA("BasePart") and hidden[part] then
+			local was = hidden[part]
+			part.Transparency = was.transparency
+			part.CanCollide = was.canCollide
+			part.CanQuery = was.canQuery
+			part.CanTouch = was.canTouch
+			hidden[part] = nil
 		end
 	end
 end
@@ -167,6 +188,15 @@ function Map.openGate(ocean: Model, area)
 		clear(child(gate, name))
 	end
 	Map.gatePrompt(gate).Enabled = false
+end
+
+-- Shuts a gate again (admin run reset): Boards and Blocker as in the place, its prompt back.
+function Map.closeGate(ocean: Model, area)
+	local gate = Map.gate(ocean, area)
+	for _, name in { "Boards", "Blocker" } do
+		show(child(gate, name))
+	end
+	Map.gatePrompt(gate).Enabled = true
 end
 
 -- An area's Rock in front of its deeper pool (checked by Map.ensure), and its prompt.
@@ -185,6 +215,13 @@ function Map.breakRock(ocean: Model, area)
 	local rock = Map.rock(ocean, area)
 	clear(rock)
 	Map.rockPrompt(rock).Enabled = false
+end
+
+-- Puts a broken rock back (admin run reset); an unbroken one is left as it is.
+function Map.mendRock(ocean: Model, area)
+	local rock = Map.rock(ocean, area)
+	show(rock)
+	Map.rockPrompt(rock).Enabled = true
 end
 
 -- The parts of an area's `folder` (Vents, CloudPath) in name order (Point1, Point2, ...).

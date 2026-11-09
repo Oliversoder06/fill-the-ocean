@@ -1,10 +1,11 @@
 -- Session pad UI, built in Studio under StarterGui.LobbyHud in the sunbaked-sea style; colours come
--- from the theme. The host gets the pad menu (PadMenu: Create Party or Saved Runs), the Create Party
--- window (map pager, party size, friends-only) and the Saved Runs panel (one card per saved run,
--- cloned from its hidden CardTemplate, with Load and Leave run). HostBar shows an open session and
--- the host's Start button; Hint shows while the player isn't on a pad. The server decides
--- everything; this only shows SessionState and sends SessionAction("view" | "open" | "cancel" |
--- "start" | "load" | "leave").
+-- from the theme. Stepping on a pad as host opens PadScreen, one screen with two panels: Create Party
+-- (map pager, party size, friends-only and Create, which reads NEW GAME when the team on the pad
+-- already has a save on that map) and Saved Runs (one card per saved run, cloned from its hidden
+-- CardTemplate, with Load Game and Delete). New Game and Delete ask first (PadScreen.Confirm).
+-- HostBar shows an open session and the host's Start button; Hint shows while the player isn't on a
+-- pad. The server decides everything; this only shows SessionState and sends SessionAction("open" |
+-- "cancel" | "start" | "load" | "delete").
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -109,10 +110,6 @@ local function show(frame: GuiObject, visible: boolean)
 	end
 end
 
-local function plural(n: number, word: string): string
-	return `{n} {word}{if n == 1 then "" else "s"}`
-end
-
 -- "Played 3h ago" from a save's updatedAt (server time, seconds).
 local function playedAgo(at: number): string
 	if at <= 0 then
@@ -137,14 +134,10 @@ function Session.start()
 
 	local hint = find(hud, "Hint")
 
-	local padMenu = find(hud, "PadMenu")
-	local createTile = find(padMenu, "Body.CreateTile")
-	local createSub = find(createTile, "Sub")
-	local savedTile = find(padMenu, "Body.SavedTile")
-	local savedSub = find(savedTile, "Sub")
-	local padClose = find(padMenu, "CloseButton")
+	local screen = find(hud, "PadScreen")
+	local screenClose = find(screen, "CloseButton")
 
-	local create = find(hud, "CreateParty")
+	local create = find(screen, "CreateParty")
 	local mapCard = find(create, "Body.Map.Card")
 	local mapTitle = find(mapCard, "MapName")
 	local mapInfo = find(mapCard, "Info")
@@ -160,61 +153,59 @@ function Session.start()
 	local toggle = find(create, "Body.Friends.Toggle")
 	local createButton = find(create, "Body.CreateButton")
 	local createLabel = find(createButton, "Label")
-	local createBack = find(create, "BackButton")
-	local createClose = find(create, "CloseButton")
 
-	local savedWindow = find(hud, "SavedRuns")
-	local savedBack = find(savedWindow, "BackButton")
-	local savedClose = find(savedWindow, "CloseButton")
-	local empty = find(savedWindow, "Body.Empty")
-	local list = find(savedWindow, "Body.List")
+	local savedPanel = find(screen, "SavedRuns")
+	local empty = find(savedPanel, "Body.Empty")
+	local list = find(savedPanel, "Body.List")
 	local template = find(list, "CardTemplate")
 	template.Visible = false
+
+	local confirm = find(screen, "Confirm")
+	local question = find(confirm, "Question")
+	local yes = find(confirm, "YesButton")
+	local yesLabel = find(yes, "Label")
+	local no = find(confirm, "CancelButton")
+	confirm.Visible = false
+	yes.ImageColor3 = C.buyCoral
+	no.ImageColor3 = C.shallowWater
 
 	local bar = find(hud, "HostBar")
 	local barLine = find(bar, "Line")
 	local barDetail = find(bar, "Detail")
 	local startButton = find(bar, "StartButton")
 
-	local windows = { padMenu, create, savedWindow }
-	for _, w in windows do
-		assert(typeof(w:GetAttribute("DesignSize")) == "Vector2", `LobbyHud.{w.Name} needs a Vector2 attribute DesignSize (built in Studio)`)
-	end
-	-- Rotating a phone or resizing the window refits whatever is open.
+	assert(typeof(screen:GetAttribute("DesignSize")) == "Vector2", "LobbyHud.PadScreen needs a Vector2 attribute DesignSize (built in Studio)")
+	-- Rotating a phone or resizing the window refits the screen while it is open.
 	hud:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		for _, w in windows do
-			local scale = w:FindFirstChild("Scale")
-			if w.Visible and scale and scale:IsA("UIScale") then
-				scale.Scale = fitOf(w)
-			end
+		local scale = screen:FindFirstChild("Scale")
+		if screen.Visible and scale and scale:IsA("UIScale") then
+			scale.Scale = fitOf(screen)
 		end
 	end)
 	local settings = { maxPlayers = 4, mapId = Maps.list[1].id, friendsOnly = false }
 	local mapIndex = 1
 	local unlocked: { [string]: boolean } = {}
+	local runs = {} -- the saved-run cards last sent (SessionRules.savedFor reads mapId and memberIds)
+	local padIds: { number } = {} -- who stands on the pad, the host first
 	local cards: { Instance } = {}
-	local confirming: string? = nil -- the card whose "Leave run?" question is open
-	local savedCount: number? = nil -- saved runs on the last menu; 0 means the tile does nothing
+	local onYes: (() -> ())? = nil -- what the open question does on its Yes button
 
-	-- Shows one window (or none) and hides the others.
-	local function open(target: GuiObject?)
-		for _, w in windows do
-			show(w, w == target)
-		end
+	local function ask(text: string, yesText: string, fn: () -> ())
+		question.Text = text
+		yesLabel.Text = yesText
+		onYes = fn
+		confirm.Visible = true
 	end
 
-	local function refreshMenu(state)
-		local openMaps = 0
-		for _ in unlocked do
-			openMaps += 1
-		end
-		createSub.Text = `{openMaps} of {plural(#Maps.list, "map")} open`
-		savedCount = state.saved
-		savedTile.ImageColor3 = if (state.saved or 0) > 0 then C.speedTag else C.locked
-		savedSub.Text = if state.saved == nil
-			then "Couldn't load your runs"
-			elseif state.saved == 0 then "None yet"
-			else plural(state.saved, "saved run")
+	local function closeAsk()
+		onYes = nil
+		confirm.Visible = false
+	end
+
+	-- The saved run Create would start over (New Game: one save per map per team), or nil.
+	local function replaced()
+		local i = SessionRules.savedFor(runs, Maps.list[mapIndex].id, SessionRules.newTeam(settings.maxPlayers, padIds))
+		return if i then runs[i] else nil
 	end
 
 	local function refreshCreate()
@@ -228,7 +219,7 @@ function Session.start()
 		mapLockText.Visible = not isOpen
 		if not isOpen then
 			local before = map.unlockedBy and Maps.get(map.unlockedBy)
-			mapLockText.Text = `Clear {if before then before.name else "the map before"} first`
+			mapLockText.Text = `Clear {if before then before.name else "the map before"} to unlock`
 		end
 		page.Text = `{mapIndex}/{#Maps.list}`
 		prev.ImageColor3 = if mapIndex > 1 then C.shallowWater else C.locked
@@ -240,7 +231,7 @@ function Session.start()
 		toggle.ImageColor3 = if settings.friendsOnly then C.speedTag else C.locked
 		find(toggle, "Label").Text = if settings.friendsOnly then "ON" else "OFF"
 		createButton.ImageColor3 = if isOpen then C.buyCoral else C.locked
-		createLabel.Text = if isOpen then "CREATE" else "LOCKED"
+		createLabel.Text = if not isOpen then "LOCKED" elseif replaced() then "NEW GAME" else "CREATE"
 	end
 
 	local function fillCard(card: Instance, run)
@@ -255,17 +246,10 @@ function Session.start()
 		reason.Visible = run.reason ~= ""
 		local load = find(card, "LoadButton")
 		load.ImageColor3 = if run.canLoad then C.buyCoral else C.locked
-		local leave = find(card, "LeaveButton")
-		local confirm = find(card, "Confirm")
-		find(confirm, "Question").Text = if run.teamSize > 1
-			then "Leave this run? It stays saved for the others, but without you they can't load it any more."
-			else "Leave this run? It comes off your list. Starting a solo party on this map again picks it back up."
-		confirm.Visible = confirming == run.key
-		local yes = find(confirm, "YesButton")
-		local no = find(confirm, "NoButton")
-		for _, b in { load, leave, yes, no } do
-			juice(b)
-		end
+		local delete = find(card, "DeleteButton")
+		delete.ImageColor3 = C.buyCoral
+		juice(load)
+		juice(delete)
 		load.Activated:Connect(function()
 			if run.canLoad then
 				action:FireServer("load", run.key)
@@ -273,18 +257,17 @@ function Session.start()
 				deny(load)
 			end
 		end)
-		leave.Activated:Connect(function()
-			confirming = run.key
-			confirm.Visible = true
-		end)
-		no.Activated:Connect(function()
-			confirming = nil
-			confirm.Visible = false
-		end)
-		yes.Activated:Connect(function()
-			confirming = nil
-			confirm.Visible = false
-			action:FireServer("leave", run.key)
+		delete.Activated:Connect(function()
+			local team = run.teamSize > 1 -- a team run only leaves your list (server/Queue deleteRun)
+			ask(
+				if team
+					then "Leave this team run? It stays saved for the others, but without you they can't load it."
+					else "Delete this run? This can't be undone.",
+				if team then "Leave" else "Delete",
+				function()
+					action:FireServer("delete", run.key)
+				end
+			)
 		end)
 	end
 
@@ -293,16 +276,17 @@ function Session.start()
 			card:Destroy()
 		end
 		cards = {}
-		local runs = state.runs
-		empty.Visible = runs == nil or state.error ~= nil or #runs == 0
-		if runs == nil then
+		runs = state.runs or {}
+		local loading = state.runs == nil
+		empty.Visible = loading or state.error ~= nil or #runs == 0
+		if loading then
 			empty.Text = "Loading your runs..."
 		elseif state.error then
 			empty.Text = state.error
 		elseif #runs == 0 then
 			empty.Text = "No saved runs yet. Create a party to start one!"
 		end
-		for i, run in runs or {} do
+		for i, run in runs do
 			local card = template:Clone()
 			card.Name = `Run{i}`
 			card.LayoutOrder = i
@@ -313,28 +297,22 @@ function Session.start()
 		end
 	end
 
-	for _, b in { createTile, savedTile, padClose, prev, nextMap, minus, plus, toggle, createButton, createBack, createClose, savedBack, savedClose, startButton } do
+	for _, b in { screenClose, prev, nextMap, minus, plus, toggle, createButton, yes, no, startButton } do
 		juice(b)
 	end
-	createTile.Activated:Connect(function()
-		action:FireServer("view", "create")
+	screenClose.Activated:Connect(function()
+		action:FireServer("cancel")
+		closeAsk()
+		show(screen, false)
 	end)
-	savedTile.Activated:Connect(function()
-		if savedCount ~= 0 then
-			action:FireServer("view", "saved")
+	yes.Activated:Connect(function()
+		local fn = onYes
+		closeAsk()
+		if fn then
+			fn()
 		end
 	end)
-	for _, back in { createBack, savedBack } do
-		back.Activated:Connect(function()
-			action:FireServer("view", "menu")
-		end)
-	end
-	for _, close in { padClose, createClose, savedClose } do
-		close.Activated:Connect(function()
-			action:FireServer("cancel")
-			open(nil)
-		end)
-	end
+	no.Activated:Connect(closeAsk)
 	prev.Activated:Connect(function()
 		mapIndex = math.max(1, mapIndex - 1)
 		refreshCreate()
@@ -357,10 +335,20 @@ function Session.start()
 	end)
 	createButton.Activated:Connect(function()
 		local map = Maps.list[mapIndex]
-		if unlocked[map.id] then
-			settings.mapId = map.id
-			action:FireServer("open", table.clone(settings))
+		if not unlocked[map.id] then
+			deny(createButton)
+			return
 		end
+		settings.mapId = map.id
+		local run = replaced()
+		if not run then
+			action:FireServer("open", table.clone(settings))
+			return
+		end
+		local percent = math.floor(math.clamp(run.fill, 0, 1) * 100)
+		ask(`This erases your saved run on {map.name} ({percent}% filled). Start over?`, "Erase and start", function()
+			action:FireServer("open", { maxPlayers = settings.maxPlayers, mapId = map.id, friendsOnly = settings.friendsOnly, replace = run.key })
+		end)
 	end)
 	startButton.Activated:Connect(function()
 		action:FireServer("start")
@@ -369,34 +357,28 @@ function Session.start()
 	stateEvent.OnClientEvent:Connect(function(state)
 		local kind = state.kind
 		hint.Visible = kind == "none"
-		if kind == "menu" then
+		if kind == "choose" then
 			unlocked = state.unlocked
-			refreshMenu(state)
-			open(padMenu)
-			show(bar, false)
-		elseif kind == "create" then
-			unlocked = state.unlocked
-			refreshCreate()
-			open(create)
-			show(bar, false)
-		elseif kind == "saved" then
+			padIds = state.padIds
 			refreshSaved(state)
-			open(savedWindow)
+			refreshCreate()
+			show(screen, true)
 			show(bar, false)
-		elseif kind == "hosting" or kind == "member" then
-			open(nil)
+			return
+		end
+		closeAsk()
+		show(screen, false)
+		if kind == "hosting" or kind == "member" then
 			barLine.Text = if kind == "hosting" then "YOUR SESSION" else `{string.upper(state.host)}'S SESSION`
 			barDetail.Text = `{state.count}/{state.max} players - {state.mapName}{if state.friendsOnly then " - Friends" else ""}`
 			startButton.Visible = kind == "hosting"
 			show(bar, true)
 		elseif kind == "launching" then
-			open(nil)
 			barLine.Text = "STARTING..."
 			barDetail.Text = state.title or ""
 			startButton.Visible = false
 			show(bar, true)
 		else
-			open(nil)
 			show(bar, false)
 		end
 	end)

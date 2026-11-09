@@ -76,6 +76,14 @@ function Progress.removeRun(raw: any, key: string): Data
 	return data
 end
 
+-- The run was erased (New Game, Delete): it leaves the list and its payment, so the fresh run on the
+-- same key pays when it fills. Raindrops already paid and cleared maps stay. Returns a new table.
+function Progress.forgetRun(raw: any, key: string): Data
+	local data = Progress.removeRun(raw, key)
+	data.paidRuns[key] = nil
+	return data
+end
+
 -- Has the ending of run runKey already paid this player?
 function Progress.isPaid(raw: any, runKey: string): boolean
 	return Progress.sanitize(raw).paidRuns[runKey] == true

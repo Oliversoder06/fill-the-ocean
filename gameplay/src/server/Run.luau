@@ -28,7 +28,8 @@
 -- itemId, areaId) (saved per player in `assign`), their water poured on a tick and paid to the owner,
 -- faster while the owner works the same area (state.workArea, set by every accepted scoop and pour).
 -- Ticked pay (buildings, staff) waits in server/Payroll and is paid in batches.
--- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
+-- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill, or Admin("reset")
+-- to start the run over for the same team and map while everyone stays (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
 -- team, and there is no party wait.
@@ -86,6 +87,7 @@ local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action p
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
 local LOOK_LIMIT = 80 -- degrees up or down
+local RESET_COOLDOWN = 10 -- seconds between admin run resets (each rebuilds the world and saves)
 local AUTOSAVE_SECONDS = 60
 local CLOSE_SAVE_SECONDS = 25 -- BindToClose waits this long at most for the last save (Roblox allows 30)
 local END_SAVE_SECONDS = 15 -- the ending waits this long at most for the finished run to be stored
@@ -692,15 +694,9 @@ local function tryStart()
 	end
 end
 
-local function onPlayerAdded(player: Player)
-	-- Default deny: only the lobby's party plays here. Anyone else (a friend who followed in, a
-	-- direct link, a public or VIP server) goes to the lobby, as does everyone once the run is closed.
-	if run.closed or not (run.session and Session.admits(run.session, player.UserId)) then
-		sendToLobby({ player }, "not part of a run from the lobby")
-		return
-	end
-	Payroll.payNow() -- what the buildings made before they came is the others'
-	states[player] = {
+-- A player's state at the start of a run (and after an admin reset).
+local function newState()
+	return {
 		money = 0,
 		carried = 0, -- litres in the tool
 		carriedValue = 0, -- their coins before coinBonus (Water.mix: each area's litres at its pay)
@@ -726,6 +722,17 @@ local function onPlayerAdded(player: Player)
 		workedAt = -math.huge,
 		nearLifeguard = false, -- near a Source a Lifeguard works (server/Staff): walking is faster
 	}
+end
+
+local function onPlayerAdded(player: Player)
+	-- Default deny: only the lobby's party plays here. Anyone else (a friend who followed in, a
+	-- direct link, a public or VIP server) goes to the lobby, as does everyone once the run is closed.
+	if run.closed or not (run.session and Session.admits(run.session, player.UserId)) then
+		sendToLobby({ player }, "not part of a run from the lobby")
+		return
+	end
+	Payroll.payNow() -- what the buildings made before they came is the others'
+	states[player] = newState()
 	if run.save then
 		applySaved(player)
 	end
@@ -846,16 +853,60 @@ local function jumpFill(fraction: number)
 	checkFull()
 end
 
--- Admin window (client/Admin): jump the ocean's fill to a fraction 0-1. Only while playing, so it
--- never races the ending (checkFull leaves "playing" at once, which also stops repeat clicks).
-local function onAdmin(player: Player, fraction: unknown)
+-- Admin "Reset run": the run starts over for the same team and map while everyone stays. A blank save
+-- (RunSave.blank: no water, gates, rocks, buildings or boosts) replaces it, every player starts fresh
+-- (money, levels, items, staff posts), the world is rebuilt from it (gates shut, rocks back, plots
+-- empty), and it is saved. Leaving "playing" for the swap puts vehicles, hoses and jetpacks away and
+-- drops scoops in flight (their state is replaced).
+local function resetRun()
+	setPhase("loading")
+	endBoost()
+	Payroll.payNow() -- so nothing earned before the reset is paid after it
+	local save = RunSave.blank(run.save :: RunSave.Save, os.time())
+	run.save = save
+	for _, area in Config.areas do
+		if area.model then
+			Map.closeGate(ocean, area)
+		end
+	end
+	publishGates()
+	Mechanics.load(save)
+	Buildings.load(save)
+	setWater(0)
+	for player in states do
+		states[player] = newState()
+		moveToSpawn(player)
+	end
+	refreshAll()
+	run.playBase, run.playSince = 0, os.clock()
+	setGlobal("PlaySeconds", 0)
+	setGlobal("RunStartedAt", workspace:GetServerTimeNow())
+	setPhase("playing")
+	card("The run was reset")
+	task.spawn(saveRun, "admin reset")
+end
+
+local lastResetAt = -math.huge
+
+-- Admin window (client/Admin): jump the ocean's fill to a fraction 0-1, or "reset" the run (at most
+-- once per RESET_COOLDOWN). Only while playing, so it never races the ending (checkFull leaves
+-- "playing" at once, which also stops repeat clicks).
+local function onAdmin(player: Player, value: unknown)
 	if not Admins[player.UserId] or run.phase ~= "playing" then
 		return
 	end
-	if type(fraction) ~= "number" or fraction ~= fraction or fraction < 0 or fraction > 1 then
+	if value == "reset" then
+		local now = os.clock()
+		if now - lastResetAt >= RESET_COOLDOWN then
+			lastResetAt = now
+			resetRun()
+		end
 		return
 	end
-	jumpFill(fraction)
+	if type(value) ~= "number" or value ~= value or value < 0 or value > 1 then
+		return
+	end
+	jumpFill(value)
 end
 
 local function rootOf(player: Player): BasePart?

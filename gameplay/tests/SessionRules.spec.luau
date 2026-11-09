@@ -56,6 +56,37 @@ function tests.load_says_who_must_step_off(t)
 	t.expectEq(SessionRules.loadError({ 11, 22 }, { 11, 22, 11 }), nil)
 end
 
+-- The team a new party would be for (padIds: the host first): the host alone for a solo party, or
+-- everyone on the pad when 2 to maxPlayers stand there; nil when it can't be known yet.
+function tests.new_team_is_the_host_alone_for_solo(t)
+	local team = SessionRules.newTeam(1, { 11, 22 })
+	t.expectEq(team and table.concat(team, ","), "11")
+	t.expectEq(SessionRules.newTeam(1, {}), nil)
+end
+
+function tests.new_team_needs_two_to_max_on_the_pad(t)
+	local team = SessionRules.newTeam(3, { 11, 22 })
+	t.expectEq(team and table.concat(team, ","), "11,22")
+	t.expectEq(SessionRules.newTeam(3, { 11 }), nil, "a party of 3 with only the host is no team yet")
+	t.expectEq(SessionRules.newTeam(2, { 11, 22, 33 }), nil, "more on the pad than the party holds")
+end
+
+-- One save per map per team: the saved run a new party would start over.
+function tests.saved_for_finds_the_same_map_and_team(t)
+	local runs = {
+		{ mapId = "map1", memberIds = { 11, 22 } },
+		{ mapId = "map2", memberIds = { 11 } },
+		{ mapId = "map1", memberIds = { 11 } },
+	}
+	t.expectEq(SessionRules.savedFor(runs, "map1", { 11 }), 3)
+	t.expectEq(SessionRules.savedFor(runs, "map1", { 22, 11 }), 1, "any order")
+	t.expectEq(SessionRules.savedFor(runs, "map2", { 11 }), 2)
+	t.expectEq(SessionRules.savedFor(runs, "map2", { 11, 22 }), nil, "another team")
+	t.expectEq(SessionRules.savedFor(runs, "map1", { 11, 22, 33 }), nil, "an extra player")
+	t.expectEq(SessionRules.savedFor(runs, "map1", nil), nil, "no team yet")
+	t.expectEq(SessionRules.savedFor({}, "map1", { 11 }), nil)
+end
+
 function tests.join_checks(t)
 	local session = { maxPlayers = 2, friendsOnly = false }
 	t.expectEq(SessionRules.joinError(session, 1, false), nil)

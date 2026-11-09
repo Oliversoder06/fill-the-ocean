@@ -29,7 +29,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
   Both projects also map `common/` -> ReplicatedStorage.Common (save progress, run
   tickets, retries, place IDs) and declare their RemoteEvents in ReplicatedStorage.Remotes.
   gameplay also maps `vendor/Animation` -> ReplicatedStorage.Animation (the owner's roblox-animation
-  runtime, vendored with its LICENSE and PROVENANCE; staff bodies use it).
+  runtime, vendored with its LICENSE and PROVENANCE; staff bodies use it). lobby maps gameplay's
+  `shared/Config`, `Water` and `Admins` into ServerStorage.GameplayShared (server only).
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
@@ -52,7 +53,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.
   - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, sign with Title and Status labels; any
-    pad hosts a party), `StarterGui.LobbyHud`.
+    pad hosts a party), `StarterGui.LobbyHud` (`PadScreen` with `CreateParty`, `SavedRuns` and
+    `Confirm` side by side on one screen; `Admin.ResetProfile` for admins).
 - The ocean is `workspace.Ocean` at the origin: one straight beach (shore along X, sea toward -Z)
   facing a terrain seabed (y -28) that runs to the horizon; its `Water` holds 5 extra `Tile` parts
   (2048 studs each, the part size cap) that rise with it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map

@@ -96,6 +96,21 @@ function tests.remove_unknown_run_changes_nothing(t)
 	t.expectEq(#Progress.removeRun(nil, "map1_1").runs, 0)
 end
 
+-- An erased run (New Game, Delete) leaves the list and its payment, so the fresh run on the same
+-- key pays its Raindrops when it fills.
+function tests.forget_run_drops_the_key_and_its_payment(t)
+	local raw = { raindrops = 7, runs = { "map1_1", "map1_2" }, mapsCleared = { map1 = true }, paidRuns = { map1_1 = true, map1_2 = true } }
+	local after = Progress.forgetRun(raw, "map1_1")
+	t.expectEq(table.concat(after.runs, ","), "map1_2")
+	t.expectEq(after.paidRuns.map1_1, nil)
+	t.expectEq(after.paidRuns.map1_2, true, "other runs stay paid")
+	t.expectEq(after.raindrops, 7, "Raindrops already paid are kept")
+	t.expectEq(after.mapsCleared.map1, true, "a cleared map stays cleared")
+	t.expectEq(#raw.runs, 2, "a new table")
+	t.expectEq(raw.paidRuns.map1_1, true)
+	t.expectEq(Progress.isPaid(Progress.forgetRun(nil, "map1_1"), "map1_1"), false)
+end
+
 function tests.clear_map_adds_raindrops_and_marks_the_map(t)
 	local after = Progress.clearMap({ raindrops = 10, runs = { "map1_1" } }, "map1", 100, "map1_1")
 	t.expectEq(after.raindrops, 110)

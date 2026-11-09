@@ -67,6 +67,20 @@ function PlayerData.removeRun(userId: number, runKey: string): (Progress.Data?, 
 	end)
 end
 
+-- The run was erased (Progress.forgetRun): off the list, and its ending may pay again.
+function PlayerData.forgetRun(userId: number, runKey: string): (Progress.Data?, string?)
+	return update(userId, "forget run", function(old)
+		return Progress.forgetRun(old, runKey)
+	end)
+end
+
+-- An admin's profile reset: back to Progress.default (no Raindrops, runs or cleared maps).
+function PlayerData.reset(userId: number): (Progress.Data?, string?)
+	return update(userId, "reset", function()
+		return Progress.default()
+	end)
+end
+
 -- The player's team filled mapId's ocean in run runKey: pays the Raindrops (once per run) and marks
 -- the map cleared.
 function PlayerData.clearMap(userId: number, mapId: string, raindrops: number, runKey: string): (Progress.Data?, string?)

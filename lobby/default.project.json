@@ -29,6 +29,9 @@
         },
         "SessionAction": {
           "$className": "RemoteEvent"
+        },
+        "Admin": {
+          "$className": "RemoteEvent"
         }
       }
     },
@@ -45,6 +48,9 @@
         },
         "Water": {
           "$path": "../gameplay/src/shared/Water.luau"
+        },
+        "Admins": {
+          "$path": "../gameplay/src/shared/Admins.luau"
         }
       }
     },
