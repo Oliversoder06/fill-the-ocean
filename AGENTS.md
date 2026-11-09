@@ -95,10 +95,18 @@ Client (`src/client/`, all started from `init.client.luau`):
   layer by layer; timing in `shared/Reveal.luau`).
 - `Hotbar.luau`: the tool slot (1 / gamepad X / click to equip or unequip), one slot per owned
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
-  with `Ease.pop`; the jetpack's fuel while it is out).
+  with `Ease.pop`) for only what is in hand, its model at the left end: the tool's water, the Water
+  Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
+  shows `Hotbar.Status` text instead (clipped? flowing L/s).
+- `Guide.luau`: the first-minute tutorial (new saves, until the first purchase): `Hud.Guide`
+  objective at the top centre, yellow ground chevrons toward the step's place (clones of
+  `Vfx.GuideChevron`, maths in `shared/GuideTrail`) and a click hand (clone of
+  `Hud.Templates.ClickHand`) tapping the button to press. `Guide.pointTo(position?)` leads the
+  chevrons anywhere once the tutorial isn't showing (nil hides them).
 - `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
 - `Vehicles.luau`: drives your own vehicle while seated (sets its `Drive` / `Turn` constraints from
-  the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `hoseReady` (on foot by
+  the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `driving` (seated in
+  your own: CameraFeel goes third person, Viewmodel hides), `hoseReady` (on foot by
   your truck with water: Action sprays it) and `gauge` (Hotbar shows the tank).
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
 - `Buildings.luau`: the build picker (`Hud.BuildPicker`, options cloned from
@@ -107,9 +115,11 @@ Client (`src/client/`, all started from `init.client.luau`):
   `ReplicatedStorage.Staff.<Model>` (anchored root, `workspace.StaffBodies`) walk their loop
   (Source/Pour, Fire Station/refill bay, plots), posed by the animation runtime's `AnimPlayer` with
   `shared/StaffClips` (baked once per model); at most 30, nearest first, none past 250 studs.
-- `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
+- `Viewmodel.luau`: first-person tool or hotbar gadget (`ToolModels.Gadgets.<model>`; sweep / pour
+  poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
-  tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
+  tilt (`CameraFeel.walk()` shares the walk cycle); third person (Classic, zoom 20-30) while
+  driving your own vehicle, and `Hud`'s cursor code frees the mouse then. `Mood.luau`: lighting.
 
 Shared (`src/shared/`, pure unless noted):
 - `Config.luau`: every run number: the one ocean (`Config.ocean`: flat `coinsPerLitre`, the fill
@@ -126,7 +136,8 @@ Shared (`src/shared/`, pure unless noted):
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
-  numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check):
+  numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check),
+  `GuideTrail.luau` (where the guide's ground chevrons sit and which show):
   maths, all Lune-tested (`Cues` too).
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the

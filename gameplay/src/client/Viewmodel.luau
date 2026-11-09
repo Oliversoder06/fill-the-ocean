@@ -1,19 +1,24 @@
--- First-person copy of the player's current tool, lower right of the view, held by a copy of the
--- player's own right hand and forearm. It grows a little with each tool tier, shows its water while
--- carrying, sweeps through the water on each scoop, tips over on a pour (poses from shared/ToolView,
--- timing from client/Action) and springs back up after. The hand wobbles with each step (walk cycle
--- from client/CameraFeel) and trails a little behind camera turns.
+-- First-person copy of what the player holds, lower right of the view, held by a copy of the
+-- player's own right hand and forearm: the hotbar gadget out (ToolModels.Gadgets.<model>), else the
+-- tool while it is out, as server/HeldTools puts in the character's hand. The tool grows a little
+-- with each tier. It shows its water while carrying, sweeps through the water on each scoop, tips
+-- over on a pour (poses from shared/ToolView, timing from client/Action) and springs back up after.
+-- The hand wobbles with each step (walk cycle from client/CameraFeel) and trails a little behind
+-- camera turns. Nothing shows while driving (client/Vehicles: the camera is third person then).
 -- A newly bought tool waits below the screen while the shop is open, then swings up into the hand.
 -- Runs after CameraFeel, so it follows the camera's bob and tilt.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local Config = require(ReplicatedStorage.Shared.Config)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local ToolView = require(ReplicatedStorage.Shared.ToolView)
+local Items = require(ReplicatedStorage.Common.Items)
 local Action = require(script.Parent.Action)
 local CameraFeel = require(script.Parent.CameraFeel)
+local Vehicles = require(script.Parent.Vehicles)
 
 local BLEND_SECONDS = 0.08 -- eases into each new action's pose, so back-to-back sweeps don't snap
 
@@ -137,10 +142,26 @@ local function shopOpen(): boolean
 	return shop ~= nil and shop:IsA("GuiObject") and shop.Visible
 end
 
+-- What is in hand: its model name, its ToolModels subfolder ("Gadgets" or nil) and its tier (a
+-- gadget shows at the first tool's size); nil when nothing is.
+local function inHand(): (string?, string?, number)
+	local gadgetId = player:GetAttribute("Gadget")
+	local gadget = if type(gadgetId) == "string" and gadgetId ~= "" then Items.get(Config, gadgetId) else nil
+	if gadget then
+		return gadget.model, "Gadgets", 1
+	end
+	local modelName, tier = player:GetAttribute("ToolModel"), player:GetAttribute("ToolTier")
+	if player:GetAttribute("Equipped") == false or type(modelName) ~= "string" or type(tier) ~= "number" then
+		return nil, nil, 0
+	end
+	return modelName, nil, tier
+end
+
 function Viewmodel.start()
 	local current: Model? = nil
-	local currentName: string? = nil
+	local currentKey: string? = nil -- "<sub>.<model>" of what shows
 	local currentTier = 0
+	local toolTier = 0 -- the last tool tier held, so a bought tool swings in
 	local viewSize = ToolView.VIEW_START
 	local centerOffset = Vector3.zero -- bounding-box centre seen from the grip (pivot), after scaling
 	local shownWater: boolean? = nil
@@ -154,8 +175,8 @@ function Viewmodel.start()
 	local sway = Vector2.zero -- (side, down) the hand trails behind camera turns
 	local lastLook: CFrame? = nil
 
-	local function load(modelName: string, tier: number): boolean
-		local template = ToolModels.find(modelName)
+	local function load(modelName: string, sub: string?, tier: number): boolean
+		local template = ToolModels.find(modelName, sub)
 		if not template then
 			return false -- not replicated yet; try again next frame
 		end
@@ -181,22 +202,20 @@ function Viewmodel.start()
 		end
 		model.Name = "Viewmodel"
 		model.Parent = workspace.CurrentCamera
-		current, currentName, currentTier = model, modelName, tier
+		current, currentKey, currentTier = model, `{sub}.{modelName}`, tier
 		shownWater = nil
 		return true
 	end
 
 	RunService:BindToRenderStep("Viewmodel", Enum.RenderPriority.Camera.Value + 2, function(dt: number)
 		local camera = workspace.CurrentCamera
-		local modelName = player:GetAttribute("ToolModel")
-		local tier = player:GetAttribute("ToolTier")
+		local modelName, sub, tier = inHand()
 		local character = player.Character
 		local alive = character and character:FindFirstChildOfClass("Humanoid")
-		local equipped = player:GetAttribute("Equipped") ~= false
-		if type(modelName) ~= "string" or type(tier) ~= "number" or not alive or not equipped or camera.CameraType ~= Enum.CameraType.Custom then
+		if not modelName or not alive or camera.CameraType ~= Enum.CameraType.Custom or Vehicles.driving() then
 			if current then
 				current:Destroy()
-				current, currentName = nil, nil
+				current, currentKey = nil, nil
 			end
 			if arm and arm.model.Parent then
 				arm.model.Parent = nil
@@ -204,11 +223,14 @@ function Viewmodel.start()
 			lastLook = nil
 			return
 		end
-		local changed = modelName ~= currentName or tier ~= currentTier
-		if changed and currentTier > 0 and tier > currentTier then
-			revealPending = true -- a bought tool: swing it in once the shop is closed
+		local changed = `{sub}.{modelName}` ~= currentKey or tier ~= currentTier
+		if not sub then
+			if toolTier > 0 and tier > toolTier then
+				revealPending = true -- a bought tool: swing it in once the shop is closed
+			end
+			toolTier = tier
 		end
-		if (changed or not current or current.Parent ~= camera) and not load(modelName, tier) then
+		if (changed or not current or current.Parent ~= camera) and not load(modelName, sub, tier) then
 			return
 		end
 		local model = current :: Model

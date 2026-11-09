@@ -49,10 +49,13 @@ Cues.coins = {
 	burstVolume = 0.35,
 }
 
--- The first-minute guide (client/Guide): `beam` is a Beam in ReplicatedStorage.Vfx from the player to
--- the current goal.
+-- The guide (client/Guide): `chevron` is a Model or BasePart in ReplicatedStorage.Vfx, cloned along
+-- the ground toward the current goal (placement in shared/GuideTrail). The click hand bobs
+-- `handBob` pixels, `handSpeed` taps a second, over the GUI element to click.
 Cues.guide = {
-	beam = "GuideBeam",
+	chevron = "GuideChevron",
+	handBob = 10,
+	handSpeed = 1.6,
 }
 
 -- Windows opening and closing (client/Window): one whoosh, a little lower on close.

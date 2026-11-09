@@ -1,12 +1,13 @@
 -- The hotbar (StarterGui.Hud.Hotbar, built in Studio): one slot showing the current tool. Press 1,
--- gamepad X or click the slot to put the tool away or take it out (the server decides). The fill
--- bar above the slot shows the tool at its left end and "carried / capacity" litres, only while
--- the tool or a gadget is out (the Jetpack Tank's fuel while it is out).
+-- gamepad X or click the slot to put the tool away or take it out (the server decides).
 -- Gadget slots (Hotbar.Gadgets.<itemId>, one per hotbar gadget in Config.items, built like Slot):
 -- shown once owned; press 2, 3, 4 (in config order), gamepad DPadRight (next one) or click a slot to
 -- take that gadget out instead of the tool, again to put it away. The server decides (Equip remote).
--- While the player drives their vehicle or stands by its hose (client/Vehicles.gauge), the fill bar
--- shows its tank instead.
+-- The fill bar above the slots shows only what the thing in hand uses, its model at the left end:
+-- the tool's "carried / capacity" litres, the Water Gun's water, the Jetpack Tank's fuel, or, while
+-- the player drives their vehicle or stands by its hose (client/Vehicles.gauge), its tank. The Garden
+-- Hose has no bar: Hotbar.Status says whether it is clipped and how fast it flows. Nothing in hand:
+-- neither shows.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -50,7 +51,8 @@ function Hotbar.start()
 	local fill = Hud.find(fillBar, "Fill")
 	local fillLabel = Hud.find(fillBar, "Label")
 	local fillPop = Hud.find(fillBar, "Pop")
-	local fillTool = Hud.find(fillBar, "Tool") -- the tool's model at the bar's left end
+	local fillTool = Hud.find(fillBar, "Tool") -- the model of what the bar measures, at its left end
+	local status = Hud.find(bar, "Status") -- the Garden Hose's line instead of the bar
 	local slot = Hud.find(bar, "Slot")
 	local ring = Hud.find(slot, "Ring")
 	local view = Hud.find(slot, "View")
@@ -134,7 +136,21 @@ function Hotbar.start()
 		TweenService:Create(press, QUICK, { Scale = 1 }):Play()
 	end)
 
+	-- The template for the bar's icon: the vehicle's, a gadget's or the tool's; nil until replicated.
+	local function iconOf(kind: string, gadget: Config.Item?, toolModel: string): Model?
+		if kind == "tank" then
+			local id = player:GetAttribute("Vehicle")
+			local item = if type(id) == "string" then Items.get(Config, id) else nil
+			local folder = ReplicatedStorage:FindFirstChild("Vehicles")
+			local model = item and folder and folder:FindFirstChild(item.model)
+			return if model and model:IsA("Model") then model else nil
+		end
+		return if gadget then ToolModels.find(gadget.model, "Gadgets") else ToolModels.find(toolModel)
+	end
+
 	local shownModel: string? = nil
+	local shownIcon: Model? = nil
+	local shownKind: string? = nil
 	-- The bar springs to each new fill (Ease.pop) instead of jumping.
 	local shown, from, to, changedAt = 0, 0, 0, -math.huge
 	RunService.RenderStepped:Connect(function()
@@ -147,7 +163,6 @@ function Hotbar.start()
 			local template = ToolModels.find(modelName)
 			if template then -- nil until replicated; try again next frame
 				ToolModels.showIn(view, template)
-				ToolModels.showIn(fillTool, template)
 				shownModel = modelName
 			end
 		end
@@ -170,33 +185,52 @@ function Hotbar.start()
 		end
 		set(slot, "ImageColor3", if equipped then colors.toolTag else colors.locked)
 		set(ring, "Visible", equipped)
-		local jetpack = out == "jetpackTank"
+
+		-- What the bar measures: the vehicle's tank, else the gadget out, else the tool while it is out.
+		local gadget = if type(out) == "string" and out ~= "" then Items.get(Config, out) else nil
 		local tank, tankMax = Vehicles.gauge()
-		set(fillBar, "Visible", tank ~= nil or equipped or (type(out) == "string" and out ~= ""))
-		if fillBar.Visible then
-			-- The vehicle's tank, else the jetpack's fuel while it is out, else the water carried.
-			local carried = player:GetAttribute("Carried") or 0
-			local capacity = player:GetAttribute("Capacity") or 0
-			if tank then
-				carried, capacity = tank, tankMax :: number
-			elseif jetpack then
-				carried = player:GetAttribute("Fuel") or 0
-				capacity = Items.gadgetStat(Config, itemState, "jetpackTank", "flightSeconds") or 0
-			end
-			local ratio = if capacity > 0 then math.clamp(carried / capacity, 0, 1) else 0
-			local now = os.clock()
-			if ratio ~= to then
-				if ratio > to and not jetpack and not tank then -- refuelling and hydrants rise every tick: no swell
-					fillPop.Scale = FILL_POP_SCALE
-					TweenService:Create(fillPop, FILL_POP, { Scale = 1 }):Play()
-				end
-				from, to, changedAt = shown, ratio, now
-			end
-			shown = math.clamp(Ease.pop(from, to, now - changedAt), 0, 1)
-			set(fill, "Size", UDim2.fromScale(shown, 1))
-			set(fill, "Visible", shown > 0)
-			set(fillLabel, "Text", if tank then `Tank {litres(carried)} / {litres(capacity)}` elseif jetpack then `Fuel {string.format("%.1f", carried)}s` else `{litres(carried)} / {litres(capacity)}`)
+		local kind = if tank then "tank" elseif gadget then gadget.id elseif equipped then "tool" else nil
+		local hose = kind == "gardenHose"
+		set(fillBar, "Visible", kind ~= nil and not hose)
+		set(status, "Visible", hose)
+		if hose then
+			local rate = Items.gadgetStat(Config, itemState, "gardenHose", "rate") or 0
+			set(status, "Text", if (player:GetAttribute("HoseArea") or 0) == 0 then "Clip to a tap" elseif player:GetAttribute("Spraying") == true then `Flowing {litres(rate)} L/s` else "Clipped to the tap")
 		end
+		if not fillBar.Visible then
+			shownKind = nil
+			return
+		end
+		local icon = iconOf(kind :: string, gadget, modelName)
+		if icon and icon ~= shownIcon then
+			ToolModels.showIn(fillTool, icon)
+			shownIcon = icon
+		end
+		local jetpack = kind == "jetpackTank"
+		local carried = player:GetAttribute("Carried") or 0
+		local capacity = player:GetAttribute("Capacity") or 0
+		if tank then
+			carried, capacity = tank, tankMax :: number
+		elseif jetpack then
+			carried = player:GetAttribute("Fuel") or 0
+			capacity = Items.gadgetStat(Config, itemState, "jetpackTank", "flightSeconds") or 0
+		end
+		local ratio = if capacity > 0 then math.clamp(carried / capacity, 0, 1) else 0
+		local now = os.clock()
+		if kind ~= shownKind then -- something else in hand: its bar starts where it stands
+			shownKind = kind
+			shown, from, to, changedAt = ratio, ratio, ratio, -math.huge
+		elseif ratio ~= to then
+			if ratio > to and not jetpack and not tank then -- refuelling and hydrants rise every tick: no swell
+				fillPop.Scale = FILL_POP_SCALE
+				TweenService:Create(fillPop, FILL_POP, { Scale = 1 }):Play()
+			end
+			from, to, changedAt = shown, ratio, now
+		end
+		shown = math.clamp(Ease.pop(from, to, now - changedAt), 0, 1)
+		set(fill, "Size", UDim2.fromScale(shown, 1))
+		set(fill, "Visible", shown > 0)
+		set(fillLabel, "Text", if tank then `Tank {litres(carried)} / {litres(capacity)}` elseif jetpack then `Fuel {string.format("%.1f", carried)}s` elseif kind == "waterGun" then `Gun water {litres(carried)} / {litres(capacity)}` else `{litres(carried)} / {litres(capacity)}`)
 	end)
 end
 

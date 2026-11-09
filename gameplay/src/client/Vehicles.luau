@@ -4,7 +4,7 @@
 -- attribute and steer (A/D) turns it, like a car (no turning on the spot, reverse turns the other
 -- way). The Water Bomber also climbs and dives: E / gamepad R1 / touch "Up", Q / L1 / touch "Down",
 -- bound only while flying it. Action and Hotbar ask here whether the player holds their truck's hose
--- and for the tank gauge.
+-- and for the tank gauge; CameraFeel and Viewmodel whether they drive.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,6 +31,14 @@ end
 
 local function humanoid(): Humanoid?
 	return player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+end
+
+-- Whether the local player sits in their own vehicle's seat (the camera goes third person:
+-- client/CameraFeel, Viewmodel).
+function Vehicles.driving(): boolean
+	local _, _, seat = mine()
+	local h = humanoid()
+	return seat ~= nil and h ~= nil and h.SeatPart == seat
 end
 
 -- Where its hose comes off (as the server measures it): its HoseReel, else its PrimaryPart.

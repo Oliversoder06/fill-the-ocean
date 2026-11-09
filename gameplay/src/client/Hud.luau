@@ -286,8 +286,10 @@ function Hud.start()
 		if windowOpen then
 			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		end
-		set(UserInputService, "MouseIconEnabled", windowOpen)
-		set(crosshair, "Visible", not windowOpen)
+		-- Driving is third person (client/CameraFeel): the camera frees the mouse and nothing is aimed.
+		local cursorFree = windowOpen or player.CameraMode ~= Enum.CameraMode.LockFirstPerson
+		set(UserInputService, "MouseIconEnabled", cursorFree)
+		set(crosshair, "Visible", not cursorFree)
 	end)
 
 	local finalTime: number? = nil -- time played as last shown while playing

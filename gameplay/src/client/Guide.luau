@@ -1,28 +1,41 @@
--- The first-minute guide (StarterGui.Hud.Guide, StarterGui.GuideMarker, Vfx.GuideBeam, all built in
--- Studio): one goal at a time for a new save, until the first purchase. Walk to the well, scoop
--- until full, carry it to the shore, pour, open the shop, buy. Each step comes from live state
--- (where you stand, Carried, Money, the shop), so walking away goes back a step and nothing is
--- saved. The guide says what to do; Action's ActHint says which key. Skip hides it for the session.
+-- The first-minute guide (StarterGui.Hud.Guide, built in Studio): one goal at a time for a new save,
+-- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
+-- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
+-- state (where you stand, Carried, Money, the shop), so walking away goes back a step and nothing is
+-- saved. The goal says what to do, never where to click: yellow chevrons on the ground (clones of
+-- ReplicatedStorage.Vfx.GuideChevron, placed by shared/GuideTrail) lead to the place, a click hand
+-- (a clone of Hud.Templates.ClickHand) taps the button to press, and Action's ActHint says which
+-- key. Skip hides it for the session. Once it is done, Guide.pointTo leads the chevrons anywhere.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
+local GuideTrail = require(ReplicatedStorage.Shared.GuideTrail)
 local Hud = require(script.Parent.Hud)
 
 local player = Players.LocalPlayer
 local set = Hud.set
 
-local BEAM = Cues.guide.beam
+local CUE = Cues.guide
 local STEPS = 6
 local DONE_SECONDS = 3
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local BOB_PIXELS, BOB_SPEED = 6, 4 -- marker arrow bob height, and radians per second
+local RAY_UP, RAY_DOWN = 8, 40 -- studs above the trail line a chevron's ground ray starts, and its length
+local LIFT = 0.05 -- studs a chevron floats over the ground, so it never flickers into it
 
 local Guide = {}
+
+-- Where another module wants the chevrons to lead while the first-minute guide isn't showing.
+local pointed: Vector3? = nil
+
+-- Lead the ground chevrons to `position` (nil hides them). The first-minute guide's own goals win
+-- while it shows.
+function Guide.pointTo(position: Vector3?)
+	pointed = position
+end
 
 local function boughtAny(levels: { [string]: number }): boolean
 	for _, level in levels do
@@ -56,59 +69,68 @@ local function target(ocean: Model, name: string): Attachment?
 	return found
 end
 
-local function openText(): string
-	local input = UserInputService:GetLastInputType()
-	if input == Enum.UserInputType.Touch then
-		return "Tap UPGRADES"
-	elseif input.Name:sub(1, 7) == "Gamepad" then
-		return "Press Y to open UPGRADES"
+-- Chevrons only show and never block: no collisions, rays, touches or shadows.
+local function quiet(instance: Instance)
+	if instance:IsA("BasePart") then
+		instance.Anchored = true
+		instance.CanCollide = false
+		instance.CanQuery = false
+		instance.CanTouch = false
+		instance.CastShadow = false
 	end
-	return "Open UPGRADES (TAB)"
-end
-
--- client/Hotbar binds key 1 and ButtonX.
-local function toolText(): string
-	local input = UserInputService:GetLastInputType()
-	if input == Enum.UserInputType.Touch then
-		return "Take out your tool (tap the slot)"
-	elseif input.Name:sub(1, 7) == "Gamepad" then
-		return "Take out your tool (press X)"
-	end
-	return "Take out your tool (press 1)"
 end
 
 function Guide.start()
-	local playerGui = player:WaitForChild("PlayerGui")
-	local gui = playerGui:WaitForChild("Hud")
+	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local panel = Hud.find(gui, "Guide")
 	local pop = Hud.find(panel, "Pop") :: UIScale
-	local stepText = Hud.find(panel, "Step.Text")
+	local objective = Hud.find(panel, "Objective")
 	local text = Hud.find(panel, "Text")
 	local skip = Hud.find(panel, "SkipButton")
 	local shop = Hud.find(gui, "Shop")
 	local admin = Hud.find(gui, "Admin")
-	local upgradesRing = Hud.find(gui, "UpgradesButton.GuideRing")
-	local buyRing = Hud.find(gui, "Shop.Body.Content.Detail.BuyButton.GuideRing")
-	local marker = playerGui:WaitForChild("GuideMarker")
-	assert(marker:IsA("BillboardGui"), "StarterGui.GuideMarker must be a BillboardGui")
-	local markerLabel = Hud.find(marker, "Label")
-	local arrow = Hud.find(marker, "Arrow")
-	local arrowRest = arrow.Position
-	local vfx = ReplicatedStorage:WaitForChild("Vfx")
-	local beamTemplate = vfx:FindFirstChild(BEAM)
-	assert(beamTemplate and beamTemplate:IsA("Beam"), `ReplicatedStorage.Vfx is missing {BEAM} (a Beam)`)
+	local toolSlot = Hud.find(gui, "Hotbar.Slot")
+	local upgrades = Hud.find(gui, "UpgradesButton")
+	local upgradesRing = Hud.find(upgrades, "GuideRing")
+	local closeButton = Hud.find(shop, "CloseButton")
+	local toolsTab = Hud.find(shop, "Body.Tabs.Tools")
+	local buyButton = Hud.find(shop, "Body.Content.Detail.BuyButton")
+	local buyRing = Hud.find(buyButton, "GuideRing")
+	local handTemplate = Hud.find(gui, "Templates.ClickHand")
+	assert(handTemplate:IsA("GuiObject"), "StarterGui.Hud.Templates.ClickHand must be an ImageLabel or TextLabel")
+	local hand = handTemplate:Clone() :: GuiObject
+	hand.Visible = false
+	hand.Parent = gui
+	local vfx = ReplicatedStorage:WaitForChild("Vfx", 10)
+	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
+	local chevronTemplate = vfx:WaitForChild(CUE.chevron, 10)
+	assert(chevronTemplate and (chevronTemplate:IsA("Model") or chevronTemplate:IsA("BasePart")), `ReplicatedStorage.Vfx is missing {CUE.chevron} (a Model or BasePart)`)
 	local tiles = {}
 	for _, track in Config.tracks do
 		local holder = if track.panel == "tool" then "ToolPanel" else "BoostPanel"
-		tiles[track.id] = Hud.find(gui, `Shop.Body.Content.{holder}.Tiles.{track.id}.Button.Ring`)
+		local button = Hud.find(gui, `Shop.Body.Content.{holder}.Tiles.{track.id}.Button`)
+		tiles[track.id] = { button = button, ring = Hud.find(button, "Ring") }
 	end
+
+	-- The trail's pool: each chevron sits in the camera while it shows, unparented while it doesn't.
+	local chevrons: { PVInstance } = {}
+	local placed: { [number]: CFrame } = {}
+	for i = 1, GuideTrail.COUNT do
+		local chevron = chevronTemplate:Clone() :: PVInstance
+		quiet(chevron)
+		for _, d in chevron:GetDescendants() do
+			quiet(d)
+		end
+		chevrons[i] = chevron
+	end
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 	-- nil until the save's levels are published; then whether this save is new.
 	local isNew: boolean? = nil
 	local finished = false
 	local doneUntil: number? = nil
 	local shownStep = 0
-	local beam: Beam? = nil
 
 	local function finish(thanks: boolean)
 		finished = true
@@ -119,32 +141,22 @@ function Guide.start()
 		finish(false)
 	end)
 
-	local function showBeam(to: Attachment?)
-		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-		local from = root and root:FindFirstChild("RootAttachment")
-		if not (to and from and from:IsA("Attachment")) then
-			if beam then
-				set(beam, "Enabled", false)
+	-- Whether `object` and every frame above it in the Hud show.
+	local function onScreen(object: GuiObject): boolean
+		local node: Instance? = object
+		while node and node ~= gui do
+			if node:IsA("GuiObject") and not node.Visible then
+				return false
 			end
-			return
+			node = node.Parent
 		end
-		if not beam or beam.Parent ~= root then -- first time, or the character respawned
-			if beam then
-				beam:Destroy()
-			end
-			beam = beamTemplate:Clone()
-			;(beam :: Beam).Attachment0 = from
-			;(beam :: Beam).Parent = root
-		end
-		local b = beam :: Beam
-		set(b, "Attachment1", to)
-		set(b, "Enabled", true)
+		return node == gui
 	end
 
 	-- Whether the shop's selected tile (the one whose Ring shows) is on sale and affordable now.
 	local function canBuySelected(levels: { [string]: number }, money: number): boolean
-		for id, ring in tiles do
-			if ring.Visible then
+		for id, tile in tiles do
+			if tile.ring.Visible then
 				local _, _, canBuy = Hud.offer(levels, id, money)
 				return canBuy
 			end
@@ -152,31 +164,32 @@ function Guide.start()
 		return false
 	end
 
-	-- The step (1-6), its text and the beam and marker targets, from live state.
-	local function current(levels: { [string]: number }, ocean: Model): (number, string, Attachment?, Attachment?, string)
+	-- The step (1-6), its goal, where the chevrons lead and the button the hand taps, from live state.
+	local function current(levels: { [string]: number }, ocean: Model): (number, string, Vector3?, GuiObject?)
 		local well, shore = target(ocean, "Source"), target(ocean, "PourPoint")
 		local source = ocean:FindFirstChild("Source")
 		local money = player:GetAttribute("Money") or 0
 		local track, cost, affordable = cheapest(levels, money)
 		if track and affordable then
 			if not shop.Visible then
-				return 5, openText(), nil, nil, ""
+				return 5, "Buy your first upgrade", nil, upgrades
 			end
 			if canBuySelected(levels, money) then
-				return 6, "Buy it!", nil, nil, ""
+				return 6, "Buy it!", nil, buyButton
 			end
-			return 6, `Pick {track.name}, then BUY`, nil, nil, ""
+			local tile = tiles[track.id].button
+			return 6, `Buy {track.name}`, nil, if onScreen(tile) then tile else toolsTab
 		end
 		if shop.Visible then
-			return 4, `Close the shop and pour more water: {Hud.money(money)} / {Hud.money(cost)} coins`, nil, nil, ""
+			return 4, `Pour more water: {Hud.money(money)} / {Hud.money(cost)} coins`, nil, closeButton
 		end
 		if player:GetAttribute("Equipped") == false then
-			return 1, toolText(), nil, nil, ""
+			return 1, "Take out your tool", nil, toolSlot
 		end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if not (root and root:IsA("BasePart") and source and source:IsA("BasePart") and well and shore) then
-			return shownStep, text.Text, nil, nil, "" -- no body yet, or the cove not streamed in
+			return shownStep, text.Text, nil, nil -- no body yet, or the cove not streamed in
 		end
 		local carried = player:GetAttribute("Carried") or 0
 		local capacity = player:GetAttribute("Capacity") or 0
@@ -184,14 +197,75 @@ function Guide.start()
 		local atWell = (root.Position - source.Position).Magnitude <= Hud.REACH
 		if carried <= 0 and not atWell then
 			local again = if money > 0 then `Again! {Hud.money(money)} / {Hud.money(cost)} coins for your first upgrade` else "Walk to the well"
-			return 1, again, well, well, "WELL"
+			return 1, again, well.WorldPosition, nil
 		elseif atWell and not full then
-			return 2, "Scoop water until your tool is full", nil, well, "WELL"
+			return 2, "Scoop water until your tool is full", nil, nil
 		end
 		if Hud.nearPour(ocean, root.Position) then
-			return 4, "Pour it in! Every litre pays coins", nil, nil, ""
+			return 4, "Pour it in! Every litre pays coins", nil, nil
 		end
-		return 3, "Carry it to the shore", shore, shore, "POUR HERE"
+		return 3, "Carry it to the shore", shore.WorldPosition, nil
+	end
+
+	-- Chevron ground spot `ahead` studs along the flat line `along` from `from` toward `goal`, turned
+	-- to point at the goal; nil over a gap or a wall.
+	local function groundAt(from: Vector3, goal: Vector3, along: Vector3, ahead: number, distance: number): CFrame?
+		local point = from + along * ahead + Vector3.yAxis * ((goal.Y - from.Y) * ahead / distance)
+		local hit = workspace:Raycast(point + Vector3.yAxis * RAY_UP, Vector3.yAxis * -RAY_DOWN, rayParams)
+		if not hit then
+			return nil
+		end
+		local up = hit.Normal
+		local look = along - up * along:Dot(up)
+		if look.Magnitude < 1e-3 then
+			return nil
+		end
+		local at = hit.Position + up * LIFT
+		return CFrame.lookAt(at, at + look.Unit, up)
+	end
+
+	-- Lays the chevrons from the player toward `goal` (nil hides them).
+	local function placeTrail(goal: Vector3?)
+		local camera = workspace.CurrentCamera
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local from = if root and root:IsA("BasePart") then root.Position else nil
+		local flat = if goal and from then Vector3.new(goal.X - from.X, 0, goal.Z - from.Z) else Vector3.zero
+		local distance = flat.Magnitude
+		if distance > GuideTrail.HIDE_NEAR then
+			local ignore: { Instance } = { camera }
+			for _, other in Players:GetPlayers() do
+				if other.Character then
+					table.insert(ignore, other.Character)
+				end
+			end
+			local staff = workspace:FindFirstChild("StaffBodies")
+			if staff then
+				table.insert(ignore, staff)
+			end
+			rayParams.FilterDescendantsInstances = ignore
+		end
+		local seconds = os.clock()
+		for i, chevron in chevrons do
+			local ahead = GuideTrail.ahead(i, seconds)
+			local at = if GuideTrail.shows(ahead, distance) then groundAt(from :: Vector3, goal :: Vector3, flat / distance, ahead, distance) else nil
+			if at and at ~= placed[i] then
+				placed[i] = at
+				chevron:PivotTo(at)
+			end
+			set(chevron, "Parent", if at then camera else nil)
+		end
+	end
+
+	-- The hand taps the middle of `button` while it shows (nil hides the hand).
+	local function pointHand(button: GuiObject?)
+		local shown = button ~= nil and onScreen(button)
+		set(hand, "Visible", shown)
+		if not shown then
+			return
+		end
+		local at = (button :: GuiObject).AbsolutePosition + (button :: GuiObject).AbsoluteSize / 2
+		local tap = math.abs(math.sin(os.clock() * math.pi * CUE.handSpeed)) * CUE.handBob
+		set(hand, "Position", UDim2.fromOffset(math.round(at.X), math.round(at.Y + tap)))
 	end
 
 	RunService.RenderStepped:Connect(function()
@@ -211,31 +285,25 @@ function Guide.start()
 			and ocean ~= nil
 			and ReplicatedStorage:GetAttribute("Phase") == "playing"
 			and not admin.Visible
-		local step, message, beamTo, markAt, markText = 0, "", nil, nil, ""
+		local step, message, goal, click = 0, "", nil, nil
 		if active and thanks then
 			step, message = STEPS, "Nice! Keep filling the ocean."
 		elseif active then
-			step, message, beamTo, markAt, markText = current(levels :: { [string]: number }, ocean :: Model)
+			step, message, goal, click = current(levels :: { [string]: number }, ocean :: Model)
 		end
 
 		set(panel, "Visible", active)
 		set(skip, "Visible", active and not thanks)
-		set(upgradesRing, "Visible", active and not thanks and step == 5)
-		set(buyRing, "Visible", active and not thanks and step == 6 and message == "Buy it!")
-		set(marker, "Enabled", markAt ~= nil)
-		set(marker, "Adornee", markAt)
-		showBeam(beamTo)
+		set(upgradesRing, "Visible", click == upgrades)
+		set(buyRing, "Visible", click == buyButton)
+		placeTrail(if active then goal else pointed)
+		pointHand(click)
 		if not active then
 			return
 		end
 		set(text, "Text", message)
-		set(stepText, "Text", `{step}/{STEPS}`)
-		set(markerLabel, "Text", markText)
-		if markAt then
-			local bob = math.sin(os.clock() * BOB_SPEED) * BOB_PIXELS
-			arrow.Position = arrowRest + UDim2.fromOffset(0, math.round(bob))
-		end
-		if step ~= shownStep then -- a new goal: the banner bounces
+		set(objective, "Text", `Objective {step}/{STEPS}`)
+		if step ~= shownStep then -- a new goal: the objective bounces
 			shownStep = step
 			pop.Scale = 1.12
 			TweenService:Create(pop, POP, { Scale = 1 }):Play()

@@ -3,11 +3,15 @@
 -- camera, and after it runs we add the tilt on top for this frame only.
 -- Bob and landing dip go through Humanoid.CameraOffset. Each dip of the bob is a footstep
 -- (CameraFeel.onStep, used by client/Footsteps).
+-- While the player drives their own vehicle (client/Vehicles.driving) the camera is third person
+-- behind it instead (Classic, zoom DRIVE_ZOOM_MIN-MAX), without bob or tilt; leaving the seat locks
+-- it back to first person.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Steps = require(ReplicatedStorage.Shared.Steps)
+local Vehicles = require(script.Parent.Vehicles)
 
 local BOB_UP = 0.18 -- studs of vertical sway at full intensity
 local BOB_SIDE = 0.1 -- studs of sideways sway at full intensity
@@ -26,6 +30,8 @@ local PITCH_PER_RISE = 0.04 -- degrees of pitch per stud/s of vertical speed
 local PITCH_PER_DIP = 5 -- degrees of forward pitch per stud of landing dip
 local TILT_MAX = 2 -- degrees, clamp for roll and pitch
 local TILT_EASE = 10 -- how quickly the tilt follows (the aim itself is never delayed)
+
+local DRIVE_ZOOM_MIN, DRIVE_ZOOM_MAX = 20, 30 -- studs behind the vehicle while driving
 
 local player = Players.LocalPlayer
 local CameraFeel = {}
@@ -54,29 +60,54 @@ end
 
 function CameraFeel.start()
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
+	local walkZoomMin, walkZoomMax = player.CameraMinZoomDistance, player.CameraMaxZoomDistance
 
 	local untilted: CFrame? = nil
 	local lastYaw: number? = nil
 	local roll, pitch = 0, 0
 	local dip, dipVelocity = 0, 0
 	local airSpeed = 0 -- fastest downward speed during the current fall
+	local driving = false
 
 	local function usable(): boolean
 		return workspace.CurrentCamera.CameraType == Enum.CameraType.Custom
 	end
 
-	-- Before the default camera: remove last frame's tilt so input applies to the real aim.
+	-- Third person behind the vehicle, or back to locked first person. The zoom range widens before it
+	-- narrows, so min never passes max.
+	local function setDriving(on: boolean)
+		driving = on
+		if on then
+			player.CameraMaxZoomDistance = DRIVE_ZOOM_MAX
+			player.CameraMinZoomDistance = DRIVE_ZOOM_MIN
+			player.CameraMode = Enum.CameraMode.Classic
+		else
+			player.CameraMinZoomDistance = walkZoomMin
+			player.CameraMaxZoomDistance = walkZoomMax
+			player.CameraMode = Enum.CameraMode.LockFirstPerson
+		end
+	end
+
+	-- Before the default camera: remove last frame's tilt so input applies to the real aim, then pick
+	-- first or third person for this frame.
 	RunService:BindToRenderStep("CameraFeelRestore", Enum.RenderPriority.Camera.Value - 1, function()
 		if untilted and usable() then
 			workspace.CurrentCamera.CFrame = untilted
+		end
+		if Vehicles.driving() ~= driving then
+			setDriving(not driving)
 		end
 	end)
 
 	-- After the default camera: update bob, dip and tilt, then show the tilted view.
 	RunService:BindToRenderStep("CameraFeelApply", Enum.RenderPriority.Camera.Value + 1, function(dt)
 		local camera = workspace.CurrentCamera
-		if not usable() then
+		if not usable() or driving then
 			untilted, lastYaw = nil, nil
+			local humanoid = driving and player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if humanoid and humanoid.CameraOffset ~= Vector3.zero then
+				humanoid.CameraOffset = Vector3.zero
+			end
 			return
 		end
 		local aim = camera.CFrame
