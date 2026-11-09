@@ -62,11 +62,13 @@ Server (`src/server/`):
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
-  panel: stopwatch, map name, fill bar), frees the cursor while
+  panel: stopwatch, map name, fill bar with `shared/Format.fill` (two decimals below 10%) and
+  `Progress.Litres` (Current / Target)), frees the cursor while
   a window is open. Exposes helpers `Hud.find` (asserting path lookup), `Hud.set` (write only on
-  change), `Hud.short` (1.2K), `Hud.money` (12,480), `Hud.ocean`, `Hud.pulseFill(litres)` (the fill
-  bar's pulse when poured water reaches the ocean) and `Hud.walletHold`
-  (money still flying in as coins; the wallet shows Money minus it).
+  change), `Hud.short` (1.2K) and `Hud.money` (12,480; both `shared/Format`), `Hud.offer` (what
+  TAB offers next; `"useless"` for a level that changes nothing, `Ladder.helps`), `Hud.ocean`,
+  `Hud.pulseFill(litres)` (the fill bar's pulse when poured water reaches the ocean) and
+  `Hud.walletHold` (money still flying in as coins; the wallet shows Money minus it).
 - `Action.luau`: scoop and pour input (aim at the water + hold E / LMB / RT / touch button), one
   full sweep or pour per action, the `ActHint` text. Viewmodel and Feel read `Action.current()`.
 - `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`;
@@ -80,7 +82,16 @@ Client (`src/client/`, all started from `init.client.luau`):
   wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
 - `Shop.luau`: the shop window: one tile per upgrade track in the Tool and Boosts panels, and a
   detail panel with the Buy button. Opens through `Window`. The `UpgradesButton` (right edge)
-  squishes while Tab / gamepad Y / mouse / touch is held and opens or closes the shop on release.
+  squishes while Tab / gamepad Y / mouse / touch is held; Tab / Y open or close the shop as they go
+  down, the mouse / touch on release. Tiles show what you own and every price (dim while locked),
+  the detail what is next and why it can't be bought here; `Badge`s on the tabs and the Upgrades
+  button mark something affordable, and the shop opens on that tab (else Tools). Buy ignores
+  clicks until the last buy has landed (no double buys). `Shop.show(id)` opens on a tile.
+- `Stands.luau`: every stand's prompt texts ("Buy Backpack Tank (1,200)", the reason when a press
+  buys nothing) and its price sign (copies of `Hud.Templates.StandSign`, from `Items.standOffer`
+  and `shared/Format`); hides the Fire Station's `CallPrompt` until you own a vehicle.
+- `Goal.luau`: the next-goal line `Hud.Progress.Goal` once the guide is gone (`shared/NextGoal`);
+  a click or G opens the shop on it or points the way (`Guide.pointTo`, from ux/b1).
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
   ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote).
 - `Purchase.luau`: the purchase moment: sting, coins fly from your money into the tile, a "BOUGHT!"
@@ -138,7 +149,13 @@ Shared (`src/shared/`, pure unless noted):
   here; check them with `lune run tools/simulate`.
 - `Ladder.luau`: `stats(config, levels)` (what a player's levels add up to, including `sweeps`),
   `openAreas(config, fill)` (areas open at a fill fraction), `offer(config, levels, trackId,
-  openAreas)` (next level and `"buy"` / `"locked"` / `"max"`), `baseSweeps`, `tripSeconds`.
+  openAreas)` (next level and `"buy"` / `"locked"` / `"max"`), `helps` (pickup only while the tool
+  takes more than one sweep; the server refuses it otherwise), `baseSweeps`, `tripSeconds`.
+- `Format.luau`: words and numbers the player reads, for the client and the server's cards:
+  `short`, `money`, `litres`, `fill`, `percent`, `need`, `gateHint`, `standName`, and the stand
+  texts `standAction` (prompt), `standCard` (why a press bought nothing), `standSign`.
+- `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
+  (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
@@ -152,7 +169,8 @@ Shared (`src/shared/`, pure unless noted):
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
   vehicle's own area). Numbers in `Config.vehicle`; `Water.share` splits a tank's value.
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). `Zones.channelPath` reads
-  an area's `Channel.Path` (server/Map checks it, client/Channels follows it).
+  an area's `Channel.Path` (server/Map checks it, client/Channels follows it). `Zones.stand`,
+  `Zones.shop` and `Zones.standPrompt` find stands for the server (`Map`) and the client (`Stands`).
 - `PourFlow.luau` (pure, tested): the `LastPour` attribute's `encode` / `decode`, a wave's place
   `along` a channel path, the fill bar's `pulse` and the seabed marker's fade.
 - `StaffRules.luau` (pure, tested): staff `targets` / `post` / `nextPost` (where each job may work),
@@ -169,8 +187,10 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `RunSave.luau` (pure): a team's saved run (its `buildings` levels and `plots`; per player `assign`,
   staff id -> area id), its key, and the exact-team check (`sameTeam`).
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
-  `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus` (plus the Jetpack Tank's),
-  `standPick` (an area's stand or a cove shop in `Config.stands`; never a building), `gadgetStat`,
+  `canBuy`, `affords` (the one money check with the fractional-coin epsilon), `nextLevel`, the
+  worn backpack and its `capacityBonus` (plus the Jetpack Tank's), `standPick` (an area's stand or
+  a cove shop in `Config.stands`; never a building) and `standOffer` (what it shows: the pick, or
+  the item and `"money"` / `"locked"`, or `"owned"`), `gadgetStat`,
   `slots` (hotbar gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`,
   `buildingOffer` / `buildingStat` (the team's building levels), `nextOwned` (the vehicle a Fire
   Station call brings next).
@@ -224,7 +244,7 @@ The server publishes state as attributes; the client only reads them.
 
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Shop, Card, Waiting, Progress,
-  Admin, BuildPicker).
+  Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.
@@ -284,7 +304,7 @@ needs a Studio play test).
 - Rojo owns code only. The map, terrain and scenery live in the Studio place; the owner saves and
   publishes it in Studio.
 - `gameplay/src/shared/` and `common/` modules that tests cover (Config, Ladder, Water, ToolView,
-  Session, RunSave, Maps, Progress, SessionRules) must stay
+  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal) must stay
   **pure**: no `require` of other modules, no `game`, no Roblox types, so Lune can run them.
   Lune tests live in `gameplay/tests/*.spec.luau` and are listed in `gameplay/tests/run.luau`.
 - Server-authoritative: the server owns money, water, purchases. Validate every remote argument

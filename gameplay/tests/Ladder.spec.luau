@@ -84,6 +84,14 @@ function tests.offer_rejects_unknown_tracks(t)
 	t.expectEq(status, nil)
 end
 
+-- Bigger Scoops (pickup) can't take a sweep off a tool that already fills in one.
+function tests.pickup_helps_only_while_the_tool_needs_sweeps(t)
+	t.expectEq(Ladder.helps(Config, {}, "pickup"), false, "the spoon fills in one sweep")
+	t.expectEq(Ladder.helps(Config, { tool = 1 }, "pickup"), true, "the cup takes two")
+	t.expectEq(Ladder.helps(Config, { tool = 1, pickup = 1 }, "pickup"), false, "already one")
+	t.expectEq(Ladder.helps(Config, {}, "walk"), true, "other tracks always help")
+end
+
 function tests.trip_seconds(t)
 	-- 80 studs there and back at 16, one 0.5 s sweep, then the quick pour
 	t.expectNear(Ladder.tripSeconds(Config, Ladder.stats(Config, {})), 10.5 + Config.pourSeconds, 1e-9)

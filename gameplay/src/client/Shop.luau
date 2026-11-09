@@ -11,6 +11,10 @@
 -- Buy button sends Buy(itemId) to level it up, and an unowned one says where to buy it. An owned
 -- staff's detail also shows Detail.AssignButton, which sends Staff("assign", itemId, areaId) with the
 -- next post it may work (StaffRules.nextPost; the server checks it).
+-- Tiles show what you own and every price (dim while locked); the detail panel shows what is next
+-- and, when it can't be bought here, where or why in plain words. A tab with something you can buy
+-- now shows its Badge (as does the Upgrades button), a tab with nothing on sale is dimmed, and the
+-- shop opens on the first tab with something affordable, else Tools.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -20,6 +24,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Format = require(ReplicatedStorage.Shared.Format)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Areas = require(ReplicatedStorage.Common.Areas)
@@ -40,8 +45,13 @@ local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Ou
 local HOLD_SCALE = 0.82
 local HOLD_DOWN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local HOLD_UP = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local BUY_GUARD = 0.4 -- seconds Buy ignores clicks after a buy is sent or lands, so a double click buys once
+local PENDING_SECONDS = 2 -- a sent buy that hasn't landed by then was refused; Buy works again
+local TAB_REFRESH = 0.25 -- seconds between badge and tab checks while the shop is closed
+local DIM = 0.45 -- transparency of a locked tile's price: still readable, clearly not for sale yet
 
 local Shop = {}
+local showTile: ((string) -> ())? = nil
 
 -- Art for each track until real upgrade icons are drawn (the tool shows its 3D model instead).
 local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = "unknown", tip = "coin" }
@@ -96,9 +106,15 @@ local function levelsOf(): { [string]: number }
 	return Hud.levels(0) :: { [string]: number }
 end
 
--- Where a locked level opens: "Opens with Hot Springs" (its area's gate).
-local function opensText(level): string
-	return `Opens with {Areas.byId(Config, level.area).name}`
+local function fillNow(): number
+	local fill = ReplicatedStorage:GetAttribute("Fill")
+	return if type(fill) == "number" then fill else 0
+end
+
+-- Why something of area `areaId` is locked: "Behind the Hot Springs gate (fill the ocean to 22%)".
+local function behindGate(areaId: number): string
+	local area = Areas.byId(Config, areaId)
+	return `Behind the {area.name} gate ({Format.gateHint(area, fillNow())})`
 end
 
 -- The tab showing an item's tile.
@@ -120,27 +136,63 @@ local function boughtLevel(item, itemState: Items.State): number?
 	return if Items.owned(itemState, item.id) then itemState.itemLevels[item.id] else nil
 end
 
--- What an item's tile and detail say instead of a price (Hud.offer's item statuses). Tiles have room
--- for a word or a shop's name, the detail panel for the full sentence.
-local function itemNote(item, status: string?, brief: boolean?): string
+-- Per tab: the first tile `money` buys in TAB now (nil for none) and whether anything there is on
+-- sale here, at a stand or on a plot (else the tab is dimmed).
+local function tabStates(levels: { [string]: number }, money: number): { [string]: { afford: string?, any: boolean } }
+	local states = {}
+	for _, name in TABS do
+		states[name] = { afford = nil, any = false }
+	end
+	local function check(name: string, id: string)
+		local _, status, affordable = Hud.offer(levels, id, money)
+		local s = states[name]
+		s.any = s.any or status == "buy" or status == "stand" or status == "unbuilt"
+		if affordable and not s.afford then
+			s.afford = id
+		end
+	end
+	for _, track in Config.tracks do
+		check("Tools", track.id)
+	end
+	for _, item in Config.items do
+		check(tabOf(item), item.id)
+	end
+	return states
+end
+
+-- Levels bought of track or item `id` as the server has published them (-1 while an item isn't
+-- owned), to tell when a buy has landed.
+local function boughtCount(id: string): number
+	if Config.track(id) then
+		return levelsOf()[id]
+	end
+	return boughtLevel(Items.get(Config, id), Hud.items()) or -1
+end
+
+-- What an unowned or maxed item's detail says (Hud.offer's item statuses): where to get it and its
+-- price, or why not yet. Staff are hired at the Lifeguard Tower in the cove once the area they open
+-- with is open, so a locked one says which gate.
+local function itemNote(item, status: string?): string
+	local area = Areas.byId(Config, item.area)
+	local place = Format.standName(Config, item.stand, area)
+	local verb = if item.kind == "staff" then "Hire" else "Buy"
 	if status == "max" then
 		return "MAX"
-	elseif brief and status == "stand" then
-		return if item.stand then Config.stands[item.stand] else "At stand"
-	elseif brief then
-		return if status == "replaced" then "Replaced" elseif status == "unbuilt" then "On a plot" else "Locked"
 	elseif status == "replaced" then
 		local worn = Items.backpack(Config, Hud.items())
 		return `Replaced by the {if worn then worn.name else "next one"}`
 	elseif status == "unbuilt" then
-		return "Build one on a plot in town"
-	elseif status == "stand" and item.stand then
-		return `Buy at the {Config.stands[item.stand]}`
+		return `Build one on a town plot · {Hud.money(item.price)}`
 	elseif status == "stand" then
-		return `Buy at the {Areas.byId(Config, item.area).name} stand`
+		return `{verb} at the {place} · {Hud.money(item.price)}`
+	elseif item.stand then
+		return `{verb} at the {place} once {area.name} opens ({Format.gateHint(area, fillNow())})`
 	end
-	return opensText(item)
+	return behindGate(item.area)
 end
+
+-- The Buy button's word when it can't buy (the full reason is in the detail's effect text).
+local BUTTON_WORDS = { max = "MAXED", stand = "AT STAND", unbuilt = "ON A PLOT", replaced = "REPLACED", locked = "LOCKED", useless = "NOT YET" }
 
 -- A stat in the effect texts: whole numbers under 1000 as they are (6), the rest short (1.6, 3.0K).
 local function amount(n: number): string
@@ -192,15 +244,16 @@ local function buildingEffect(stat: Stat): string
 	return stat("rate", " L/s per plot")
 end
 
--- What a staff does at some level, by its job (Config.items `job`).
-local function staffEffect(stat: Stat, item): string
-	local who = stat("hires", " hired")
+-- What a staff does at some level, by its job (Config.items `job`); how many are hired only once
+-- one is.
+local function staffEffect(stat: Stat, item, owned: boolean): string
+	local who = if owned then `{stat("hires", " hired")}, ` else ""
 	if item.job == "area" then
-		return `{who}, each {stat("carry", " L")} every {stat("tripSeconds", "s")}`
+		return `{who}{stat("carry", " L")} every {stat("tripSeconds", "s")} per {item.name}`
 	elseif item.job == "truck" then
-		return `{who}, each a tank every {stat("tripSeconds", "s")}`
+		return `{who}a tank every {stat("tripSeconds", "s")} per {item.name}`
 	end
-	return `{who}, no clogs, {stat("boost", " output", percent)}`
+	return `{who}no clogs, {stat("boost", " output", percent)}`
 end
 
 local KIND_EFFECTS = { vehicle = vehicleEffect, building = buildingEffect, staff = staffEffect }
@@ -220,24 +273,29 @@ local function itemEffect(item, level, owned: boolean): string
 		if level then
 			return effect(statText(function(name: string): number
 				return level[name]
-			end, nowStat), item)
+			end, nowStat), item, owned)
 		end
-		return effect(statText(nowStat), item)
+		return effect(statText(nowStat), item, owned)
 	end
 	local now = nowStat("capacity")
 	if level then
 		return `Holds {short(level.capacity)} L on your back (now {short(now)} L)`
 	end
-	return `Holds {short(now)} L on your back, on top of your tool`
+	return `Holds {short(now)} L on your back`
 end
 
 
--- The next level's display name: tools have their own, the rest are "<track> <n>".
-local function levelName(track, n: number, level): string
+-- The display name of a track's level `n`: tools have their own, the rest are "<track> <n>".
+function Shop.levelName(track, n: number, level): string
 	if track.id == "tool" then
 		return level.name
 	end
 	return if #track.levels == 1 then track.name else `{track.name} {n}`
+end
+
+-- Opens the shop on the tile of track or item `id` (client/Goal).
+function Shop.show(id: string)
+	assert(showTile, "Shop.show before Shop.start")(id)
 end
 
 local function bounce(scale: UIScale)
@@ -305,8 +363,10 @@ function Shop.start()
 		itemTiles[item.id] = Hud.find(content, `{panel}.Tiles.{item.id}`)
 	end
 	local tabButtons = {}
+	local tabBadges = {}
 	for _, name in TABS do
 		tabButtons[name] = Hud.find(gui, `Shop.Body.Tabs.{name}`)
+		tabBadges[name] = Hud.find(tabButtons[name], "Badge")
 		for _, panel in TAB_PANELS[name] or {} do
 			Hud.find(content, panel) -- fail at start, not on the first tab switch
 		end
@@ -331,7 +391,21 @@ function Shop.start()
 	refit()
 
 	local window = Window.new(shop, fit)
-	local function setOpen(value: boolean)
+	-- Opening shows the first tab with something you can buy now (on that tile), else Tools; `pick` (a
+	-- track or item id) opens on its tile instead.
+	local function setOpen(value: boolean, pick: string?)
+		if value and pick then
+			tab, selected = if Config.track(pick) then "Tools" else tabOf(Items.get(Config, pick)), pick
+		elseif value and not open then
+			local states = tabStates(levelsOf(), player:GetAttribute("Money") or 0)
+			tab, selected = "Tools", "tool"
+			for _, name in TABS do
+				if states[name].afford then
+					tab, selected = name, states[name].afford :: string
+					break
+				end
+			end
+		end
 		if value == open then
 			return
 		end
@@ -347,11 +421,19 @@ function Shop.start()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
 		return phase == "playing"
 	end
+	showTile = function(id: string)
+		if inRun() then
+			setOpen(true, id)
+		end
+	end
 
 	-- The Upgrades button (right edge) shows where the shop is. Holding Tab / Y / the mouse / a
-	-- finger squishes it down; letting go springs it back up and opens (or closes) the shop. Its key
-	-- tag tells keyboard and gamepad players which key does it.
+	-- finger squishes it down; letting go springs it back up. Tab and Y open (or close) the shop as
+	-- they go down, so a release that never arrives (focus moving) can't swallow the press; the mouse
+	-- and a finger open it on release, like a button. Its key tag tells keyboard and gamepad players
+	-- which key does it; its Badge shows while something in the shop can be bought now.
 	local upgrades = Hud.find(gui, "UpgradesButton")
+	local upgradesBadge = Hud.find(upgrades, "Badge")
 	local upgradesPress = Hud.find(upgrades, "Press") :: UIScale
 	local upgradesKey = Hud.find(upgrades, "Key")
 	local upgradesKeyText = Hud.find(upgradesKey, "Text")
@@ -374,10 +456,9 @@ function Shop.start()
 	ContextActionService:BindAction("ToggleShop", function(_, inputState)
 		if inputState == Enum.UserInputState.Begin then
 			hold()
-		elseif inputState == Enum.UserInputState.End then
-			release(true)
-		elseif inputState == Enum.UserInputState.Cancel then
-			release(false) -- focus lost while held: spring back, don't open
+			setOpen(not open and inRun())
+		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+			release(false)
 		end
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.Tab, Enum.KeyCode.ButtonY)
@@ -434,14 +515,24 @@ function Shop.start()
 			selected = firstTile[name] or selected
 		end)
 	end
+	local guardUntil = 0
+	local pending: { id: string, have: number, at: number }? = nil
 	onPress(buyButton, function()
-		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0)
-		if canBuy then
-			bounce(buyButton.Press)
-		else
-			Purchase.deny(buyButton)
+		local now = os.clock()
+		local have = boughtCount(selected)
+		local waiting = pending and pending.id == selected and pending.have == have and now - pending.at < PENDING_SECONDS
+		if now < guardUntil or waiting then
+			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
 		end
+		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0)
+		if not canBuy then
+			Purchase.deny(buyButton)
+			return
+		end
+		bounce(buyButton.Press)
 		buyRemote:FireServer(selected)
+		pending = { id = selected, have = have, at = now }
+		guardUntil = now + BUY_GUARD
 	end)
 	-- Assign: the selected staff moves to its next allowed post.
 	pressable(assignButton, assignButton.Press)
@@ -477,10 +568,34 @@ function Shop.start()
 		end
 	end
 
+	-- A tile's price row: `cost` (red when you can't pay it, dim while `grey`) or `word` (MAX, Replaced).
+	local function priceRow(holder: Instance, cost: number?, word: string, grey: boolean, money: number)
+		local coin, price = Hud.find(holder, "PriceRow.Coin"), Hud.find(holder, "PriceRow.Price")
+		set(coin, "Visible", cost ~= nil)
+		set(coin, "ImageTransparency", if grey then DIM else 0)
+		set(price, "Text", if cost then Hud.money(cost) else word)
+		set(price, "TextTransparency", if grey then DIM else 0)
+		set(price, "TextColor3", if cost and not grey and not Items.affords(money, cost) then colors.buyCoral else colors.foam)
+	end
+
 	local shownLevels: { [string]: number } = {}
+	local tabInfo = tabStates(levelsOf(), 0)
+	local tabsAt = 0
+	local shownSelected, shownHave = selected, boughtCount(selected)
 	RunService.RenderStepped:Connect(function()
 		if open and not inRun() then
 			setOpen(false)
+		end
+		local clock = os.clock()
+		if clock >= tabsAt then -- badges show while the shop is closed too
+			tabsAt = clock + TAB_REFRESH
+			tabInfo = tabStates(levelsOf(), player:GetAttribute("Money") or 0)
+			local any = false
+			for name, badge in tabBadges do
+				set(badge, "Visible", tabInfo[name].afford ~= nil)
+				any = any or tabInfo[name].afford ~= nil
+			end
+			set(upgradesBadge, "Visible", any)
 		end
 		set(upgrades, "Visible", inRun() and not shop.Visible)
 		local input = UserInputService:GetLastInputType()
@@ -494,9 +609,17 @@ function Shop.start()
 		local levels = levelsOf()
 		local now = Ladder.stats(Config, levels)
 
-		-- Tabs: the open one is shallow blue, the rest sand; ComingSoon stands in for missing panels.
+		-- A buy landing (the selected tile's bought count goes up) holds Buy back for a moment too.
+		local boughtNow = boughtCount(selected)
+		if selected == shownSelected and boughtNow ~= shownHave then
+			guardUntil = clock + BUY_GUARD
+		end
+		shownSelected, shownHave = selected, boughtNow
+
+		-- Tabs: the open one is shallow blue, the rest sand, dimmed with nothing on sale; ComingSoon
+		-- stands in for missing panels.
 		for name, button in tabButtons do
-			set(button, "ImageColor3", if name == tab then colors.shallowWater else colors.drySand)
+			set(button, "ImageColor3", if name == tab then colors.shallowWater elseif tabInfo[name].any then colors.drySand else colors.locked)
 			for _, panel in TAB_PANELS[name] or {} do
 				set(Hud.find(content, panel), "Visible", name == tab)
 			end
@@ -504,13 +627,13 @@ function Shop.start()
 		set(comingSoon, "Visible", TAB_PANELS[tab] == nil)
 		set(detail, "Visible", TAB_PANELS[tab] ~= nil)
 
-		-- Item tiles: the level of an owned one, else where it is bought
+		-- Item tiles: the level you own, and the next upgrade's price or the item's own
 		local itemState = Hud.items()
 		for _, item in Config.items do
 			local holder = itemTiles[item.id]
 			local button = Hud.find(holder, "Button")
 			local bought = boughtLevel(item, itemState)
-			local level, status, affordable = Hud.offer(levels, item.id, money)
+			local level, status = Hud.offer(levels, item.id, money)
 			local grey = status == "locked" or status == "replaced"
 			set(button, "ImageColor3", if grey then colors.locked else colors.shallowWater)
 			set(Hud.find(button, "Ring"), "Visible", item.id == selected)
@@ -521,10 +644,8 @@ function Shop.start()
 			set(Hud.find(button, "Pips"), "Visible", false)
 			set(Hud.find(button, "Level"), "Visible", true)
 			set(Hud.find(button, "Level"), "Text", if bought then `Lv {bought + 1}` else "")
-			local priceText = Hud.find(holder, "PriceRow.Price")
-			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
-			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) else itemNote(item, status, true))
-			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
+			local cost = if status == "buy" then level.cost elseif bought == nil and status ~= "replaced" then item.price else nil
+			priceRow(holder, cost, if status == "max" then "MAX" else "Replaced", grey, money)
 		end
 
 		for _, track in Config.tracks do
@@ -532,10 +653,11 @@ function Shop.start()
 			local holder = tiles[id]
 			local button = Hud.find(holder, "Button")
 			local have = levels[id]
-			local level, status, affordable = Hud.offer(levels, id, money)
-			set(button, "ImageColor3", if status == "locked" then colors.locked else panelColor(track))
+			local level, status = Hud.offer(levels, id, money)
+			local grey = status == "locked" or status == "useless"
+			set(button, "ImageColor3", if grey then colors.locked else panelColor(track))
 			set(Hud.find(button, "Ring"), "Visible", id == selected)
-			showArt(button, id, now.toolModel, status == "locked")
+			showArt(button, id, now.toolModel, grey)
 			set(Hud.find(button, "ItemName"), "Text", if id == "tool" then now.toolName else track.name)
 
 			-- Level pips (short tracks) or a level label (the long tool ladder, the one-time Hold)
@@ -558,17 +680,14 @@ function Shop.start()
 					end
 				end
 			elseif id == "tool" then
-				set(label, "Text", `Lv {now.toolTier}`)
+				set(label, "Text", "OWNED") -- the tool you hold; the detail shows the next one
 			else
 				set(label, "Text", if have > 0 then "OWNED" else "")
 			end
 			shownLevels[id] = have
 
-			-- Price row: the price (red when you can't afford it), MAX, or the fill that unlocks it
-			local priceText = Hud.find(holder, "PriceRow.Price")
-			set(Hud.find(holder, "PriceRow.Coin"), "Visible", status == "buy")
-			set(priceText, "Text", if status == "buy" then Hud.money(level.cost) elseif status == "max" then "MAX" else opensText(level))
-			set(priceText, "TextColor3", if status == "buy" and not affordable then colors.buyCoral else colors.foam)
+			-- Price row: the next level's price (red when you can't afford it, dim while locked), or MAX
+			priceRow(holder, if level then level.cost else nil, "MAX", grey, money)
 		end
 
 		-- Detail panel: the selected item's next upgrade
@@ -583,7 +702,8 @@ function Shop.start()
 			set(Hud.find(detailArt, "Icon"), "Image", if status == "locked" then images.lock else images.unknown)
 			set(Hud.find(detail, "About"), "Text", selectedItem.about)
 			set(Hud.find(detail, "MoneyRow.Money"), "Text", Hud.money(money))
-			set(Hud.find(detail, "ItemName"), "Text", if bought then `{selectedItem.name} Lv {bought + 1}` else selectedItem.name)
+			local name = selectedItem.name
+			set(Hud.find(detail, "ItemName"), "Text", if bought and level then `Next: {name} Lv {bought + 2}` elseif bought then `{name} Lv {bought + 1}` else name)
 			local effect = itemEffect(selectedItem, level, bought ~= nil)
 			-- the button only fits a word, so the full "where to get it" sentence leads the effect
 			local note = status ~= "buy" and status ~= "max"
@@ -591,7 +711,7 @@ function Shop.start()
 			set(buyCoin, "Visible", status == "buy")
 			set(buyPrice, "Visible", status == "buy")
 			-- the button fits a short word beside the price (a longer one overflows at 150.0K)
-			set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else itemNote(selectedItem, status, true):upper())
+			set(buyText, "Text", if status == "buy" then "BUY" else BUTTON_WORDS[status :: string] or "LOCKED")
 			if status == "buy" then
 				set(buyPrice, "Text", Hud.money(level.cost))
 			end
@@ -617,8 +737,15 @@ function Shop.start()
 			local nextLevels = table.clone(levels)
 			nextLevels[selected] = have + 1
 			showArt(detailArt, selected, if selected == "tool" then level.model else now.toolModel)
-			set(Hud.find(detail, "ItemName"), "Text", levelName(track, have + 1, level))
-			set(Hud.find(detail, "Effect"), "Text", effectText(selected, now, Ladder.stats(Config, nextLevels)))
+			local name = Shop.levelName(track, have + 1, level)
+			set(Hud.find(detail, "ItemName"), "Text", if selected == "tool" or have > 0 then `Next: {name}` else name)
+			local effect = effectText(selected, now, Ladder.stats(Config, nextLevels))
+			if status == "locked" then
+				effect = `{behindGate(level.area)}\n{effect}`
+			elseif status == "useless" then
+				effect = `Your {now.toolName} already fills in one scoop: this helps once a tool takes more`
+			end
+			set(Hud.find(detail, "Effect"), "Text", effect)
 		else
 			showArt(detailArt, selected, now.toolModel)
 			set(Hud.find(detail, "ItemName"), "Text", if selected == "tool" then now.toolName else track.name)
@@ -626,7 +753,7 @@ function Shop.start()
 		end
 		set(buyCoin, "Visible", status == "buy")
 		set(buyPrice, "Visible", status == "buy")
-		set(buyText, "Text", if status == "buy" then "BUY" elseif status == "max" then "MAXED" else opensText(level):upper())
+		set(buyText, "Text", if status == "buy" then "BUY" else BUTTON_WORDS[status :: string] or "LOCKED")
 		if status == "buy" then
 			set(buyPrice, "Text", Hud.money(level.cost))
 		end

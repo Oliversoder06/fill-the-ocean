@@ -1,13 +1,14 @@
 -- The gate signs (workspace.Areas.<Area>.Gate.Sign, a SurfaceGui with a TextLabel "Label", built in
--- Studio): "Fill the ocean to 22%" until the gate's fill, "Open <earlier area> first" while an
--- earlier gate is closed, its price once it is the next gate on sale, then "Open". Its prompt shows
--- only while it is on sale. The server sells and opens gates (server/Run onGate) and checks every
--- buy; this only shows their state from the Fill and GatesOpen attributes. Signs of areas not
--- streamed in yet are filled in once they arrive.
+-- Studio): the area's name, then "Fill to 22% · 88,000" until the gate's fill, "Open <earlier area>
+-- first" while an earlier gate is closed, its price once it is the next gate on sale, then "Open".
+-- Its prompt shows only while it is on sale. The server sells and opens gates (server/Run onGate)
+-- and checks every buy; this only shows their state from the Fill and GatesOpen attributes. Signs of
+-- areas not streamed in yet are filled in once they arrive.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Format = require(ReplicatedStorage.Shared.Format)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
@@ -16,17 +17,20 @@ local Hud = require(script.Parent.Hud)
 local colors = Theme.colors
 local Gates = {}
 
--- The sign text of an area's gate, its colour and whether the gate is on sale now.
+-- The sign text of an area's gate, its colour and whether the gate is on sale now: the area's name
+-- over its fill and price until then, "<price> · hold E" once it is the next gate on sale, then
+-- "Open". White, teal and orange on the navy outline read from a distance (Theme colours).
 local function signOf(area, gatesOpen: { number }, fill: number): (string, Color3, boolean)
 	local nextId, onSale = Areas.nextGate(Config, gatesOpen, fill)
+	local title = area.name:upper()
 	if table.find(gatesOpen, area.id) then
-		return "Open", colors.speedTag, false
+		return `{title}\nOpen`, colors.speedTag, false
 	elseif nextId == area.id and onSale then
-		return `{Hud.money(area.gate.price)} coins - hold E`, colors.toolTag, true
+		return `{title}\n{Hud.money(area.gate.price)} · hold E`, colors.toolTag, true
 	elseif fill >= area.gate.fill and nextId then
-		return `Open {Areas.byId(Config, nextId).name} first`, colors.sunRim, false
+		return `{title}\nOpen {Areas.byId(Config, nextId).name} first`, colors.foam, false
 	end
-	return `Fill the ocean to {math.round(area.gate.fill * 100)}%`, colors.sunRim, false
+	return `{title}\nFill to {Format.percent(area.gate.fill)} · {Hud.money(area.gate.price)}`, colors.foam, false
 end
 
 -- An area's Gate model, or nil while it hasn't streamed in.

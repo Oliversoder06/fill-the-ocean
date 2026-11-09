@@ -46,6 +46,7 @@ local TeleportService = game:GetService("TeleportService")
 local Admins = require(ReplicatedStorage.Shared.Admins)
 local AreaRules = require(ReplicatedStorage.Shared.AreaRules)
 local Config = require(ReplicatedStorage.Shared.Config)
+local Format = require(ReplicatedStorage.Shared.Format)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
@@ -774,6 +775,9 @@ local function onBuy(player: Player, id: unknown)
 	local level, status
 	if isTrack then
 		level, status = Ladder.offer(Config, state.levels, id, openAreas())
+		if not Ladder.helps(Config, state.levels, id) then
+			return
+		end
 	else
 		level, status = Items.nextLevel(Config, state, id)
 	end
@@ -1060,8 +1064,9 @@ local function onGate(player: Player, area)
 end
 
 -- The stand prompt of `area`: buys the cheapest item sold there that the player can buy now
--- (Items.standPick; one prompt per stand). `stand`: a cove shop (Config.stands) selling its own
--- items instead. The area must be open, the item not owned and affordable, and the player by the stand.
+-- (Items.standPick; one prompt per stand), or says why it can't (Items.standOffer). `stand`: a cove
+-- shop (Config.stands) selling its own items instead. The area must be open, the item not owned and
+-- affordable, and the player by the stand.
 local function onStand(player: Player, area, prompt: ProximityPrompt, stand: string?)
 	local state = states[player]
 	local now = os.clock()
@@ -1072,9 +1077,10 @@ local function onStand(player: Player, area, prompt: ProximityPrompt, stand: str
 	if not Areas.open(gatesOpen())[area.id] or not inReach(player, prompt) then
 		return
 	end
-	local item = Items.standPick(Config, state, area.id, openAreas(), state.money, stand)
-	if not item then
-		remotes.Card:FireClient(player, "Nothing here you can buy yet", CARD_SECONDS)
+	local item, status = Items.standOffer(Config, state, area.id, openAreas(), state.money, stand)
+	if status ~= "buy" then
+		local why = Format.standCard(item, status, state.money, item and Areas.byId(Config, item.area), fillOf(run.current))
+		remotes.Card:FireClient(player, why, CARD_SECONDS)
 		return
 	end
 	state.money = math.max(0, state.money - item.price)

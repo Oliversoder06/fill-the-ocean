@@ -75,6 +75,32 @@ function Zones.channelPath(ocean: Model, area): { Vector3 }?
 	return if count >= 2 then points else nil
 end
 
+-- An area's stand: workspace.Areas.<model>.Stand, the cove's workspace.Map.Beach.BackpackStand.
+-- Nil when it isn't there (not in the place yet, or not streamed in).
+function Zones.stand(ocean: Model, area): Instance?
+	if area.model then
+		local model = Zones.areaModel(ocean, area)
+		return model and model:FindFirstChild("Stand")
+	end
+	local scenery = workspace:FindFirstChild("Map")
+	local beach = scenery and scenery:FindFirstChild("Beach")
+	return beach and beach:FindFirstChild("BackpackStand")
+end
+
+-- A cove shop (Config.stands): workspace.Map.Town.<name> or workspace.Map.Beach.<name>, or nil.
+function Zones.shop(name: string): Instance?
+	local scenery = workspace:FindFirstChild("Map")
+	local town = scenery and scenery:FindFirstChild("Town")
+	local beach = scenery and scenery:FindFirstChild("Beach")
+	return (town and town:FindFirstChild(name)) or (beach and beach:FindFirstChild(name))
+end
+
+-- A stand's (or shop's, or rock's) ProximityPrompt "Prompt" anywhere inside it, or nil when it has none.
+function Zones.standPrompt(stand: Instance): ProximityPrompt?
+	local prompt = stand:FindFirstChild("Prompt", true)
+	return if prompt and prompt:IsA("ProximityPrompt") then prompt else nil
+end
+
 -- The first open area (`open`: Areas.open) whose `name` part lies within `radius` studs of
 -- `position`, and that part; nil when none does.
 function Zones.openSpot(ocean: Model, config, open: { [number]: boolean }, name: string, position: Vector3, radius: number)

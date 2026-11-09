@@ -74,6 +74,11 @@ local function replaced(config, state: State, item): boolean
 	return worn ~= nil and worn.area > item.area
 end
 
+-- Whether `money` pays `price`. Pours add fractional coins: 1199.9999999 must still buy a 1,200-coin item.
+function Items.affords(money: number, price: number): boolean
+	return money + MONEY_EPSILON >= price
+end
+
 -- Whether the stand sells `id` to this player now, with `openAreas` areas open (Ladder.openAreas)
 -- and `money`. The reason when not: "unknown", "owned", "replaced", "locked" or "money".
 -- Buildings (3e) are the team's: their caller checks Items.teamOwned instead of "owned".
@@ -87,7 +92,7 @@ function Items.canBuy(config, state: State, id: any, openAreas: number, money: n
 		return false, "replaced"
 	elseif item.area > openAreas then
 		return false, "locked"
-	elseif money + MONEY_EPSILON < item.price then
+	elseif not Items.affords(money, item.price) then
 		return false, "money"
 	end
 	return true, nil
@@ -174,6 +179,12 @@ function Items.withGear(config, state: State, stats)
 	return s
 end
 
+-- Whether area `areaId`'s stand (or cove shop `stand`) sells `item`.
+local function soldAt(item, areaId: number, stand: string?): boolean
+	local here = if stand then item.stand == stand else item.area == areaId and item.stand == nil
+	return here and item.kind ~= "building"
+end
+
 -- What a press on area `areaId`'s stand buys: the cheapest item sold there that canBuy allows now,
 -- or nil. `stand`: a cove shop (Config.stands) instead of the area's own stand; each sells only its
 -- own items, whatever their area (the Fire Station's vehicles open with areas 2-5). One prompt per
@@ -181,12 +192,33 @@ end
 function Items.standPick(config, state: State, areaId: number, openAreas: number, money: number, stand: string?)
 	local pick = nil
 	for _, item in config.items do
-		local here = if stand then item.stand == stand else item.area == areaId and item.stand == nil
-		if here and item.kind ~= "building" and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
+		if soldAt(item, areaId, stand) and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
 			pick = item
 		end
 	end
 	return pick
+end
+
+-- What the stand shows this player (args as standPick): the item a press buys and "buy"; else the
+-- cheapest one there that is open but costs more than `money` and "money"; else the cheapest one
+-- still behind its area's gate and "locked"; else nil and "owned" (all of it owned or replaced).
+function Items.standOffer(config, state: State, areaId: number, openAreas: number, money: number, stand: string?)
+	local pick = Items.standPick(config, state, areaId, openAreas, money, stand)
+	if pick then
+		return pick, "buy"
+	end
+	for _, why in { "money", "locked" } do
+		local cheapest = nil
+		for _, item in config.items do
+			if soldAt(item, areaId, stand) and select(2, Items.canBuy(config, state, item.id, openAreas, money)) == why and (not cheapest or item.price < cheapest.price) then
+				cheapest = item
+			end
+		end
+		if cheapest then
+			return cheapest, why
+		end
+	end
+	return nil, "owned"
 end
 
 -- Whether the team owns building `id` (save.buildings: upgrades bought per building, 0 = just built).

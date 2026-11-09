@@ -316,4 +316,41 @@ function tests.tool_shack_sells_water_gun(t)
 	t.expectEq(Config.stands.ToolShack, "Tool Shack", "its name for the shop")
 end
 
+-- Pours add fractional coins: 1199.9999999 still pays for a 1,200-coin item.
+function tests.affords_counts_fractional_coins(t)
+	t.expectEq(Items.affords(1199.9999999, 1200), true)
+	t.expectEq(Items.affords(1200, 1200), true)
+	t.expectEq(Items.affords(1199, 1200), false)
+end
+
+-- What a stand shows: the item a press buys, else the cheapest one short of money, else the
+-- cheapest locked one, else that everything there is owned.
+function tests.stand_offer_says_why(t)
+	local pack = Items.get(Config, "backpackTank")
+	local item, status = Items.standOffer(Config, fresh(), 1, 1, pack.price)
+	t.expectEq(item, pack)
+	t.expectEq(status, "buy")
+	item, status = Items.standOffer(Config, fresh(), 1, 1, 30)
+	t.expectEq(item, pack, "short of money")
+	t.expectEq(status, "money")
+	local state = fresh()
+	own(state, pack.id)
+	item, status = Items.standOffer(Config, state, 1, 1, 1e12)
+	t.expectEq(item, nil)
+	t.expectEq(status, "owned")
+	local big = fresh()
+	own(big, "bigTank")
+	t.expectEq(select(2, Items.standOffer(Config, big, 1, 2, 1e12)), "owned", "a replaced pack counts as done")
+end
+
+function tests.stand_offer_prefers_open_items_over_locked_ones(t)
+	local truck = Items.get(Config, "fireTruck")
+	local item, status = Items.standOffer(Config, fresh(), 1, 1, 1e12, "FireStation")
+	t.expectEq(item, truck, "the cheapest locked vehicle")
+	t.expectEq(status, "locked")
+	item, status = Items.standOffer(Config, fresh(), 1, 2, 10, "FireStation")
+	t.expectEq(item, truck)
+	t.expectEq(status, "money", "open but short of money beats the locked Tanker")
+end
+
 return tests

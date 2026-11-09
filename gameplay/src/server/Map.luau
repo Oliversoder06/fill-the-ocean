@@ -88,31 +88,16 @@ function Map.gatePrompt(gate: Instance): ProximityPrompt
 	return prompt
 end
 
--- An area's stand: workspace.Areas.<model>.Stand, the cove's workspace.Map.Beach.BackpackStand.
--- Nil when the place doesn't have it yet.
-function Map.stand(ocean: Model, area): Instance?
-	if area.model then
-		local model = Zones.areaModel(ocean, area)
-		return model and model:FindFirstChild("Stand")
-	end
-	local scenery = workspace:FindFirstChild("Map")
-	local beach = scenery and scenery:FindFirstChild("Beach")
-	return beach and beach:FindFirstChild("BackpackStand")
-end
+-- An area's stand (Zones.stand), nil when the place doesn't have it yet.
+Map.stand = Zones.stand
 
 -- A stand's ProximityPrompt "Prompt" (anywhere inside it), or nil when it has none yet.
-function Map.standPrompt(stand: Instance): ProximityPrompt?
-	local prompt = stand:FindFirstChild("Prompt", true)
-	return if prompt and prompt:IsA("ProximityPrompt") then prompt else nil
-end
+Map.standPrompt = Zones.standPrompt
 
 -- A cove shop's ProximityPrompt (workspace.Map.Town.<name> or Map.Beach.<name>, Config.stands); fails
 -- loudly when the place doesn't have it.
 function Map.shopPrompt(name: string): ProximityPrompt
-	local scenery = workspace:FindFirstChild("Map")
-	local town = scenery and scenery:FindFirstChild("Town")
-	local beach = scenery and scenery:FindFirstChild("Beach")
-	local shop = (town and town:FindFirstChild(name)) or (beach and beach:FindFirstChild(name))
+	local shop = Zones.shop(name)
 	assert(shop, `workspace.Map.Town.{name} or workspace.Map.Beach.{name} is missing (a cove shop, Config.stands)`)
 	local prompt = Map.standPrompt(shop)
 	assert(prompt, `{shop:GetFullName()} needs a ProximityPrompt "Prompt"`)

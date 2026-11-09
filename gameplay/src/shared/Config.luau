@@ -204,7 +204,7 @@ Config.tracks = {
 	},
 	{
 		id = "pickup",
-		name = "Pickup",
+		name = "Bigger Scoops",
 		panel = "tool",
 		about = "Each scoop picks up more, so your tool fills in fewer sweeps.",
 		levels = {
@@ -216,7 +216,7 @@ Config.tracks = {
 	},
 	{
 		id = "hold",
-		name = "Hold",
+		name = "Hold to Scoop",
 		panel = "tool",
 		about = "Hold the button to keep scooping until your tool is full.",
 		levels = { { cost = 40, area = 1 } },
@@ -240,7 +240,7 @@ Config.tracks = {
 		id = "walk",
 		name = "Sneakers",
 		panel = "boosts",
-		about = "Walk faster between the water and the basin.",
+		about = "Walk faster between the water and the ocean.",
 		levels = {
 			{ cost = 69, area = 1, walkSpeed = 20 },
 			{ cost = 385, area = 1, walkSpeed = 23.5 },

@@ -1,6 +1,6 @@
 -- Fills in the HUD that lives in StarterGui ("Hud", built in Studio) from server attributes:
 -- wallet, waiting text, card, and the run panel at the top right (stopwatch from PlaySeconds and
--- RunStartedAt, the map's name, how full the ocean is, a running boost's countdown).
+-- RunStartedAt, the map's name, how full the ocean is and its litres, a running boost's countdown).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
+local Format = require(ReplicatedStorage.Shared.Format)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local Zones = require(ReplicatedStorage.Shared.Zones)
@@ -21,11 +22,9 @@ local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 local player = Players.LocalPlayer
 local Hud = {}
 
-local SUFFIXES = { "K", "M", "B", "T" }
 local COIN_BOUNCE = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local PROGRESS_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local PRESS = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 
 -- Studs from a Source or Pour / from where the water will be within which a player scoops or pours
 -- (client Action and Guide); the server uses the same (shared/Zones).
@@ -41,33 +40,9 @@ function Hud.clock(seconds: number): string
 	return string.format("%d:%02d", m, s % 60)
 end
 
-function Hud.short(n: number): string
-	if n < 10 then
-		return string.format("%.1f", n)
-	elseif n < 1000 then
-		return tostring(math.floor(n))
-	end
-	local i = 0
-	while n >= 1000 and i < #SUFFIXES do
-		n /= 1000
-		i += 1
-	end
-	return string.format("%.1f%s", n, SUFFIXES[i])
-end
-
--- Money: whole coins with thousands separators below 100K, then the short form (1.2M).
-function Hud.money(n: number): string
-	n = math.floor(n)
-	if n >= 100000 then
-		return Hud.short(n)
-	end
-	local text = tostring(n)
-	local count
-	repeat
-		text, count = text:gsub("^(%d+)(%d%d%d)", "%1,%2")
-	until count == 0
-	return text
-end
+-- 1.2K and money (12,480, then 1.2M): shared/Format, the same words the server's cards use.
+Hud.short = Format.short
+Hud.money = Format.money
 
 function Hud.find(parent: Instance, path: string): any
 	local node = parent
@@ -157,7 +132,8 @@ function Hud.buildings(): { [string]: number }
 end
 
 -- What TAB offers next and whether `money` buys it now, with the areas the open gates open (as the
--- server counts them). A track (`levels`): Ladder.offer's level and "buy" / "locked" / "max". An
+-- server counts them). A track (`levels`): Ladder.offer's level and "buy" / "locked" / "max", or
+-- "useless" while the level would change nothing (Ladder.helps; the server doesn't sell it). An
 -- item: Items.nextLevel's upgrade and "buy" / "max" / "replaced", or, while unowned, nil and
 -- "stand" (buy it at its area's stand) or "locked" (its area is closed). A building: the team's
 -- Items.buildingOffer ("buy" / "max" / "unbuilt" / "locked").
@@ -167,6 +143,9 @@ function Hud.offer(levels: { [string]: number }, id: string, money: number): (an
 	local item = Items.get(Config, id)
 	if Config.track(id) then
 		level, status = Ladder.offer(Config, levels, id, openAreas)
+		if status == "buy" and not Ladder.helps(Config, levels, id) then
+			status = "useless"
+		end
 	elseif item and item.kind == "building" then
 		level, status = Items.buildingOffer(Config, Hud.buildings(), id, openAreas)
 	else
@@ -175,7 +154,7 @@ function Hud.offer(levels: { [string]: number }, id: string, money: number): (an
 			status = if (item :: Config.Item).area <= openAreas then "stand" else "locked"
 		end
 	end
-	return level, status, status == "buy" and money + MONEY_EPSILON >= level.cost
+	return level, status, status == "buy" and Items.affords(money, level.cost)
 end
 
 -- The open area the local player reaches (Items.reachable: Cloud Catcher needs the Jetpack Tank)
@@ -272,6 +251,7 @@ function Hud.start()
 	local progressLabel = find(progress, "Bar.Label")
 	local progressPop = find(progress, "Bar.Pop")
 	fillPop = progressPop
+	local litresLabel = find(progress, "Litres")
 	local shownFill, fillFrom, fillTo, fillChangedAt = 0, 0, 0, -math.huge
 
 	local cardToken = 0
@@ -360,7 +340,13 @@ function Hud.start()
 			shownFill = math.clamp(Ease.pop(fillFrom, fillTo, clock - fillChangedAt), 0, 1)
 			set(progressFill, "Size", UDim2.fromScale(shownFill, 1))
 			set(progressFill, "Visible", shownFill > 0)
-			set(progressLabel, "Text", string.format("%.1f%% filled", math.floor(target * 1000) / 10))
+			set(progressLabel, "Text", `{Format.fill(target)} filled`)
+			local current, goal = ReplicatedStorage:GetAttribute("Current"), ReplicatedStorage:GetAttribute("Target")
+			local known = type(current) == "number" and type(goal) == "number"
+			set(litresLabel, "Visible", known)
+			if known then
+				set(litresLabel, "Text", `{Format.litres(current)} / {Format.litres(goal)} L`)
+			end
 		end
 
 	end)

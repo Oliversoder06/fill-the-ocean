@@ -68,6 +68,12 @@ function Ladder.offer(config, levels: { [string]: number }, id: string, openArea
 	return level, (if level.area <= openAreas then "buy" else "locked") :: Status
 end
 
+-- Whether the next level of track `id` would change anything: pickup can't take a sweep off a tool
+-- that already fills in one (the shop and server don't sell it then).
+function Ladder.helps(config, levels: { [string]: number }, id: string): boolean
+	return id ~= "pickup" or Ladder.stats(config, levels).sweeps > 1
+end
+
 -- Walk there and back, the scoop sweeps, then one quick pour.
 function Ladder.tripSeconds(config, stats: Stats): number
 	return 2 * config.tripDistance / stats.walkSpeed + stats.sweeps * stats.actSeconds + config.pourSeconds
