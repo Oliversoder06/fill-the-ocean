@@ -139,12 +139,22 @@ local function watchSeat(player: Player, model: Model, seat: VehicleSeat)
 			seat:Sit(h)
 		end
 	end)
+	local lastRider: Humanoid? = nil
 	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
 		if not model:IsDescendantOf(workspace) then
 			return
 		end
 		local humanoid = seat.Occupant
 		prompt.Enabled = humanoid == nil
+		-- players pass through vehicles, so a driver who gets out would stand inside the body
+		local left = lastRider
+		lastRider = humanoid
+		if humanoid == nil and left and left.Parent and left.Health > 0 then
+			local box, size = model:GetBoundingBox()
+			local side = box * CFrame.new(-(size.X / 2 + 3), 0, 0)
+			local character = left.Parent :: Model
+			character:PivotTo(CFrame.new(side.Position.X, seat.Position.Y + 2, side.Position.Z) * box.Rotation)
+		end
 		local rider = humanoid and Players:GetPlayerFromCharacter(humanoid.Parent)
 		if humanoid and rider ~= player then
 			local weld = seat:FindFirstChild("SeatWeld")
