@@ -23,6 +23,10 @@
 -- and dropped there; their water lands through the same pour as a tool's.
 -- The team's buildings on the cove's plots (server/Buildings): Build(plot, itemId), TAB levels
 -- through Buy(itemId), their water poured on a tick and paid to everyone present.
+-- Each player's staff (server/Staff): hired at the Lifeguard Tower, assigned with Staff("assign",
+-- itemId, areaId) (saved per player in `assign`), their water poured on a tick and paid to the owner,
+-- faster while the owner works the same area (state.workArea, set by every accepted scoop and pour).
+-- Ticked pay (buildings, staff) waits in server/Payroll and is paid in batches.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
@@ -44,6 +48,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
+local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Water = require(ReplicatedStorage.Shared.Water)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Session = require(ReplicatedStorage.Shared.Session)
@@ -60,6 +65,8 @@ local HeldTools = require(script.Parent.HeldTools)
 local Buildings = require(script.Parent.Buildings)
 local Map = require(script.Parent.Map)
 local Mechanics = require(script.Parent.Mechanics)
+local Payroll = require(script.Parent.Payroll)
+local Staff = require(script.Parent.Staff)
 local Vehicles = require(script.Parent.Vehicles)
 
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
@@ -192,7 +199,8 @@ local function applyWalkSpeed(player: Player)
 	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		local state = states[player]
-		humanoid.WalkSpeed = AreaRules.walkSpeed(Config, boosted(state).walkSpeed, state.onSnow)
+		local walk = AreaRules.walkSpeed(Config, boosted(state).walkSpeed, state.onSnow)
+		humanoid.WalkSpeed = walk * StaffRules.walkFactor(Config, state.nearLifeguard)
 	end
 end
 
@@ -381,6 +389,7 @@ local function keepPlayer(player: Player, state)
 			litres = state.litres,
 			owned = table.clone(state.owned),
 			itemLevels = table.clone(state.itemLevels),
+			assign = table.clone(state.assign),
 		}
 	end
 end
@@ -498,7 +507,7 @@ local function endRun()
 	local save = run.save :: RunSave.Save
 	local map = run.map :: Maps.Map
 	save.finished = true
-	Buildings.payNow()
+	Payroll.payNow()
 	if run.key then
 		local key = run.key
 		if not saveNow("ocean full", END_SAVE_SECONDS) then
@@ -568,6 +577,7 @@ local function applySaved(player: Player)
 		local state = states[player]
 		state.money, state.levels, state.litres = saved.money, table.clone(saved.levels), saved.litres
 		state.owned, state.itemLevels = table.clone(saved.owned), table.clone(saved.itemLevels)
+		state.assign = table.clone(saved.assign)
 		state.stats = statsOf(state)
 	end
 end
@@ -688,7 +698,7 @@ local function onPlayerAdded(player: Player)
 		sendToLobby({ player }, "not part of a run from the lobby")
 		return
 	end
-	Buildings.payNow() -- what the buildings made before they came is the others'
+	Payroll.payNow() -- what the buildings made before they came is the others'
 	states[player] = {
 		money = 0,
 		carried = 0, -- litres in the tool
@@ -711,6 +721,10 @@ local function onPlayerAdded(player: Player)
 		iceHits = 0, -- hits on the current ice block (server/Mechanics, AreaRules.sweep)
 		onSnow = false, -- standing on snow terrain (server/Mechanics): walking is slower
 		rockAt = 0, -- os.clock() of the last accepted rock prompt (server/Mechanics)
+		assign = {} :: { [string]: number }, -- where each hired staff works (server/Staff)
+		workArea = 0, -- the area of the last accepted scoop or pour, at os.clock() workedAt (server/Staff)
+		workedAt = -math.huge,
+		nearLifeguard = false, -- near a Source a Lifeguard works (server/Staff): walking is faster
 	}
 	if run.save then
 		applySaved(player)
@@ -921,6 +935,11 @@ local function publishAct(player: Player, kind: string)
 	player:SetAttribute("ActAt", workspace:GetServerTimeNow())
 end
 
+-- The player works in area `id` now: their staff there work faster for a while (server/Staff).
+local function worked(state, id: number)
+	state.workArea, state.workedAt = id, os.clock()
+end
+
 -- `litres` land in the ocean: the water rises and a crossed milestone starts its boost. Callers
 -- check that the ocean takes them (Water.pourAmount) and then checkFull.
 local function raise(litres: number)
@@ -966,14 +985,19 @@ local function onAct(player: Player, kind: unknown)
 		return
 	end
 	local reach = if gun then Items.gadgetStat(Config, state, "waterGun", "range") :: number else ACT_REACH
-	local area, deep = nil, false
+	local area, deep, poured = nil, false, 0
 	if kind == "scoop" then
 		area, deep = scoopSpot(player)
 		if not area then
 			return
 		end
-	elseif not (nearFlood(player, reach) or openSpot(player, "Pour", reach)) then
-		return
+	else
+		-- where the water goes: the ocean (the cove's) or an open area's Pour
+		local into = if nearFlood(player, reach) then Areas.byId(Config, 1) else openSpot(player, "Pour", reach)
+		if not into then
+			return
+		end
+		poured = into.id
 	end
 	local hotFill = Items.gadgetStat(Config, state, "heatGloves", "hotFill")
 	local act = if area then AreaRules.scoopSeconds(state.stats.actSeconds, area, hotFill) else state.stats.actSeconds
@@ -989,6 +1013,7 @@ local function onAct(player: Player, kind: unknown)
 	end
 	if kind == "pour" then
 		if creditPour(state) then
+			worked(state, poured)
 			publishAct(player, kind)
 			publish(player)
 			checkFull()
@@ -997,6 +1022,7 @@ local function onAct(player: Player, kind: unknown)
 	end
 	-- Keep up to `slack` of earned time, so a late packet doesn't make the next on-time one look early.
 	state.nextActAt = math.max(state.nextActAt, now - slack) + act
+	worked(state, area.id)
 	publishAct(player, kind)
 	task.delay(act, function()
 		if states[player] ~= state or run.phase ~= "playing" or not state.equipped then
@@ -1054,7 +1080,8 @@ local function onStand(player: Player, area, prompt: ProximityPrompt, stand: str
 	state.itemLevels[item.id] = 0
 	state.stats = statsOf(state)
 	publish(player)
-	remotes.Card:FireClient(player, `You bought the {item.name}!`, CARD_SECONDS)
+	local bought = if item.kind == "staff" then `You hired a {item.name}! Assign them in TAB (Staff)` else `You bought the {item.name}!`
+	remotes.Card:FireClient(player, bought, CARD_SECONDS)
 	task.spawn(saveRun, `{player.Name} bought {item.id}`)
 end
 
@@ -1203,7 +1230,7 @@ end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build", "Staff" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Fill", 0)
@@ -1222,7 +1249,7 @@ function Run.start(oceanModel: Model)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
 	remotes.Gadget.OnServerEvent:Connect(onGadget)
-	-- What the area mechanics, the vehicles and the buildings may see and do in the run.
+	-- What the area mechanics, the vehicles, the buildings and the staff may see and do in the run.
 	local hooks = {
 		states = states,
 		playing = function()
@@ -1255,7 +1282,7 @@ function Run.start(oceanModel: Model)
 			publish(player)
 			checkFull()
 		end,
-		-- Building pay is the team's, raw: no Tip Jar or boost (those are a player's own pours).
+		-- Building and staff pay is raw: no Tip Jar or boost (those are a player's own pours).
 		fill = function(litres)
 			local taken = Water.pourAmount(litres, run.current, run.target)
 			if taken > 0 then
@@ -1273,9 +1300,11 @@ function Run.start(oceanModel: Model)
 		end,
 		vehicle = remotes.Vehicle,
 	}
+	Payroll.start(hooks)
 	Mechanics.start(ocean, hooks)
 	Vehicles.start(ocean, hooks)
 	Buildings.start(hooks, remotes.Build)
+	Staff.start(ocean, hooks, remotes.Staff)
 	RunService.Heartbeat:Connect(function(dt)
 		if run.phase ~= "playing" then
 			return
@@ -1320,7 +1349,7 @@ function Run.start(oceanModel: Model)
 		Vehicles.leave(player)
 		local state = states[player]
 		if state then
-			Buildings.payNow() -- the leaver keeps their share
+			Payroll.payNow() -- the leaver keeps their share and their staff's pay
 			keepPlayer(player, state)
 			states[player] = nil
 			task.spawn(saveRun, `{player.Name} left`)
@@ -1332,7 +1361,7 @@ function Run.start(oceanModel: Model)
 		if not run.key or run.lockLost then
 			return
 		end
-		Buildings.payNow()
+		Payroll.payNow()
 		if saveNow("server closing", CLOSE_SAVE_SECONDS) then
 			local ok, err = RunStore.unlock(run.key, serverId)
 			if not ok then

@@ -8,7 +8,7 @@
 -- level counts on every plot with that building (one TAB tile per kind, levelled by anyone).
 -- Output: while playing with someone present (D4), every building pours its rate (litres a second)
 -- into the ocean; its coins (BuildingRules.payPerLitre) are split evenly between the players
--- present, paid every PAY_SECONDS so the coin burst (client/Payout) doesn't fire every second.
+-- present and paid in batches (server/Payroll).
 -- Clogs: after BuildingRules.clogDelay seconds of play a building clogs and makes half until someone
 -- holds E on its Unclog prompt.
 -- Published: ReplicatedStorage BuildingLevel_<id> (upgrades bought; nil until the team builds one),
@@ -27,9 +27,9 @@ local BuildingRules = require(ReplicatedStorage.Shared.BuildingRules)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Items = require(ReplicatedStorage.Common.Items)
 local RunSave = require(ReplicatedStorage.Common.RunSave)
+local Payroll = require(script.Parent.Payroll)
 
 local TICK = 1 -- seconds between output ticks
-local PAY_SECONDS = 10 -- seconds between paydays
 local MAX_BUILDS_PER_SECOND = 2
 local MAX_UNCLOGS_PER_SECOND = 2
 local SIDES = { "ShopSide", "StaffSide" }
@@ -243,26 +243,6 @@ local function updateAqueducts()
 	end
 end
 
-local owed = 0 -- coins made since the last payday
-
--- Splits what the buildings made between the players present. server/Run also pays out before a
--- player joins or leaves and before its last saves, so no coins wait in `owed` across those.
-function Buildings.payNow()
-	local present = {}
-	for player in hooks.states do
-		table.insert(present, player)
-	end
-	if owed <= 0 or #present == 0 then
-		return
-	end
-	local share = owed / #present
-	owed = 0
-	for _, player in present do
-		hooks.states[player].money += share
-		hooks.publish(player)
-	end
-end
-
 -- One output tick of `dt` seconds: every building pours, clocks tick toward clogs.
 local function tick(dt: number)
 	updateAqueducts()
@@ -281,7 +261,7 @@ local function tick(dt: number)
 		end
 	end
 	if litres > 0 then
-		owed += hooks.fill(litres) * BuildingRules.payPerLitre(Config, hooks.openIds())
+		Payroll.share(hooks.fill(litres) * BuildingRules.payPerLitre(Config, hooks.openIds()))
 	end
 end
 
@@ -315,17 +295,12 @@ function Buildings.start(runHooks: Hooks, buildRemote: RemoteEvent)
 	updateAqueducts()
 	buildRemote.OnServerEvent:Connect(onBuild)
 
-	local sinceTick, sincePay = 0, 0
+	local sinceTick = 0
 	RunService.Heartbeat:Connect(function(dt)
 		sinceTick += dt
-		sincePay += dt
 		if sinceTick >= TICK then
 			tick(sinceTick)
 			sinceTick = 0
-		end
-		if sincePay >= PAY_SECONDS then
-			Buildings.payNow()
-			sincePay = 0
 		end
 	end)
 end

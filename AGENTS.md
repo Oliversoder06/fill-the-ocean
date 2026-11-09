@@ -50,8 +50,14 @@ Server (`src/server/`):
   network ownership, collision groups, hydrant fill, truck hose spray, bomber skim and drop; `Run`
   starts it with the same hooks as `Mechanics` and calls `leave` / `stop`.
 - `Buildings.luau`: the team's buildings on `workspace.Map.Plots.PlotN` (`Build` remote, TAB levels
-  via `Buy`, output on a tick paid to everyone present, clogs, aqueduct flow); `Run` starts it with
-  hooks. 3f's Plumber hook: `Buildings.setPlumber(scale, keepClear)`, `Buildings.unclog(plot)`.
+  via `Buy`, output on a tick split between everyone present, clogs, aqueduct flow); `Run` starts it
+  with hooks. 3f's Plumber hook: `Buildings.setPlumber(scale, keepClear)`, `Buildings.unclog(plot)`.
+- `Staff.luau`: each player's staff (Helper, Lifeguard, Firefighter, Plumber; hired at the Lifeguard
+  Tower, a cove shop): `Staff` remote (assign), output from rates on a tick (D4: owner present and
+  playing) at half the post's hand pay, 2x while the owner works that area (`state.workArea`, set in
+  `onAct`), Lifeguard walk bonus (`state.nearLifeguard`), Plumbers into `Buildings.setPlumber`.
+- `Payroll.luau`: ticked pay (buildings' `share`, staff's `owe`) paid in batches; `Run` calls
+  `Payroll.payNow()` before a join or leave, at the run's end and on close.
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
@@ -97,6 +103,10 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
 - `Buildings.luau`: the build picker (`Hud.BuildPicker`, options cloned from
   `Hud.Templates.BuildOption`) opened by a plot's prompt; scrolls flowing aqueducts' water.
+- `Staff.luau`: staff bodies: from each player's `Staff` attribute, clones of
+  `ReplicatedStorage.Staff.<Model>` (anchored root, `workspace.StaffBodies`) walk their loop
+  (Source/Pour, Fire Station/refill bay, plots), posed by the animation runtime's `AnimPlayer` with
+  `shared/StaffClips` (baked once per model); at most 30, nearest first, none past 250 studs.
 - `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
   tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
@@ -122,9 +132,19 @@ Shared (`src/shared/`, pure unless noted):
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
   vehicle's own area). Numbers in `Config.vehicle`; `Water.share` splits a tank's value.
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
+- `StaffRules.luau` (pure, tested): staff `targets` / `post` / `nextPost` (where each job may work),
+  `rate`, `payPerLitre`, `bonus` (2x), `plumber`, `walkFactor`, the `Staff` attribute's
+  `encode` / `decode`. Numbers in `Config.staff`.
+- `StaffClips.luau` (pure data, tested): the staff's clips and gaits for the animation runtime, and
+  `overlay` (the carry hold over the walk). `tests/StaffClips.spec` bakes and lints them on R15.
+
+Vendored (`vendor/Animation` -> `ReplicatedStorage.Animation`): the owner's roblox-animation
+runtime (pure core + `Roblox/` AnimPlayer etc.; `vendor/LICENSE`, `vendor/PROVENANCE.md`). Outside
+`src`, so `selene src` doesn't lint it; don't edit it here, update it from the skill.
 
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
-- `RunSave.luau` (pure): a team's saved run (its `buildings` levels and `plots`), its key, and the exact-team check (`sameTeam`).
+- `RunSave.luau` (pure): a team's saved run (its `buildings` levels and `plots`; per player `assign`,
+  staff id -> area id), its key, and the exact-team check (`sameTeam`).
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
   `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus` (plus the Jetpack Tank's),
   `standPick` (an area's stand or a cove shop in `Config.stands`; never a building), `gadgetStat`,
@@ -159,9 +179,12 @@ The server publishes state as attributes; the client only reads them.
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
   Vehicles (server/Vehicles): `Vehicle` (item id out or `""`), `Tank`, `TankMax` (whole litres),
   `Filling`, `VehicleSpraying`; the vehicle model carries `Owner` (UserId), `ItemId`, `Speed`, `Flies`.
+  Staff (server/Staff): `Staff` (`"helper:2@2,firefighter:1@0"`: id:hires@post, post 0 = nowhere).
 - Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it,
   or a built building's id to level it for the team),
   `Build` (plot number, building id; server checks plot empty, area open, price, reach, rate),
+  `Staff` (`"assign", itemId, areaId`: an owned staff's post, checked against
+  `StaffRules.targets`; rate-limited),
   `Equip` (boolean for the tool, or an owned hotbar gadget's id), `Act` (`"scoop"` or `"pour"`, sent
   when an action starts; the server credits a scoop ActSeconds later and a pour at once; with the
   Water Gun out a pour reaches its range), `Gadget` (`"clip"`, `"spray", on`, `"fly", on`;

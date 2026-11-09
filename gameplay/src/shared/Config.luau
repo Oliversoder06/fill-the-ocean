@@ -55,6 +55,10 @@ export type ItemLevel = {
 	speed: number?, -- vehicle: top speed, studs a second
 	fillRate: number?, -- vehicle: litres a second at a hydrant (the bomber: skimming a pool)
 	sprayRate: number?, -- truck: litres a second its hose sprays (the bomber drops its load at once)
+	hires: number?, -- staff: how many work (D3: up to 3)
+	carry: number?, -- Helper, Lifeguard: litres each brings a trip
+	tripSeconds: number?, -- staff: seconds one loop takes (scoop, walk, pour, back; a Firefighter's truck loop)
+	boost: number?, -- Plumber: the team's buildings' output scale (1.1 = +10 %)
 }
 
 -- A thing bought once at its area's stand (common/Items), then levelled in TAB.
@@ -69,7 +73,7 @@ export type Item = {
 	-- backpack: its Accessory in ReplicatedStorage.ToolModels.Backpacks; gadget: its Model in
 	-- ReplicatedStorage.ToolModels.Gadgets (held in the hand while it is out); vehicle: its Model in
 	-- ReplicatedStorage.Vehicles (server/Vehicles); building: its Model in ReplicatedStorage.Buildings
-	-- (placed on a plot)
+	-- (placed on a plot); staff: its rig in ReplicatedStorage.Staff (client/Staff walks a copy)
 	model: string?,
 	-- gadget: how it is used from its hotbar slot; nil = it works on its own once owned (no slot)
 	use: ("pour" | "hose" | "fly")?,
@@ -87,6 +91,13 @@ export type Item = {
 	fillRate: number?,
 	sprayRate: number?,
 	flies: boolean?, -- vehicle: the Water Bomber flies, skims pools and drops its load on the ocean
+	-- staff: where it works (shared/StaffRules.targets): "area" an open area's loop, "truck" an owned
+	-- vehicle's loop at that vehicle's area, "plots" the team's buildings
+	job: ("area" | "truck" | "plots")?,
+	hires: number?,
+	carry: number?,
+	tripSeconds: number?,
+	boost: number?,
 	levels: { ItemLevel }, -- upgrades in order, after the first buy
 }
 
@@ -483,12 +494,82 @@ local buildings = {
 -- area. Every minSeconds-maxSeconds of play a building clogs and makes `factor` of its rate until
 -- someone holds its Unclog prompt.
 Config.buildings = { payShare = 0.5, clog = { minSeconds = 240, maxSeconds = 420, factor = 0.5 } }
-local staff = {} -- 3f: Helper, Lifeguard, Firefighter, Plumber
+
+local function hire(id: string, name: string, area: number, job: "area" | "truck" | "plots", price: number, about: string, stats, levels: { ItemLevel }): Item
+	return {
+		id = id,
+		name = name,
+		kind = "staff",
+		area = area,
+		stand = "Stage_Ocean_LifeguardTower",
+		price = price,
+		about = about,
+		model = name,
+		job = job,
+		hires = 1,
+		carry = stats.carry,
+		tripSeconds = stats.tripSeconds,
+		boost = stats.boost,
+		levels = levels,
+	}
+end
+
+-- Staff (D3, server/Staff, shared/StaffRules): each player's own, hired at the Lifeguard Tower once
+-- their area is open and assigned in TAB. The buy is the first hire; TAB levels add a 2nd and a 3rd
+-- hire with a speed level (shorter trip) and a carry level between them. Their output follows from
+-- the stats (hires x carry / tripSeconds litres a second, no physics), paid to the owner at half the
+-- hand pay of the area they work (Config.staff.payShare), twice as fast while the owner works there.
+-- Each is sized to its area's band like the buildings: it costs about that area's Pump-like price
+-- and each hire (the buy, the 2nd, the 3rd) pays itself back in about 13 minutes at its own area;
+-- the speed and carry levels between them pay back a little slower. Its litres never grow with the
+-- area it works, so a Helper moved to a later area earns that area's pay on a trickle of water.
+--   Helper (2): 30 L every 15 s = 2 L/s next to a ~10 L/s hand rate, 50 coins/s for 40K: 13 min
+--   Lifeguard (3): scoops faster (10 s trips), 400 L = 40 L/s next to ~200 L/s by hand, 5,000
+--     coins/s for 4M: 13 min; players near the water it watches walk 10 % faster
+--   Firefighter (4): one tank of the owner's vehicle every 300 s (a solo fill, drive and spray at
+--     a staff pace); sized for its area's Snowcat Tanker (250,000 L = 833 L/s, 520K coins/s for 400M:
+--     13 min); an earlier truck makes its own small share
+--   Plumber (5): no water of its own: the team's buildings never clog and make +10 % / 15 % / 20 %.
+--     A team at Cloud Catcher with two or three Rain Machines makes 12-19M coins/s; a clog halves
+--     one for a few minutes now and then, so keeping them clear plus 10 % is worth ~2.5M coins/s to
+--     the team (the hirer's share less): 1.5B pays back in about 10 minutes for the team
+local staff = {
+	hire("helper", "Helper", 2, "area", 40000, "Scoops and pours for you in the area you pick, on their own.", { carry = 30, tripSeconds = 15 }, {
+		{ cost = 10000, hires = 1, carry = 30, tripSeconds = 12 },
+		{ cost = 50000, hires = 2, carry = 30, tripSeconds = 12 },
+		{ cost = 60000, hires = 2, carry = 45, tripSeconds = 12 },
+		{ cost = 80000, hires = 3, carry = 45, tripSeconds = 12 },
+		{ cost = 120000, hires = 3, carry = 45, tripSeconds = 9 },
+	}),
+	hire("lifeguard", "Lifeguard", 3, "area", 4e6, "Scoops faster than a Helper, and everyone near the water they watch walks 10% faster.", { carry = 400, tripSeconds = 10 }, {
+		{ cost = 1e6, hires = 1, carry = 400, tripSeconds = 8 },
+		{ cost = 5e6, hires = 2, carry = 400, tripSeconds = 8 },
+		{ cost = 6e6, hires = 2, carry = 600, tripSeconds = 8 },
+		{ cost = 8e6, hires = 3, carry = 600, tripSeconds = 8 },
+		{ cost = 12e6, hires = 3, carry = 600, tripSeconds = 6 },
+	}),
+	hire("firefighter", "Firefighter", 4, "truck", 400e6, "Runs your vehicle's loop on their own: a full tank into the ocean every few minutes.", { tripSeconds = 300 }, {
+		{ cost = 100e6, hires = 1, tripSeconds = 240 },
+		{ cost = 500e6, hires = 2, tripSeconds = 240 },
+		{ cost = 600e6, hires = 2, tripSeconds = 180 },
+		{ cost = 700e6, hires = 3, tripSeconds = 180 },
+		{ cost = 1.2e9, hires = 3, tripSeconds = 150 },
+	}),
+	hire("plumber", "Plumber", 5, "plots", 1.5e9, "Keeps the team's buildings from clogging and makes them pour 10% more.", { boost = 1.1 }, {
+		{ cost = 3e9, hires = 2, boost = 1.15 },
+		{ cost = 6e9, hires = 3, boost = 1.2 },
+	}),
+} :: { Item }
+
+-- Staff (server/Staff): a staff litre pays `payShare` of its area's hand pay; staff work `workBonus`
+-- times as fast while their owner scooped or poured in the same area within `workSeconds`. Players
+-- within `lifeguardRadius` studs of a Source a Lifeguard works walk `lifeguardWalk` times as fast.
+Config.staff = { payShare = 0.5, workBonus = 2, workSeconds = 10, lifeguardRadius = 25, lifeguardWalk = 1.1 }
 
 -- Cove shops that sell items instead of the cove's stand (Item.stand), whatever the items' area: the
--- shop's model in workspace.Map.Town (holding a ProximityPrompt "Prompt", server/Map.shop) and its
--- name in the shop.
-Config.stands = { ToolShack = "Tool Shack", FireStation = "Fire Station" }
+-- shop's model in workspace.Map.Town or workspace.Map.Beach (holding a ProximityPrompt "Prompt",
+-- server/Map.shopPrompt) and its name in the shop.
+Config.stands = { ToolShack = "Tool Shack", FireStation = "Fire Station", Stage_Ocean_LifeguardTower = "Lifeguard Tower" }
 
 -- Driving and filling (server/Vehicles, client/Vehicles, shared/VehicleRules), in studs and seconds.
 -- hydrantReach: a truck parked (slower than parkedSpeed) this close to a hydrant fills; hoseReach: its

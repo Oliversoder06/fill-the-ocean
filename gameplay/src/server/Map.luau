@@ -31,8 +31,9 @@
 --   steam     Vents: a Folder or Model of vent parts (each bursts steam, client/Mechanics)
 --   cloud     CloudPath: a Folder or Model of 3-4 parts Point1..PointN the anchored Source drifts
 --             between (its visible cloud is welded to it, unanchored)
--- Cove shops that sell their own items (Config.stands): workspace.Map.Town.<name> (a part or Model)
--- holding a ProximityPrompt "Prompt" (server/Run), e.g. Town.ToolShack sells the Water Gun.
+-- Cove shops that sell their own items (Config.stands): workspace.Map.Town.<name> or
+-- workspace.Map.Beach.<name> (a part or Model) holding a ProximityPrompt "Prompt" (server/Run), e.g.
+-- Town.ToolShack sells the Water Gun and Beach.Stage_Ocean_LifeguardTower hires the staff.
 -- Vehicles (server/Vehicles): Town.FireStation also holds a ProximityPrompt "CallPrompt" (brings the
 -- player's vehicle out) and a part "VehicleSpawn" (where it appears, facing the part's front).
 -- Vehicles fill at hydrants: workspace.Map.Roads.TruckRefillBay1 and TruckRefillBay2 (the cove's) and
@@ -102,13 +103,14 @@ function Map.standPrompt(stand: Instance): ProximityPrompt?
 	return if prompt and prompt:IsA("ProximityPrompt") then prompt else nil
 end
 
--- A cove shop's ProximityPrompt (workspace.Map.Town.<name>, Config.stands); fails loudly when the
--- place doesn't have it.
+-- A cove shop's ProximityPrompt (workspace.Map.Town.<name> or Map.Beach.<name>, Config.stands); fails
+-- loudly when the place doesn't have it.
 function Map.shopPrompt(name: string): ProximityPrompt
 	local scenery = workspace:FindFirstChild("Map")
 	local town = scenery and scenery:FindFirstChild("Town")
-	local shop = town and town:FindFirstChild(name)
-	assert(shop, `workspace.Map.Town.{name} is missing (a cove shop, Config.stands)`)
+	local beach = scenery and scenery:FindFirstChild("Beach")
+	local shop = (town and town:FindFirstChild(name)) or (beach and beach:FindFirstChild(name))
+	assert(shop, `workspace.Map.Town.{name} or workspace.Map.Beach.{name} is missing (a cove shop, Config.stands)`)
 	local prompt = Map.standPrompt(shop)
 	assert(prompt, `{shop:GetFullName()} needs a ProximityPrompt "Prompt"`)
 	return prompt

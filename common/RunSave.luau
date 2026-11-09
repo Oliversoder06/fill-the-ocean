@@ -2,13 +2,15 @@
 -- A team's saved run: its shape, its key and the exact-team check. Pure: Lune-tested.
 -- RunStore does the DataStore calls; the gameplay server is the only writer.
 
--- owned: item ids bought at the stands (common/Items); itemLevels: upgrades bought per owned item.
+-- owned: item ids bought at the stands (common/Items); itemLevels: upgrades bought per owned item;
+-- assign: where each hired staff works (staff item id -> area id, shared/StaffRules.post).
 export type PlayerState = {
 	money: number,
 	levels: { [string]: number },
 	litres: number,
 	owned: { string },
 	itemLevels: { [string]: number },
+	assign: { [string]: number },
 }
 
 -- players is keyed by user id as a string: DataStores need string keys.
@@ -92,12 +94,22 @@ local function sanitizePlayer(raw: { [any]: any }): PlayerState
 			end
 		end
 	end
+	-- staff posts are area ids 1-5; saves from before 3f have none
+	local assign = {}
+	if type(raw.assign) == "table" then
+		for id, area in raw.assign do
+			if type(id) == "string" and type(area) == "number" and area % 1 == 0 and area >= 1 and area <= 5 then
+				assign[id] = area
+			end
+		end
+	end
 	return {
 		money = amount(raw.money),
 		levels = counts(raw.levels),
 		litres = amount(raw.litres),
 		owned = owned,
 		itemLevels = counts(raw.itemLevels),
+		assign = assign,
 	}
 end
 

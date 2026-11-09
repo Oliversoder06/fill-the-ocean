@@ -203,6 +203,28 @@ function tests.sanitize_plots(t)
 	t.expectEq(count(broken.plots), 0)
 end
 
+-- 3f: where each of a player's staff works (staff item id -> area id 1-5).
+function tests.sanitize_staff_assignments(t)
+	local save = RunSave.sanitize({
+		mapId = "ocean1",
+		members = { 1 },
+		players = {
+			["1"] = { money = 1, assign = { helper = 2, lifeguard = 3.5, plumber = 1, firefighter = 6, x = 0, [2] = 2, y = "2", z = 0 / 0 } },
+		},
+	})
+	assert(save, "sanitize returned nil for a repairable save")
+	local assign = save.players["1"].assign
+	t.expectEq(assign.helper, 2)
+	t.expectEq(assign.plumber, 1)
+	t.expectEq(count(assign), 2, "areas are whole numbers 1-5 by string id")
+	local old = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { money = 5 } } })
+	assert(old, "an old save must load")
+	t.expectEq(count(old.players["1"].assign), 0, "a save from before staff has no assignments")
+	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { assign = "all" } } })
+	assert(broken, "bad assignments must not drop the save")
+	t.expectEq(count(broken.players["1"].assign), 0)
+end
+
 function tests.sanitize_rejects_non_tables(t)
 	t.expectEq(RunSave.sanitize(nil), nil)
 	t.expectEq(RunSave.sanitize("save"), nil)

@@ -28,6 +28,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
   `C:\RobloxDev\shared` -> ReplicatedStorage.Kit (UI and Lib). A change in Kit changes every game.
   Both projects also map `common/` -> ReplicatedStorage.Common (save progress, run
   tickets, retries, place IDs) and declare their RemoteEvents in ReplicatedStorage.Remotes.
+  gameplay also maps `vendor/Animation` -> ReplicatedStorage.Animation (the owner's roblox-animation
+  runtime, vendored with its LICENSE and PROVENANCE; staff bodies use it).
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
 - Nothing is generated at runtime. Baked into the places and only checked by code:
@@ -41,6 +43,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     `workspace.Map.Town.FireStation` (`Prompt` sells vehicles, `CallPrompt` and part `VehicleSpawn`
     bring one out), `ReplicatedStorage.Vehicles.<Model>` (VehicleSeat `Seat` with a `DrivePrompt`),
     hydrants (`Map.Roads.TruckRefillBay1/2`, `Areas.<Name>.Hydrant`; server/Map),
+    `workspace.Map.Beach.Stage_Ocean_LifeguardTower`'s ProximityPrompt `Prompt` (hires staff),
+    `ReplicatedStorage.Staff.<Model>` (R15 staff rigs with a PrimaryPart; client/Staff walks copies),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.

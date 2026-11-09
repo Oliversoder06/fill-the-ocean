@@ -19,6 +19,9 @@
       "Common": {
         "$path": "../common"
       },
+      "Animation": {
+        "$path": "vendor/Animation"
+      },
       "Remotes": {
         "$className": "Folder",
         "Buy": {
@@ -46,6 +49,9 @@
           "$className": "RemoteEvent"
         },
         "Build": {
+          "$className": "RemoteEvent"
+        },
+        "Staff": {
           "$className": "RemoteEvent"
         }
       }

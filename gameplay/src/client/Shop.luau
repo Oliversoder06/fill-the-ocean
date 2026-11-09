@@ -5,9 +5,12 @@
 -- sends Buy(trackId). The server checks every buy.
 -- Tabs (Body.Tabs): Tools (the tracks), Gear (one tile per backpack and gadget in GearPanel), Vehicles
 -- (one tile per vehicle in VehiclePanel), Buildings (one tile per building in BuildingPanel: the
--- team's levels, server/Buildings), and Staff, which shows ComingSoon until its items exist. Items are
+-- team's levels, server/Buildings), and Staff (one tile per staff in StaffPanel; ComingSoon stands in
+-- for a tab without panels). Items are
 -- bought once at their area's stand (buildings on a plot); here an owned one shows its level and its
--- Buy button sends Buy(itemId) to level it up, and an unowned one says where to buy it.
+-- Buy button sends Buy(itemId) to level it up, and an unowned one says where to buy it. An owned
+-- staff's detail also shows Detail.AssignButton, which sends Staff("assign", itemId, areaId) with the
+-- next post it may work (StaffRules.nextPost; the server checks it).
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,6 +21,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
+local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
@@ -49,11 +53,12 @@ local TAB_PANELS = {
 	Gear = { "GearPanel" },
 	Vehicles = { "VehiclePanel" },
 	Buildings = { "BuildingPanel" },
+	Staff = { "StaffPanel" },
 }
 -- the tab panel holding each kind's tiles
-local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel", vehicle = "VehiclePanel", building = "BuildingPanel" }
+local ITEM_PANELS = { backpack = "GearPanel", gadget = "GearPanel", vehicle = "VehiclePanel", building = "BuildingPanel", staff = "StaffPanel" }
 -- the detail panel's category line; the rest say "Gear"
-local ITEM_CATEGORIES = { vehicle = "Vehicle", building = "Building" }
+local ITEM_CATEGORIES = { vehicle = "Vehicle", building = "Building", staff = "Staff" }
 
 -- Tiles take their panel's tag colour, so the colour says which group an upgrade belongs to.
 local function panelColor(track): Color3
@@ -169,10 +174,22 @@ local function buildingEffect(stat)
 	return `Makes {short(stat("rate"))} L/s on every plot it stands on`
 end
 
-local KIND_EFFECTS = { vehicle = vehicleEffect, building = buildingEffect }
+-- What a staff does at some level, by its job (Config.items `job`).
+local function staffEffect(stat, item): string
+	local hires = stat("hires")
+	local who = if hires == 1 then "1 hired" else `{hires} hired`
+	if item.job == "area" then
+		return `{who}, each brings {short(stat("carry"))} L every {stat("tripSeconds")}s`
+	elseif item.job == "truck" then
+		return `{who}, each empties your vehicle's tank every {stat("tripSeconds")}s`
+	end
+	return `{who}: buildings never clog and make +{math.floor((stat("boost") - 1) * 100 + 0.5)}%`
+end
 
--- What an item does now and after its next upgrade: a backpack's litres, a gadget's, vehicle's or
--- building's stats.
+local KIND_EFFECTS = { vehicle = vehicleEffect, building = buildingEffect, staff = staffEffect }
+
+-- What an item does now and after its next upgrade: a backpack's litres, a gadget's, vehicle's,
+-- building's or staff's stats.
 local function itemEffect(item, level, owned: boolean): string
 	local function nowStat(name: string): number
 		if not owned then
@@ -186,10 +203,10 @@ local function itemEffect(item, level, owned: boolean): string
 		if level then
 			local after = effect(function(name: string): number
 				return level[name]
-			end)
-			return `Next: {after} (now: {effect(nowStat)})`
+			end, item)
+			return `Next: {after} (now: {effect(nowStat, item)})`
 		end
-		return effect(nowStat)
+		return effect(nowStat, item)
 	end
 	local now = nowStat("capacity")
 	if level then
@@ -212,9 +229,43 @@ local function bounce(scale: UIScale)
 	TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 end
 
+-- Where an owned staff works (the server's Staff attribute: an area id, 0 for nowhere), or nil until
+-- the server has published it.
+local function postOf(id: string): number?
+	for _, entry in StaffRules.decode(player:GetAttribute("Staff")) do
+		if entry.id == id then
+			return entry.post
+		end
+	end
+	return nil
+end
+
+-- The posts staff `item` may work now, as the server checks them (StaffRules.targets).
+local function postsOf(item): { number }
+	local items = Hud.items()
+	return StaffRules.targets(Config, item, items.owned, Items.reachable(Config, items, Areas.openIds(Hud.gatesOpen())))
+end
+
+-- The Assign button's text for staff `item` working at `post`.
+local function assignText(item, post: number?): string
+	if item.job == "plots" then
+		return "FIXES THE TEAM'S BUILDINGS"
+	elseif not post or post == 0 then
+		return if item.job == "truck" then "BUY A VEHICLE FIRST" else "..."
+	elseif item.job == "truck" then
+		for _, vehicle in Config.items do
+			if vehicle.kind == "vehicle" and vehicle.area == post then
+				return `DRIVES THE {vehicle.name:upper()}`
+			end
+		end
+	end
+	return `WORKS AT {Areas.byId(Config, post).name:upper()}`
+end
+
 function Shop.start()
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local buyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Buy") :: RemoteEvent
+	local staffRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Staff") :: RemoteEvent
 	local shop = Hud.find(gui, "Shop")
 	local fit = Hud.find(gui, "Shop.Scale")
 	local content = Hud.find(gui, "Shop.Body.Content")
@@ -224,6 +275,8 @@ function Shop.start()
 	local buyText = Hud.find(buyButton, "Row.BuyText")
 	local buyCoin = Hud.find(buyButton, "Row.Coin")
 	local buyPrice = Hud.find(buyButton, "Row.Price")
+	local assignButton = Hud.find(detail, "AssignButton")
+	local assignLabel = Hud.find(assignButton, "Label")
 	local closeButton = Hud.find(shop, "CloseButton")
 	local tiles = {}
 	for _, track in Config.tracks do
@@ -375,6 +428,22 @@ function Shop.start()
 		end
 		buyRemote:FireServer(selected)
 	end)
+	-- Assign: the selected staff moves to its next allowed post.
+	pressable(assignButton, assignButton.Press)
+	assignButton.Activated:Connect(function()
+		local item = Items.get(Config, selected)
+		if not (item and item.kind == "staff" and Items.owned(Hud.items(), item.id)) then
+			return
+		end
+		local now = postOf(item.id)
+		local post = StaffRules.nextPost(postsOf(item), now)
+		if post and post ~= now then
+			bounce(assignButton.Press)
+			staffRemote:FireServer("assign", item.id, post)
+		else
+			Purchase.deny(assignButton)
+		end
+	end)
 
 	-- Shows the tool model (tool track) or the track's icon (a lock while locked) in an art slot.
 	local shownModels: { [Instance]: string } = {}
@@ -508,10 +577,16 @@ function Shop.start()
 				set(buyPrice, "Text", Hud.money(level.cost))
 			end
 			set(buyButton, "ImageColor3", if canLevel then colors.buyCoral else colors.locked)
+			local hired = selectedItem.kind == "staff" and bought ~= nil
+			set(assignButton, "Visible", hired)
+			if hired then
+				set(assignLabel, "Text", assignText(selectedItem, postOf(selectedItem.id)))
+			end
 			return
 		end
 
 		-- Detail panel: the selected track's next level
+		set(assignButton, "Visible", false)
 		local track = Config.track(selected) :: Config.Track
 		local have = levels[selected]
 		local level, status, canBuy = Hud.offer(levels, selected, money)
