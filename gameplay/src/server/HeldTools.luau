@@ -5,6 +5,10 @@
 -- The worn backpack (player attribute Backpack, a model name or "") goes on the back: a clone of the
 -- Accessory ReplicatedStorage.ToolModels.Backpacks.<name>, whose Handle holds an Attachment
 -- "BodyBackAttachment" so Humanoid:AddAccessory welds it to the back.
+-- A hotbar gadget out (player attribute Gadget, an item id) is held instead of the tool: a clone of
+-- ReplicatedStorage.ToolModels.Gadgets.<item.model>. Run also drives two gadget pieces directly
+-- (setHose, setLift): the Garden Hose's rope from its tap to the hand, and the Jetpack Tank's lift,
+-- which exists only while the server lets the player fly.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -14,8 +18,13 @@ local ToolView = require(ReplicatedStorage.Shared.ToolView)
 local HELD_NAME = "HeldTool"
 local GRIP_NAME = "HeldGrip"
 local PACK_NAME = "WornBackpack"
+local ROPE_NAME = "HoseRope"
+local LIFT_NAME = "JetpackLift"
+local LIFT_FORCE = 2 -- the lift's strongest push, in body weights (climbs at riseSpeed, then holds it)
 
 local HeldTools = {}
+
+local gadgetModels: { [string]: string } = {} -- gadget item id -> its model in ToolModels.Gadgets
 
 local function hand(character: Model): BasePart?
 	local h = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
@@ -38,13 +47,17 @@ end
 
 local function refresh(player: Player)
 	local character = player.Character
-	local modelName = player:GetAttribute("ToolModel")
+	local toolName = player:GetAttribute("ToolModel")
 	local h = character and hand(character)
-	if not (character and h and type(modelName) == "string") then
+	if not (character and h and type(toolName) == "string") then
 		return
 	end
 	local held = character:FindFirstChild(HELD_NAME)
-	if player:GetAttribute("Equipped") == false then
+	-- In hand: the hotbar gadget, else the tool while it is out, else nothing.
+	local gadgetId = player:GetAttribute("Gadget")
+	local gadget = if type(gadgetId) == "string" then gadgetModels[gadgetId] else nil
+	local modelName = gadget or toolName
+	if not gadget and player:GetAttribute("Equipped") == false then
 		if held then
 			held:Destroy()
 		end
@@ -54,7 +67,7 @@ local function refresh(player: Player)
 		if held then
 			held:Destroy()
 		end
-		local model = ToolModels.get(modelName):Clone()
+		local model = ToolModels.get(modelName, if gadget then "Gadgets" else nil):Clone()
 		local extents = model:GetExtentsSize()
 		local scale = ToolView.heldScale(math.max(extents.X, extents.Y, extents.Z))
 		if scale < 1 then
@@ -91,6 +104,72 @@ local function refresh(player: Player)
 		held = model
 	end
 	ToolModels.setWater(held :: Model, (player:GetAttribute("Carried") or 0) > 0)
+end
+
+-- The Garden Hose's rope: from `tap`'s Attachment "Hose" to the right hand, `length` studs long, so
+-- it also keeps the player within reach. Nil `tap` takes it off. Called on every publish (server/Run).
+function HeldTools.setHose(player: Player, tap: BasePart?, length: number)
+	local character = player.Character
+	local rope = character and character:FindFirstChild(ROPE_NAME)
+	local h = character and hand(character)
+	local grip = h and h:FindFirstChild("RightGripAttachment")
+	if not (tap and character and grip and grip:IsA("Attachment")) then
+		if rope then
+			rope:Destroy()
+		end
+		return
+	end
+	local from = tap:FindFirstChild("Hose") :: Attachment -- checked by server/Map.ensure
+	if rope and rope:IsA("RopeConstraint") and rope.Attachment0 == from and rope.Attachment1 == grip then
+		rope.Length = length
+		return
+	end
+	if rope then
+		rope:Destroy()
+	end
+	local new = Instance.new("RopeConstraint")
+	new.Name = ROPE_NAME
+	new.Attachment0 = from
+	new.Attachment1 = grip
+	new.Length = length
+	new.Visible = true
+	new.Parent = character
+end
+
+-- The Jetpack Tank's lift: a vertical-only LinearVelocity on the root that climbs at `riseSpeed`
+-- studs a second (walking still steers sideways). Nil turns it off. Called on every publish
+-- (server/Run), which turns it off the moment the fuel runs out.
+function HeldTools.setLift(player: Player, riseSpeed: number?)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not (root and root:IsA("BasePart")) then
+		return
+	end
+	local lift = root:FindFirstChild(LIFT_NAME)
+	if not riseSpeed then
+		if lift and lift:IsA("LinearVelocity") then
+			lift.Enabled = false
+		end
+		return
+	end
+	if not lift then
+		local attachment = Instance.new("Attachment")
+		attachment.Name = `{LIFT_NAME}Attachment`
+		attachment.Parent = root
+		local velocity = Instance.new("LinearVelocity")
+		velocity.Name = LIFT_NAME
+		velocity.Attachment0 = attachment
+		velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+		velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+		velocity.LineDirection = Vector3.yAxis
+		velocity.Enabled = false
+		velocity.Parent = root
+		lift = velocity
+	end
+	local velocity = lift :: LinearVelocity
+	velocity.LineVelocity = riseSpeed
+	velocity.MaxForce = root.AssemblyMass * workspace.Gravity * LIFT_FORCE
+	velocity.Enabled = true
 end
 
 -- Puts the worn backpack on the character's back, swapping it when a bigger one is bought.
@@ -143,6 +222,9 @@ local function track(player: Player)
 	player:GetAttributeChangedSignal("Equipped"):Connect(function()
 		refresh(player)
 	end)
+	player:GetAttributeChangedSignal("Gadget"):Connect(function()
+		refresh(player)
+	end)
 	player:GetAttributeChangedSignal("Backpack"):Connect(function()
 		refreshPack(player)
 	end)
@@ -158,6 +240,12 @@ end
 
 function HeldTools.start(config)
 	ToolModels.check(config)
+	for _, item in config.items do
+		if item.kind == "gadget" then
+			gadgetModels[item.id] = item.model
+		end
+	end
+
 	Players.PlayerAdded:Connect(track)
 	for _, player in Players:GetPlayers() do
 		track(player)

@@ -38,6 +38,9 @@
         },
         "Admin": {
           "$className": "RemoteEvent"
+        },
+        "Gadget": {
+          "$className": "RemoteEvent"
         }
       }
     },

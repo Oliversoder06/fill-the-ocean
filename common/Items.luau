@@ -88,10 +88,52 @@ function Items.stat(state: State, item, name: string): number
 	return level[name]
 end
 
--- Extra litres carried on top of the tool: the worn backpack's, 0 without one.
+-- Gadget `id`'s stat at its bought level, or nil when the player doesn't own it (or id is unknown).
+function Items.gadgetStat(config, state: State, id: any, name: string): number?
+	local item = Items.get(config, id)
+	return if item and Items.owned(state, item.id) then Items.stat(state, item, name) else nil
+end
+
+-- Extra litres carried on top of the tool: the worn backpack's plus every owned gadget that holds
+-- water (the Jetpack Tank); 0 without them.
 function Items.capacityBonus(config, state: State): number
 	local worn = Items.backpack(config, state)
-	return if worn then Items.stat(state, worn, "capacity") else 0
+	local bonus = if worn then Items.stat(state, worn, "capacity") else 0
+	for _, item in config.items do
+		if item.kind == "gadget" and item.capacity and Items.owned(state, item.id) then
+			bonus += Items.stat(state, item, "capacity")
+		end
+	end
+	return bonus
+end
+
+-- The hotbar's gadget slots: owned gadgets used by hand (a `use`), in config order.
+function Items.slots(config, state: State)
+	local slots = {}
+	for _, item in config.items do
+		if item.kind == "gadget" and item.use and Items.owned(state, item.id) then
+			table.insert(slots, item)
+		end
+	end
+	return slots
+end
+
+-- The area ids of `ids` (open areas, in order) this player reaches: an area that `needs` an item
+-- (Cloud Catcher: the Jetpack Tank) only when they own it.
+function Items.reachable(config, state: State, ids: { number }): { number }
+	local reached = {}
+	for _, id in ids do
+		local needs = nil
+		for _, area in config.areas do
+			if area.id == id then
+				needs = area.needs
+			end
+		end
+		if not needs or Items.owned(state, needs) then
+			table.insert(reached, id)
+		end
+	end
+	return reached
 end
 
 -- A copy of the tool's stats (Ladder.stats) with the gear on. The pack fills once the tool is full,
@@ -107,11 +149,12 @@ function Items.withGear(config, state: State, stats)
 end
 
 -- What a press on area `areaId`'s stand buys: the cheapest item sold there that canBuy allows now,
--- or nil. One prompt per stand, so it picks for the player (a picker comes with more items, 3b).
-function Items.standPick(config, state: State, areaId: number, openAreas: number, money: number)
+-- or nil. `stand`: a cove shop (Config.stands) instead of the area's own stand; each sells only its
+-- own items. One prompt per stand, so it picks for the player.
+function Items.standPick(config, state: State, areaId: number, openAreas: number, money: number, stand: string?)
 	local pick = nil
 	for _, item in config.items do
-		if item.area == areaId and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
+		if item.area == areaId and item.stand == stand and Items.canBuy(config, state, item.id, openAreas, money) and (not pick or item.price < pick.price) then
 			pick = item
 		end
 	end

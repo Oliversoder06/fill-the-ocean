@@ -1,7 +1,10 @@
 -- The hotbar (StarterGui.Hud.Hotbar, built in Studio): one slot showing the current tool. Press 1,
 -- gamepad X or click the slot to put the tool away or take it out (the server decides). The fill
 -- bar above the slot shows the tool at its left end and "carried / capacity" litres, only while
--- the tool is out.
+-- the tool or a gadget is out (the Jetpack Tank's fuel while it is out).
+-- Gadget slots (Hotbar.Gadgets.<itemId>, one per hotbar gadget in Config.items, built like Slot):
+-- shown once owned; press 2, 3, 4 (in config order), gamepad DPadRight (next one) or click a slot to
+-- take that gadget out instead of the tool, again to put it away. The server decides (Equip remote).
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,6 +12,8 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Config = require(ReplicatedStorage.Shared.Config)
+local Items = require(ReplicatedStorage.Common.Items)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Hud = require(script.Parent.Hud)
@@ -21,6 +26,7 @@ local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Ou
 local POP = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local FILL_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local FILL_POP_SCALE = 1.08 -- the bar swells a little each time water lands (shows even at 100%)
+local GADGET_KEYS = { Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four }
 
 local Hotbar = {}
 
@@ -46,11 +52,52 @@ function Hotbar.start()
 	local ring = Hud.find(slot, "Ring")
 	local view = Hud.find(slot, "View")
 	local press = Hud.find(slot, "Press")
+	-- Hotbar gadgets (a `use`), in config order: each one's slot and key.
+	local gadgets = {}
+	for _, item in Config.items do
+		if item.kind == "gadget" and item.use then
+			local gadgetSlot = Hud.find(bar, `Gadgets.{item.id}`)
+			table.insert(gadgets, {
+				item = item,
+				slot = gadgetSlot,
+				ring = Hud.find(gadgetSlot, "Ring"),
+				view = Hud.find(gadgetSlot, "View"),
+				press = Hud.find(gadgetSlot, "Press"),
+				shown = false,
+			})
+		end
+	end
+	assert(#gadgets <= #GADGET_KEYS, "Hotbar: more hotbar gadgets than keys")
 
+	local function bump(scale: UIScale)
+		scale.Scale = motion.pressScale
+		TweenService:Create(scale, POP, { Scale = 1 }):Play()
+	end
+	-- The tool: out (also from a gadget) or away.
 	local function toggle()
 		equipRemote:FireServer(player:GetAttribute("Equipped") == false)
-		press.Scale = motion.pressScale
-		TweenService:Create(press, POP, { Scale = 1 }):Play()
+		bump(press)
+	end
+	-- A gadget: out instead of the tool, or away when it already is. Only owned ones have a slot.
+	local function pick(entry)
+		if not Items.owned(Hud.items(), entry.item.id) then
+			return
+		end
+		equipRemote:FireServer(if player:GetAttribute("Gadget") == entry.item.id then false else entry.item.id)
+		bump(entry.press)
+	end
+	-- Gamepad: the next owned gadget after the one out (the tool after the last).
+	local function cycle()
+		local owned = Items.slots(Config, Hud.items())
+		local out = player:GetAttribute("Gadget")
+		local at = 0
+		for i, item in owned do
+			if item.id == out then
+				at = i
+			end
+		end
+		local nextItem = owned[at + 1]
+		equipRemote:FireServer(if nextItem then nextItem.id else true)
 	end
 
 	ContextActionService:BindAction("ToggleEquip", function(_, inputState)
@@ -60,6 +107,23 @@ function Hotbar.start()
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.One, Enum.KeyCode.ButtonX)
 	slot.Activated:Connect(toggle)
+	local keys = {}
+	for i, entry in gadgets do
+		keys[GADGET_KEYS[i]] = entry
+		entry.slot.Activated:Connect(function()
+			pick(entry)
+		end)
+	end
+	ContextActionService:BindAction("PickGadget", function(_, inputState, input)
+		if inputState == Enum.UserInputState.Begin then
+			if input.KeyCode == Enum.KeyCode.DPadRight then
+				cycle()
+			elseif keys[input.KeyCode] then
+				pick(keys[input.KeyCode])
+			end
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.KeyCode.DPadRight, table.unpack(GADGET_KEYS, 1, #gadgets))
 	slot.MouseEnter:Connect(function()
 		TweenService:Create(press, QUICK, { Scale = motion.hoverScale }):Play()
 	end)
@@ -86,16 +150,37 @@ function Hotbar.start()
 		end
 
 		local equipped = player:GetAttribute("Equipped") ~= false
+		local out = player:GetAttribute("Gadget")
+		local itemState = Hud.items()
+		for _, entry in gadgets do
+			local id = entry.item.id
+			set(entry.slot, "Visible", Items.owned(itemState, id))
+			set(entry.slot, "ImageColor3", if out == id then colors.toolTag else colors.locked)
+			set(entry.ring, "Visible", out == id)
+			if not entry.shown and entry.slot.Visible then
+				local template = ToolModels.find(entry.item.model, "Gadgets")
+				if template then -- nil until replicated; try again next frame
+					ToolModels.showIn(entry.view, template)
+					entry.shown = true
+				end
+			end
+		end
 		set(slot, "ImageColor3", if equipped then colors.toolTag else colors.locked)
 		set(ring, "Visible", equipped)
-		set(fillBar, "Visible", equipped)
-		if equipped then
+		local jetpack = out == "jetpackTank"
+		set(fillBar, "Visible", equipped or (type(out) == "string" and out ~= ""))
+		if fillBar.Visible then
+			-- The jetpack's fuel while it is out, else the water carried.
 			local carried = player:GetAttribute("Carried") or 0
 			local capacity = player:GetAttribute("Capacity") or 0
+			if jetpack then
+				carried = player:GetAttribute("Fuel") or 0
+				capacity = Items.gadgetStat(Config, itemState, "jetpackTank", "flightSeconds") or 0
+			end
 			local ratio = if capacity > 0 then math.clamp(carried / capacity, 0, 1) else 0
 			local now = os.clock()
 			if ratio ~= to then
-				if ratio > to then
+				if ratio > to and not jetpack then -- refuelling rises every frame: no swell for it
 					fillPop.Scale = FILL_POP_SCALE
 					TweenService:Create(fillPop, FILL_POP, { Scale = 1 }):Play()
 				end
@@ -104,7 +189,7 @@ function Hotbar.start()
 			shown = math.clamp(Ease.pop(from, to, now - changedAt), 0, 1)
 			set(fill, "Size", UDim2.fromScale(shown, 1))
 			set(fill, "Visible", shown > 0)
-			set(fillLabel, "Text", `{litres(carried)} / {litres(capacity)}`)
+			set(fillLabel, "Text", if jetpack then `Fuel {string.format("%.1f", carried)}s` else `{litres(carried)} / {litres(capacity)}`)
 		end
 	end)
 end

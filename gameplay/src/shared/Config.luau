@@ -25,6 +25,7 @@ export type Area = {
 	scoopFactor: number, -- scoop sweeps here take actSeconds * this
 	gate: { fill: number, price: number }?, -- on sale once the ocean is `fill` full; nil = open from the start
 	model: string?, -- its model in workspace.Areas (server/Map); nil = the cove, whose parts are the ocean's
+	needs: string?, -- an item id: only players who own it reach this area (pads, spawn, scoop, pour)
 }
 
 export type Track = {
@@ -35,10 +36,17 @@ export type Track = {
 	levels: { Level },
 }
 
--- One upgrade of a bought item (TAB): its cost and the stat it gives from then on.
+-- One upgrade of a bought item (TAB): its cost and the stats it gives from then on. An item's
+-- first-buy stats sit on the item itself under the same names (common/Items.stat).
 export type ItemLevel = {
 	cost: number,
-	capacity: number?, -- backpack: litres it holds
+	capacity: number?, -- backpack, Jetpack Tank: litres it holds
+	range: number?, -- Water Gun: studs it pours from; Cloud Net: studs it catches a cloud from (3c)
+	rate: number?, -- Garden Hose: litres a second it pours
+	reach: number?, -- Garden Hose: studs you may walk from its tap
+	flightSeconds: number?, -- Jetpack Tank: seconds of thrust on a full tank
+	hotFill: number?, -- Heat Gloves: hot pools fill this many times faster (3c)
+	hits: number?, -- Ice Pick: hits to chip one ice block (3c)
 }
 
 -- A thing bought once at its area's stand (common/Items), then levelled in TAB.
@@ -47,10 +55,23 @@ export type Item = {
 	name: string,
 	kind: "backpack" | "gadget" | "vehicle" | "building" | "staff",
 	area: number, -- sold at this area's stand once it is open
+	stand: string?, -- sold at this cove shop instead (a key of Config.stands)
 	price: number, -- the first buy, at the stand
 	about: string, -- one line for the shop
-	model: string?, -- backpack: its Accessory in ReplicatedStorage.ToolModels.Backpacks
-	capacity: number?, -- backpack: litres it holds when bought
+	-- backpack: its Accessory in ReplicatedStorage.ToolModels.Backpacks; gadget: its Model in
+	-- ReplicatedStorage.ToolModels.Gadgets (held in the hand while it is out)
+	model: string?,
+	-- gadget: how it is used from its hotbar slot; nil = it works on its own once owned (no slot)
+	use: ("pour" | "hose" | "fly")?,
+	capacity: number?, -- the ItemLevel stats when bought (see ItemLevel)
+	range: number?,
+	rate: number?,
+	reach: number?,
+	flightSeconds: number?,
+	hotFill: number?,
+	hits: number?,
+	riseSpeed: number?, -- Jetpack Tank: studs a second it climbs (every level)
+	rechargeSeconds: number?, -- Jetpack Tank: seconds on the ground from empty to full (every level)
 	levels: { ItemLevel }, -- upgrades in order, after the first buy
 }
 
@@ -98,7 +119,8 @@ Config.areas = {
 	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 }, model = "MountainSpring" },
 	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 }, model = "HotSprings" },
 	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 }, model = "Glacier" },
-	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher" },
+	-- Up in the clouds: only players with a Jetpack Tank get there.
+	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher", needs = "jetpackTank" },
 } :: { Area }
 
 -- Shop order. Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price
@@ -241,10 +263,102 @@ local backpacks = {
 		{ cost = 12e9, capacity = 2e6 },
 	}),
 }
-local gadgets = {} -- 3b: Water Gun, Garden Hose, Heat Gloves, Ice Pick, Jetpack Tank, Cloud Net
+-- Gadgets: one mechanic each, bought once and levelled in TAB. Water Gun, Garden Hose and Jetpack Tank
+-- are used from the hotbar; Heat Gloves, Ice Pick and Cloud Net act on the area mechanics of 3c (their
+-- stats are here, their effects come with steam, ice and clouds). Prices sit in their area's band
+-- like the backpacks (tools/simulate retunes them in Phase 4); the Jetpack Tank opens Cloud Catcher,
+-- so it costs well under that gate (120M).
+--   Water Gun (1, cove Tool Shack): pours from 30 / 40 / 50 studs instead of Zones.REACH (12).
+--   Garden Hose (2): clipped to a Tap, pours 10 / 20 / 40 L/s at the tap's area pay while you stay
+--     within 20 / 25 / 30 studs of it (hand rate there: a 150 L Bucket Lv3 every ~20 s, ~7.5 L/s).
+--   Jetpack Tank (4): 3 / 5 / 8 s of thrust, refills on the ground; holds 50K / 80K / 120K L on top
+--     of the backpack (next to a 100K L Cargo Ship).
+local gadgets = {
+	{
+		id = "waterGun",
+		name = "Water Gun",
+		kind = "gadget",
+		area = 1,
+		stand = "ToolShack",
+		price = 2500,
+		about = "Pour your water from far away: no need to walk to the shore.",
+		model = "WaterGun",
+		use = "pour",
+		range = 30,
+		levels = { { cost = 6000, range = 40 }, { cost = 12000, range = 50 } },
+	},
+	{
+		id = "gardenHose",
+		name = "Garden Hose",
+		kind = "gadget",
+		area = 2,
+		price = 40000,
+		about = "Clip it to a tap by a pour spot and pour non-stop while you stay close.",
+		model = "GardenHose",
+		use = "hose",
+		rate = 10,
+		reach = 20,
+		levels = { { cost = 120000, rate = 20, reach = 25 }, { cost = 400000, rate = 40, reach = 30 } },
+	},
+	{
+		id = "heatGloves",
+		name = "Heat Gloves",
+		kind = "gadget",
+		area = 3,
+		price = 2e6,
+		about = "Steam can't knock you back, and hot pools fill faster.",
+		model = "HeatGloves",
+		hotFill = 1.25,
+		levels = { { cost = 6e6, hotFill = 1.5 }, { cost = 20e6, hotFill = 2 } },
+	},
+	{
+		id = "icePick",
+		name = "Ice Pick",
+		kind = "gadget",
+		area = 4,
+		price = 20e6,
+		about = "Chip ice blocks loose in fewer hits.",
+		model = "IcePick",
+		hits = 4,
+		levels = { { cost = 60e6, hits = 3 }, { cost = 150e6, hits = 2 } },
+	},
+	{
+		id = "jetpackTank",
+		name = "Jetpack Tank",
+		kind = "gadget",
+		area = 4,
+		price = 40e6,
+		about = "Hold jump to fly up to Cloud Catcher. Its tank holds water too.",
+		model = "JetpackTank",
+		use = "fly",
+		flightSeconds = 3,
+		capacity = 50000,
+		riseSpeed = 30,
+		rechargeSeconds = 4,
+		levels = {
+			{ cost = 90e6, flightSeconds = 5, capacity = 80000 },
+			{ cost = 200e6, flightSeconds = 8, capacity = 120000 },
+		},
+	},
+	{
+		id = "cloudNet",
+		name = "Cloud Net",
+		kind = "gadget",
+		area = 5,
+		price = 3e9,
+		about = "Catch a drifting cloud from a distance.",
+		model = "CloudNet",
+		range = 20,
+		levels = { { cost = 7e9, range = 30 }, { cost = 15e9, range = 45 } },
+	},
+} :: { Item }
 local vehicles = {} -- 3d: Fire Truck, Tanker, Snowcat Tanker, Water Bomber
 local buildings = {} -- 3e: Pump, Water Tower, Pipeline, Rain Machine (the team's, save.buildings)
 local staff = {} -- 3f: Helper, Lifeguard, Firefighter, Plumber
+
+-- Cove shops that sell items instead of the cove's stand (Item.stand): the shop's model in
+-- workspace.Map.Town (holding a ProximityPrompt "Prompt", server/Map.shop) and its name in the shop.
+Config.stands = { ToolShack = "Tool Shack" }
 
 -- Everything bought once at a stand beyond the tool ladder, by kind (common/Items).
 Config.items = {} :: { Item }

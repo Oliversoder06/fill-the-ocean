@@ -156,4 +156,116 @@ function tests.team_owned_buildings(t)
 	t.expectEq(Items.teamOwned({ pump = 0 }, "pump"), true, "level 0 is bought")
 end
 
+-- 3b: one gadget per area, each with one mechanic (Phase 3 outline).
+function tests.six_gadgets_by_area(t)
+	local want = {
+		waterGun = { "Water Gun", 1 },
+		gardenHose = { "Garden Hose", 2 },
+		heatGloves = { "Heat Gloves", 3 },
+		icePick = { "Ice Pick", 4 },
+		jetpackTank = { "Jetpack Tank", 4 },
+		cloudNet = { "Cloud Net", 5 },
+	}
+	local count = 0
+	for _, item in Config.items do
+		if item.kind == "gadget" then
+			count += 1
+			local w = want[item.id]
+			t.expectEq(w ~= nil, true, `unexpected gadget {item.id}`)
+			t.expectEq(item.name, w[1])
+			t.expectEq(item.area, w[2], `{item.id}'s area`)
+			t.expectEq(type(item.model), "string", `{item.id} has a model`)
+		end
+	end
+	t.expectEq(count, 6)
+	t.expectEq(Items.get(Config, "waterGun").range, 30, "the Water Gun pours from 30 studs")
+end
+
+-- Every gadget level costs more and makes each of its stats better (Ice Pick: fewer hits).
+function tests.gadget_levels_improve(t)
+	local better = { range = 1, rate = 1, reach = 1, flightSeconds = 1, capacity = 1, hotFill = 1, hits = -1 }
+	for _, item in Config.items do
+		if item.kind == "gadget" then
+			t.expectEq(#item.levels >= 2, true, `{item.id} has levels`)
+			local last, cost = item, item.price
+			for i, level in item.levels do
+				t.expectEq(level.cost > cost, true, `{item.id} level {i} costs more`)
+				local any = false
+				for stat, sign in better do
+					if last[stat] ~= nil then
+						t.expectEq(level[stat] ~= nil, true, `{item.id} level {i} keeps {stat}`)
+						t.expectEq((level[stat] - last[stat]) * sign > 0, true, `{item.id} level {i} improves {stat}`)
+						any = true
+					end
+				end
+				t.expectEq(any, true, `{item.id} level {i} changes a stat`)
+				last, cost = level, level.cost
+			end
+		end
+	end
+end
+
+function tests.gadget_stat_only_when_owned(t)
+	local state = fresh()
+	t.expectEq(Items.gadgetStat(Config, state, "waterGun", "range"), nil, "unowned")
+	own(state, "waterGun")
+	t.expectEq(Items.gadgetStat(Config, state, "waterGun", "range"), 30)
+	state.itemLevels.waterGun = 1
+	t.expectEq(Items.gadgetStat(Config, state, "waterGun", "range"), Items.get(Config, "waterGun").levels[1].range)
+	t.expectEq(Items.gadgetStat(Config, state, "nope", "range"), nil, "unknown id")
+end
+
+-- The Jetpack Tank holds water too, on top of the worn backpack.
+function tests.jetpack_holds_water(t)
+	local state = fresh()
+	own(state, "jetpackTank")
+	local jet = Items.get(Config, "jetpackTank")
+	t.expectEq(Items.capacityBonus(Config, state), jet.capacity)
+	own(state, "backpackTank")
+	t.expectEq(Items.capacityBonus(Config, state), jet.capacity + Items.get(Config, "backpackTank").capacity, "both count")
+	state.itemLevels.jetpackTank = 2
+	t.expectEq(Items.capacityBonus(Config, state), jet.levels[2].capacity + Items.get(Config, "backpackTank").capacity)
+end
+
+-- Hotbar slots: owned gadgets you use by hand, in config order; passive ones (gloves, pick) have none.
+function tests.hotbar_slots(t)
+	local state = fresh()
+	t.expectEq(#Items.slots(Config, state), 0)
+	own(state, "jetpackTank")
+	own(state, "heatGloves")
+	own(state, "waterGun")
+	own(state, "icePick")
+	local slots = Items.slots(Config, state)
+	t.expectEq(#slots, 2)
+	t.expectEq(slots[1].id, "waterGun")
+	t.expectEq(slots[2].id, "jetpackTank")
+end
+
+-- Cloud Catcher is up in the clouds: only players with a Jetpack Tank reach it.
+function tests.cloud_catcher_needs_jetpack(t)
+	local state = fresh()
+	local ids = Items.reachable(Config, state, { 1, 2, 3, 4, 5 })
+	t.expectEq(table.concat(ids, ","), "1,2,3,4")
+	own(state, "jetpackTank")
+	t.expectEq(table.concat(Items.reachable(Config, state, { 1, 2, 3, 4, 5 }), ","), "1,2,3,4,5")
+	t.expectEq(table.concat(Items.reachable(Config, fresh(), { 1, 3 }), ","), "1,3", "other areas need nothing")
+end
+
+-- The jetpack opens area 5, so it must cost less than the Cloud Catcher gate.
+function tests.jetpack_affordable_before_cloud_gate(t)
+	local cloud = Config.areas[5]
+	t.expectEq(Items.get(Config, "jetpackTank").price < (cloud.gate :: any).price, true)
+end
+
+-- The cove's Tool Shack sells the Water Gun; the cove's stand keeps selling only its backpack.
+function tests.tool_shack_sells_water_gun(t)
+	local state = fresh()
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, "ToolShack"), Items.get(Config, "waterGun"))
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12), Items.get(Config, "backpackTank"))
+	own(state, "waterGun")
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, "ToolShack"), nil)
+	t.expectEq(Items.standPick(Config, state, 2, 2, 1e12, "ToolShack"), nil, "the shack sells only cove items")
+	t.expectEq(Config.stands.ToolShack, "Tool Shack", "its name for the shop")
+end
+
 return tests

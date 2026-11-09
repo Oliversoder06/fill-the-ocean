@@ -5,6 +5,10 @@
 -- the Hold upgrade. A pour is one quick tip that empties the tool. An action that has started always
 -- plays to the end. The server re-checks and credits each action (server/Run onAct). Viewmodel and
 -- Feel read the current action from here.
+-- Hotbar gadgets use the same input: with the Water Gun out (instead of the tool) a pour reaches the
+-- gun's range; with the Garden Hose out a press by a Tap clips it there, then holding the input aimed
+-- at the water sprays (Gadget remote; the server pours while it sprays). The jetpack's hint shows here
+-- too (client/Jetpack flies it).
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +17,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Zones = require(ReplicatedStorage.Shared.Zones)
+local Items = require(ReplicatedStorage.Common.Items)
 local Hud = require(script.Parent.Hud)
 
 local AIM_DISTANCE = 80
@@ -58,8 +63,19 @@ local function keyName(): string
 	return "E"
 end
 
+local function jumpName(): string
+	local last = UserInputService:GetLastInputType()
+	if last == Enum.UserInputType.Touch then
+		return "the jump button"
+	elseif last.Name:sub(1, 7) == "Gamepad" then
+		return "A"
+	end
+	return "Space"
+end
+
 function Action.start()
 	local actRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Act") :: RemoteEvent
+	local gadgetRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Gadget") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local hint = Hud.find(gui, "ActHint")
 	local shop = Hud.find(gui, "Shop")
@@ -110,10 +126,14 @@ function Action.start()
 
 	-- The action this spot offers, the visible point aimed at (nil = not aimed at its water) and,
 	-- for a scoop, the area scooped. Scooping is at an open area's Source; pouring at an open area's
-	-- Pour, or anywhere next to where the water will be, aimed at a spot it will cover.
-	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera): (Kind?, Vector3?, any)
+	-- Pour, or anywhere next to where the water will be, aimed at a spot it will cover. `reach`: studs
+	-- a pour reaches (Hud.REACH by default); `pourOnly`: no scooping (a gadget in hand).
+	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera, reach: number?, pourOnly: boolean): (Kind?, Vector3?, any)
 		local origin, look = camera.CFrame.Position, camera.CFrame.LookVector * AIM_DISTANCE
-		local area, source = Hud.openSpot(ocean, "Source", root.Position)
+		local area, source = nil, nil
+		if not pourOnly then
+			area, source = Hud.openSpot(ocean, "Source", root.Position)
+		end
 		-- Splash where the eye lands (the source's water or the basin), not on the invisible zone parts.
 		-- Their lookups are nil-safe: a part not streamed in yet is simply not ignored.
 		local ignore: { Instance } = { character, camera }
@@ -131,11 +151,11 @@ function Action.start()
 			local seen = workspace:Raycast(origin, look, seeParams)
 			return "scoop", if seen then seen.Position else aim, area
 		end
-		local _, pour = Hud.openSpot(ocean, "Pour", root.Position)
+		local _, pour = Hud.openSpot(ocean, "Pour", root.Position, reach)
 		if pour then
 			return "pour", aimAt(pour, origin, look), nil -- the splash plays on the channel inlet
 		end
-		if not Hud.nearPour(ocean, root.Position) then
+		if not Hud.nearPour(ocean, root.Position, reach) then
 			return nil, nil, nil
 		end
 		local seen = workspace:Raycast(origin, look, seeParams)
@@ -191,7 +211,36 @@ function Action.start()
 		return `{verb} {keyName()} to {kind}`
 	end
 
-	local shownKind: Kind? = nil
+	-- The Garden Hose: a press by a Tap clips it there; once clipped it sprays while the input is held
+	-- aimed at the water. Returns the hint and the touch button's title.
+	local spraying = false
+	local function setSpray(on: boolean)
+		if on ~= spraying then
+			spraying = on
+			gadgetRemote:FireServer("spray", on)
+		end
+	end
+	local function hoseStep(ocean: Model, root: BasePart, character: Model, camera: Camera): (string, string?)
+		if (player:GetAttribute("HoseArea") or 0) == 0 then
+			spraying = false -- the server stops spraying when the hose comes off
+			if not Hud.openSpot(ocean, "Tap", root.Position) then
+				return "Take the hose to a tap by a pour spot", nil
+			end
+			if tapped then
+				gadgetRemote:FireServer("clip")
+			end
+			return `Press {keyName()} to clip the hose to the tap`, "Clip"
+		end
+		local reach = Items.gadgetStat(Config, Hud.items(), "gardenHose", "reach")
+		local _, hit = target(ocean, root, character, camera, reach, true)
+		setSpray(held and hit ~= nil)
+		if not hit then
+			return "Aim the hose at the water", "Spray"
+		end
+		return if spraying then "Spraying!" else `Hold {keyName()} to spray`, "Spray"
+	end
+
+	local shownTitle: string? = nil
 	RunService.RenderStepped:Connect(function()
 		local now = os.clock()
 		local finished = current
@@ -212,10 +261,9 @@ function Action.start()
 		local camera = workspace.CurrentCamera
 		local ocean = Hud.ocean()
 		local windowOpen = shop.Visible
-		local kind, hit, area = nil, nil, nil
-		if
-			ReplicatedStorage:GetAttribute("Phase") == "playing"
-			and player:GetAttribute("Equipped") ~= false
+		local gadget = player:GetAttribute("Gadget")
+		local gun = gadget == "waterGun"
+		local ready = ReplicatedStorage:GetAttribute("Phase") == "playing"
 			and ocean
 			and character
 			and root
@@ -224,23 +272,36 @@ function Action.start()
 			and humanoid.Health > 0
 			and camera
 			and not windowOpen
-		then
-			kind, hit, area = target(ocean, root, character, camera)
+		local kind, hit, area = nil, nil, nil
+		local text, title = nil, nil
+		if ready and gadget == "gardenHose" then
+			text, title = hoseStep(ocean, root, character, camera)
+		else
+			setSpray(false)
+			if ready and (player:GetAttribute("Equipped") ~= false or gun) then
+				local reach = if gun then Items.gadgetStat(Config, Hud.items(), "waterGun", "range") else nil
+				kind, hit, area = target(ocean, root, character, camera, reach, gun)
+				title = if kind == "scoop" then "Scoop" elseif kind then "Pour" else nil
+			end
+			text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil)
+			if ready and gadget == "jetpackTank" then
+				text = if (player:GetAttribute("Fuel") or 0) > 0 then `Hold {jumpName()} to fly` else "Out of fuel: land to refill"
+			end
 		end
 
-		local text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil)
 		Hud.set(hint, "Visible", text ~= nil)
 		if text then
 			Hud.set(hint, "Text", text)
 		end
 		local button = ContextActionService:GetButton(ACTION_NAME)
 		if button then
-			Hud.set(button, "Visible", kind ~= nil)
+			Hud.set(button, "Visible", title ~= nil)
 		end
-		if kind and kind ~= shownKind then
-			shownKind = kind
-			ContextActionService:SetTitle(ACTION_NAME, if kind == "scoop" then "Scoop" else "Pour")
+		if title and title ~= shownTitle then
+			shownTitle = title
+			ContextActionService:SetTitle(ACTION_NAME, title)
 		end
+
 
 		-- Without Hold, only a fresh press starts a sweep; holding the button does nothing more.
 		local repeatHeld = held and player:GetAttribute("Hold") == true

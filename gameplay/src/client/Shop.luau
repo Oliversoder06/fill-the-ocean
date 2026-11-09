@@ -89,28 +89,67 @@ end
 
 -- What an item's tile and detail say instead of a price (Hud.offer's item statuses). Tiles have room
 -- for one short word, the detail panel for the full sentence.
-local function itemNote(item, status: string?, short: boolean?): string
+local function itemNote(item, status: string?, brief: boolean?): string
 	if status == "max" then
 		return "MAX"
-	elseif short then
+	elseif brief then
 		return if status == "replaced" then "Replaced" elseif status == "stand" then "At stand" else "Locked"
 	elseif status == "replaced" then
 		local worn = Items.backpack(Config, Hud.items())
 		return `Replaced by the {if worn then worn.name else "next one"}`
+	elseif status == "stand" and item.stand then
+		return `Buy at the {Config.stands[item.stand]}`
 	elseif status == "stand" then
 		return `Buy at the {Areas.byId(Config, item.area).name} stand`
 	end
 	return opensText(item)
 end
 
--- What a backpack holds now and after its next upgrade.
+-- What each gadget does at some level; `stat(name)` reads that level's stats (Config.ItemLevel).
+local GADGET_EFFECTS = {
+	waterGun = function(stat)
+		return `Pours from {stat("range")} studs away`
+	end,
+	gardenHose = function(stat)
+		return `Pours {stat("rate")} L/s within {stat("reach")} studs of its tap`
+	end,
+	heatGloves = function(stat)
+		return `Hot pools fill {stat("hotFill")}x faster`
+	end,
+	icePick = function(stat)
+		return `{stat("hits")} hits per ice block`
+	end,
+	jetpackTank = function(stat)
+		return `{stat("flightSeconds")}s of flight, holds {short(stat("capacity"))} L`
+	end,
+	cloudNet = function(stat)
+		return `Catches clouds from {stat("range")} studs`
+	end,
+}
+
+-- What an item does now and after its next upgrade: a backpack's litres, a gadget's stats.
 local function itemEffect(item, level, owned: boolean): string
-	local now = if owned then Items.stat(Hud.items(), item, "capacity") else item.capacity
+	local function nowStat(name: string): number
+		return if owned then Items.stat(Hud.items(), item, name) else item[name]
+	end
+	if item.kind == "gadget" then
+		local effect = GADGET_EFFECTS[item.id]
+		assert(effect, `Shop has no effect text for {item.id}`)
+		if level then
+			local after = effect(function(name: string): number
+				return level[name]
+			end)
+			return `Next: {after} (now: {effect(nowStat)})`
+		end
+		return effect(nowStat)
+	end
+	local now = nowStat("capacity")
 	if level then
 		return `Holds {short(level.capacity)} L on your back (now {short(now)} L)`
 	end
 	return `Holds {short(now)} L on your back, on top of your tool`
 end
+
 
 -- The next level's display name: tools have their own, the rest are "<track> <n>".
 local function levelName(track, n: number, level): string

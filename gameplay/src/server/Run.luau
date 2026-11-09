@@ -6,7 +6,12 @@
 -- instant. Gates (Config.areas) are bought through their ProximityPrompt and open for the whole
 -- team (save.gatesOpen, published as GatesOpen); pads move players between open areas. Items
 -- (Config.items, common/Items) are bought once through their area's stand prompt and levelled with
--- Buy(itemId); a worn backpack adds to Capacity. Each
+-- Buy(itemId); a worn backpack adds to Capacity. Gadgets (kind "gadget") with a hotbar slot are taken
+-- out with Equip(itemId) instead of the tool: the Water Gun pours from its range (Act "pour"), the
+-- Garden Hose clips to an area's Tap and pours from it while the player stays in reach and holds the
+-- act input (Gadget "clip" / "spray"), and the Jetpack Tank flies while its fuel lasts (Gadget "fly";
+-- server/HeldTools adds the lift only while Flying is set). Cloud Catcher (an area that `needs` an
+-- item) is reached only with the Jetpack Tank: pads, spawn, scoop and pour skip it without one. Each
 -- accepted action is published as ActKind + ActAt (server time) so other clients can play it on
 -- that player's body (client/Bodies).
 -- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
@@ -29,6 +34,7 @@ local Admins = require(ReplicatedStorage.Shared.Admins)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
+local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
 local Water = require(ReplicatedStorage.Shared.Water)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Session = require(ReplicatedStorage.Shared.Session)
@@ -41,12 +47,17 @@ local Retry = require(ReplicatedStorage.Common.Retry)
 local RunSave = require(ReplicatedStorage.Common.RunSave)
 local RunStore = require(ReplicatedStorage.Common.RunStore)
 local RunTicket = require(ReplicatedStorage.Common.RunTicket)
+local HeldTools = require(script.Parent.HeldTools)
 local Map = require(script.Parent.Map)
 
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
 local PARTY_WAIT = 20 -- party: start when everyone is in, or this long after the first arrival
 local CARD_SECONDS = 3
 local MAX_BUYS_PER_SECOND = 5
+local MAX_EQUIPS_PER_SECOND = 5 -- each one swaps the model in hand (server/HeldTools)
+local MAX_GADGET_PER_SECOND = 10 -- clip / spray / fly toggles; water and fuel follow server time, not these
+local HOSE_TICK = 0.5 -- seconds between the hose's credits while it sprays
+local GROUND_PROBE = 1.5 -- studs below the feet that still count as standing (jetpack refuel)
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
@@ -91,6 +102,10 @@ local run = {
 }
 local states: { [Player]: any } = {}
 
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+groundParams.RespectCanCollide = true -- the ground, not invisible zones
+
 local function setGlobal(name: string, value: any)
 	ReplicatedStorage:SetAttribute(name, value)
 end
@@ -110,6 +125,13 @@ local function remote(name: string): RemoteEvent
 	local r = folder:WaitForChild(name, 10)
 	assert(r and r:IsA("RemoteEvent"), `ReplicatedStorage.Remotes is missing {name} (Rojo project)`)
 	return r
+end
+
+-- The jetpack's fuel, to a tenth of a second (it changes every frame while flying or refuelling).
+-- Nil without a jetpack.
+local function publishFuel(player: Player, state)
+	local max = Items.gadgetStat(Config, state, "jetpackTank", "flightSeconds")
+	player:SetAttribute("Fuel", if max then math.floor(math.min(state.fuel, max) * 10 + 0.5) / 10 else nil)
 end
 
 -- Nothing goes out before the save is applied: clients would show the fresh start as the player's
@@ -143,7 +165,20 @@ local function publish(player: Player)
 	end
 	local worn = Items.backpack(Config, state)
 	player:SetAttribute("Backpack", if worn then worn.model else "")
+	-- The gadget in hand (an item id, "" for none), the area whose Tap the hose is clipped to (0 for
+	-- none) and whether it sprays, and the jetpack: Flying and Fuel (seconds of thrust left).
+	player:SetAttribute("Gadget", state.gadget)
+	player:SetAttribute("HoseArea", if state.hose then state.hose.area.id else 0)
+	player:SetAttribute("Spraying", state.hose ~= nil and state.hose.spraying)
+	player:SetAttribute("Flying", state.flying)
+	publishFuel(player, state)
+	-- The hose's rope and the jetpack's lift follow the state at once (server/HeldTools).
+	local hose = state.hose
+	local reach = if hose then Items.gadgetStat(Config, state, "gardenHose", "reach") :: number else 0
+	HeldTools.setHose(player, hose and hose.tap, reach)
+	HeldTools.setLift(player, if state.flying then Items.get(Config, "jetpackTank").riseSpeed else nil)
 end
+
 
 local function applyWalkSpeed(player: Player)
 	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
@@ -157,7 +192,13 @@ local function gatesOpen(): { number }
 	return if run.save then run.save.gatesOpen else {}
 end
 
+-- Moving away takes the hose off its tap first (its rope would yank the character back).
 local function moveTo(player: Player, spawn: BasePart)
+	local state = states[player]
+	if state and state.hose then
+		state.hose = nil
+		publish(player)
+	end
 	local character = player.Character
 	if character then
 		character:PivotTo(spawn.CFrame + Vector3.new(0, 3, 0))
@@ -169,9 +210,14 @@ local function areaPart(area, name: string): BasePart
 	return Zones.areaPart(ocean, area, name) :: BasePart
 end
 
--- Players appear at the furthest open area.
+-- The open area ids this player reaches, in order (Items.reachable: Cloud Catcher needs the jetpack).
+local function reachableIds(state): { number }
+	return Items.reachable(Config, state, Areas.openIds(gatesOpen()))
+end
+
+-- Players appear at the furthest open area they reach.
 local function moveToSpawn(player: Player)
-	local open = Areas.openIds(gatesOpen())
+	local open = reachableIds(states[player])
 	moveTo(player, areaPart(Areas.byId(Config, open[#open]), "Spawn"))
 end
 
@@ -622,18 +668,26 @@ local function onPlayerAdded(player: Player)
 		stats = Ladder.stats(Config, {}),
 		litres = 0,
 		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
-		buyWindowStart = 0,
-		buysInWindow = 0,
+		windows = {} :: { [string]: { start: number, count: number } }, -- per-remote rate limits (allow)
 		lastLookAt = 0, -- os.clock() of the last accepted Look
 		padAt = 0, -- os.clock() of the last pad move
 		standAt = 0, -- os.clock() of the last accepted stand prompt
-		equipped = true,
+		equipped = true, -- the tool is in hand
+		gadget = "", -- the hotbar gadget in hand instead (an item id), "" for none
+		hose = nil :: { area: any, tap: BasePart, spraying: boolean, due: number }?, -- clipped Garden Hose
+		flying = false, -- the jetpack's lift is on (server/HeldTools)
+		fuel = math.huge, -- jetpack seconds left; Gadgets.fuel clamps it to the tank's size
 	}
 	if run.save then
 		applySaved(player)
 	end
 	publish(player)
 	player.CharacterAdded:Connect(function()
+		local state = states[player]
+		if state and (state.flying or state.hose) then -- a new body starts on the ground, unclipped
+			state.flying, state.hose = false, nil
+			publish(player)
+		end
 		applyWalkSpeed(player)
 		task.defer(moveToSpawn, player)
 		run.firstArrival = run.firstArrival or os.clock()
@@ -643,21 +697,28 @@ local function onPlayerAdded(player: Player)
 	end
 end
 
+-- Whether a player may send one more `key` request this second (at most `max`); counts it.
+local function allow(state, key: string, max: number): boolean
+	local now = os.clock()
+	local window = state.windows[key]
+	if not window or now - window.start >= 1 then
+		window = { start = now, count = 0 }
+		state.windows[key] = window
+	end
+	if window.count >= max then
+		return false
+	end
+	window.count += 1
+	return true
+end
+
 -- Buy the next level of one upgrade track (only levels of the open areas), or the next upgrade of
 -- an owned item (TAB). Items themselves are bought at their stand (onStand).
 local function onBuy(player: Player, id: unknown)
 	local state = states[player]
-	if not state or type(id) ~= "string" or run.phase ~= "playing" then
+	if not state or type(id) ~= "string" or run.phase ~= "playing" or not allow(state, "buy", MAX_BUYS_PER_SECOND) then
 		return
 	end
-	local now = os.clock()
-	if now - state.buyWindowStart >= 1 then
-		state.buyWindowStart, state.buysInWindow = now, 0
-	end
-	if state.buysInWindow >= MAX_BUYS_PER_SECOND then
-		return
-	end
-	state.buysInWindow += 1
 	local isTrack = Config.track(id) ~= nil
 	local level, status
 	if isTrack then
@@ -676,13 +737,34 @@ local function onBuy(player: Player, id: unknown)
 	publish(player)
 end
 
--- Hotbar: the player puts their tool away or takes it out. Unequipped, they can't scoop or pour.
-local function onEquip(player: Player, equipped: unknown)
+-- Hotbar: true takes the tool out, false puts whatever is in hand away, and a gadget's id takes that
+-- owned hotbar gadget (Items.slots) out instead of the tool. Without the tool they can't scoop, and
+-- pour only with the Water Gun. Putting the hose away unclips it; putting the jetpack away stops it.
+local function onEquip(player: Player, value: unknown)
 	local state = states[player]
-	if not state or type(equipped) ~= "boolean" or state.equipped == equipped then
+	if not state or not allow(state, "equip", MAX_EQUIPS_PER_SECOND) then
 		return
 	end
-	state.equipped = equipped
+	local equipped, gadget
+	if type(value) == "boolean" then
+		equipped, gadget = value, ""
+	else
+		local item = Items.get(Config, value)
+		if not (item and table.find(Items.slots(Config, state), item)) then
+			return
+		end
+		equipped, gadget = false, item.id
+	end
+	if state.equipped == equipped and state.gadget == gadget then
+		return
+	end
+	state.equipped, state.gadget = equipped, gadget
+	if gadget ~= "gardenHose" then
+		state.hose = nil
+	end
+	if gadget ~= "jetpackTank" then
+		state.flying = false
+	end
 	publish(player)
 end
 
@@ -739,17 +821,20 @@ local function inReach(player: Player, prompt: ProximityPrompt): boolean
 	return root ~= nil and at ~= nil and (root.Position - at).Magnitude <= prompt.MaxActivationDistance + DISTANCE_SLACK
 end
 
--- The open area whose Source (scoop) or Pour (pour) the player stands by, and that part.
-local function openSpot(player: Player, name: string)
+-- The open area the player reaches whose Source (scoop), Pour (pour) or Tap (hose) they stand
+-- within `reach` studs of (Zones.REACH by default), and that part.
+local function openSpot(player: Player, name: string, reach: number?)
 	local root = rootOf(player)
 	if not root then
 		return nil, nil
 	end
-	return Zones.openSpot(ocean, Config, Areas.open(gatesOpen()), name, root.Position, ACT_REACH + DISTANCE_SLACK)
+	local reached = Areas.open(reachableIds(states[player]))
+	return Zones.openSpot(ocean, Config, reached, name, root.Position, (reach or ACT_REACH) + DISTANCE_SLACK)
 end
 
--- Pouring works anywhere next to where the ocean's water will be (shared/Zones.nearFlood).
-local function nearFlood(player: Player): boolean
+-- Pouring works anywhere within `reach` studs (Zones.REACH by default) of where the ocean's water
+-- will be (shared/Zones.nearFlood).
+local function nearFlood(player: Player, reach: number?): boolean
 	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 	if not root then
 		return false
@@ -760,7 +845,7 @@ local function nearFlood(player: Player): boolean
 			table.insert(characters, other.Character)
 		end
 	end
-	return Zones.nearFlood(ocean, (root :: BasePart).Position, ACT_REACH + DISTANCE_SLACK, characters)
+	return Zones.nearFlood(ocean, (root :: BasePart).Position, (reach or ACT_REACH) + DISTANCE_SLACK, characters)
 end
 
 -- A sweep at `area`'s Source: its litres are worth that area's pay.
@@ -776,6 +861,16 @@ local function publishAct(player: Player, kind: string)
 	player:SetAttribute("ActAt", workspace:GetServerTimeNow())
 end
 
+-- `litres` worth `value` coins (before the tip and boosts) land in the ocean: pay the player and
+-- raise the water. Callers check that the ocean takes them (Water.pourAmount) and then checkFull.
+local function pourIn(state, litres: number, value: number)
+	state.money += value * boosted(state).coinBonus
+	state.litres += litres
+	local before = fillOf(run.current)
+	setWater(run.current + litres)
+	checkBoost(before, fillOf(run.current))
+end
+
 local function creditPour(state): boolean
 	local litres = Water.pourAmount(state.carried, run.current, run.target)
 	if litres <= 0 then
@@ -785,31 +880,33 @@ local function creditPour(state): boolean
 	local value = state.carriedValue * litres / state.carried
 	state.carried -= litres
 	state.carriedValue = if state.carried > 0 then state.carriedValue - value else 0
-	state.money += value * boosted(state).coinBonus
-	state.litres += litres
-	local before = fillOf(run.current)
-	setWater(run.current + litres)
-	checkBoost(before, fillOf(run.current))
+	pourIn(state, litres, value)
 	return true
 end
 
 -- A scoop sweep or a pour. Checked when it starts (distance, room or water). A scoop is at an open
 -- area's Source and is credited when it ends (it always plays out in full on the client); it is
 -- paced: on average one per actSeconds x the area's scoopFactor, with slack for latency. A pour is
--- by the ocean or at an open area's Pour, instant and needs no pacing: it empties the tool.
+-- by the ocean or at an open area's Pour, instant and needs no pacing: it empties the tool. With the
+-- Water Gun in hand instead of the tool, a pour reaches the gun's range.
 -- lihfolk-ignore: remote-unvalidated-args (kind is checked against exactly "scoop" / "pour" below)
 local function onAct(player: Player, kind: unknown)
 	local state = states[player]
-	if not state or (kind ~= "scoop" and kind ~= "pour") or not state.equipped or run.phase ~= "playing" then
+	if not state or (kind ~= "scoop" and kind ~= "pour") or run.phase ~= "playing" then
 		return
 	end
+	local gun = kind == "pour" and state.gadget == "waterGun"
+	if not (state.equipped or gun) then
+		return
+	end
+	local reach = if gun then Items.gadgetStat(Config, state, "waterGun", "range") :: number else ACT_REACH
 	local area = nil
 	if kind == "scoop" then
 		area = openSpot(player, "Source")
 		if not area then
 			return
 		end
-	elseif not (nearFlood(player) or openSpot(player, "Pour")) then
+	elseif not (nearFlood(player, reach) or openSpot(player, "Pour", reach)) then
 		return
 	end
 	local act = state.stats.actSeconds * (if area then area.scoopFactor else 1)
@@ -868,9 +965,9 @@ local function onGate(player: Player, area)
 end
 
 -- The stand prompt of `area`: buys the cheapest item sold there that the player can buy now
--- (Items.standPick; one prompt per stand until 3b adds a picker). The area must be open, the item
--- not owned and affordable, and the player by the stand.
-local function onStand(player: Player, area, prompt: ProximityPrompt)
+-- (Items.standPick; one prompt per stand). `stand`: a cove shop (Config.stands) selling its own
+-- items instead. The area must be open, the item not owned and affordable, and the player by the stand.
+local function onStand(player: Player, area, prompt: ProximityPrompt, stand: string?)
 	local state = states[player]
 	local now = os.clock()
 	if not state or run.phase ~= "playing" or now - state.standAt < STAND_COOLDOWN then
@@ -880,7 +977,7 @@ local function onStand(player: Player, area, prompt: ProximityPrompt)
 	if not Areas.open(gatesOpen())[area.id] or not inReach(player, prompt) then
 		return
 	end
-	local item = Items.standPick(Config, state, area.id, openAreas(), state.money)
+	local item = Items.standPick(Config, state, area.id, openAreas(), state.money, stand)
 	if not item then
 		remotes.Card:FireClient(player, "Nothing here you can buy yet", CARD_SECONDS)
 		return
@@ -904,13 +1001,108 @@ local function onPad(area, hit: BasePart)
 	if not player or not state or not run.save or now - state.padAt < PAD_COOLDOWN then
 		return
 	end
-	local open = Areas.openIds(run.save.gatesOpen)
+	local open = reachableIds(state)
 	local i = table.find(open, area.id)
 	if not i or #open == 1 then
 		return -- a closed area's pad, or nowhere else to go
 	end
 	state.padAt = now
+	-- An open area skipped for lack of its item (Cloud Catcher without the jetpack) says why.
+	local all = Areas.openIds(run.save.gatesOpen)
+	local skipped = Areas.byId(Config, all[(table.find(all, area.id) :: number) % #all + 1])
+	if skipped.needs and not table.find(open, skipped.id) then
+		local needs = Items.get(Config, skipped.needs)
+		remotes.Card:FireClient(player, `{skipped.name} is up in the clouds: you need the {needs.name}`, CARD_SECONDS)
+	end
 	moveTo(player, areaPart(Areas.byId(Config, open[i % #open + 1]), "Spawn"))
+end
+
+-- Gadget requests from the hotbar gadget in hand (client/Action, client/Jetpack):
+--   "clip": clip the Garden Hose to the Tap of a reachable open area within Zones.REACH;
+--   "spray", on: the clipped hose pours (credited in tickHose) while the act input is held;
+--   "fly", on: the Jetpack Tank's lift on or off (off by itself when its fuel runs out).
+-- Water and fuel follow the server's clock, so toggles only switch things; they are rate-limited.
+local function onGadget(player: Player, action: unknown, on: unknown)
+	local state = states[player]
+	if not state or run.phase ~= "playing" or not allow(state, "gadget", MAX_GADGET_PER_SECOND) then
+		return
+	end
+	if action == "clip" and state.gadget == "gardenHose" and not state.hose then
+		local area, tap = openSpot(player, "Tap")
+		if area then
+			state.hose = { area = area, tap = tap, spraying = false, due = 0 }
+			publish(player)
+		end
+	elseif action == "spray" and type(on) == "boolean" and state.hose and state.hose.spraying ~= on then
+		state.hose.spraying, state.hose.due = on, 0
+		publish(player)
+	elseif action == "fly" and type(on) == "boolean" and state.gadget == "jetpackTank" and state.flying ~= on then
+		if on and state.fuel <= 0 then
+			return
+		end
+		state.flying = on
+		publish(player)
+	end
+end
+
+-- Whether the character stands on something (the jetpack refuels only then).
+local function grounded(player: Player, root: BasePart): boolean
+	local character = player.Character :: Model
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local down = root.Size.Y / 2 + (if humanoid then humanoid.HipHeight else 2) + GROUND_PROBE
+	groundParams.FilterDescendantsInstances = { character }
+	return workspace:Raycast(root.Position, Vector3.new(0, -down, 0), groundParams) ~= nil
+end
+
+-- The jetpack's fuel burns while flying and refills on the ground; the lift stops when it is empty.
+local function tickJetpack(player: Player, state, dt: number)
+	local max = Items.gadgetStat(Config, state, "jetpackTank", "flightSeconds")
+	if not max then
+		return
+	end
+	local root = rootOf(player)
+	local onGround = not state.flying and state.fuel < max and root ~= nil and grounded(player, root)
+	local jet = Items.get(Config, "jetpackTank")
+	state.fuel = Gadgets.fuel(state.fuel, max, dt, state.flying, onGround, jet.rechargeSeconds)
+	if state.flying and state.fuel <= 0 then
+		state.flying = false
+		publish(player)
+	else
+		publishFuel(player, state)
+	end
+end
+
+-- The clipped hose pours `rate` litres a second at its tap's area pay while it sprays. Walking
+-- further from the tap than its reach (the rope holds you, so only a lag spike or a teleport does)
+-- takes it off.
+local function tickHose(player: Player, state, dt: number)
+	local hose = state.hose
+	if not hose then
+		return
+	end
+	local root = rootOf(player)
+	local reach = Items.gadgetStat(Config, state, "gardenHose", "reach") :: number
+	if not root or (root.Position - hose.tap.Position).Magnitude > reach + DISTANCE_SLACK then
+		state.hose = nil
+		publish(player)
+		remotes.Card:FireClient(player, "The hose came off the tap", CARD_SECONDS)
+		return
+	end
+	if not hose.spraying then
+		return
+	end
+	hose.due += dt
+	if hose.due < HOSE_TICK then
+		return
+	end
+	local rate = Items.gadgetStat(Config, state, "gardenHose", "rate") :: number
+	local litres = Water.pourAmount(rate * hose.due, run.current, run.target)
+	hose.due = 0
+	if litres > 0 then
+		pourIn(state, litres, litres * Config.ocean.coinsPerLitre * hose.area.payMultiplier)
+		publish(player)
+		checkFull()
+	end
 end
 
 -- Decides who may play here. Only a reserved server the lobby made (with its ticket) runs; the
@@ -945,7 +1137,7 @@ end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Fill", 0)
@@ -963,6 +1155,16 @@ function Run.start(oceanModel: Model)
 	remotes.Act.OnServerEvent:Connect(onAct)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
+	remotes.Gadget.OnServerEvent:Connect(onGadget)
+	RunService.Heartbeat:Connect(function(dt)
+		if run.phase ~= "playing" then
+			return
+		end
+		for player, state in states do
+			tickJetpack(player, state, dt)
+			tickHose(player, state, dt)
+		end
+	end)
 	for _, area in Config.areas do
 		if area.model then
 			Map.gatePrompt(Map.gate(ocean, area)).Triggered:Connect(function(player)
@@ -982,6 +1184,14 @@ function Run.start(oceanModel: Model)
 			warn(`[Run] {area.name}'s stand has no ProximityPrompt "Prompt" (Studio); its items can't be bought yet`)
 		end
 	end
+	-- The cove shops that sell their own items (Config.stands, Item.stand).
+	for name in Config.stands do
+		local prompt = Map.shopPrompt(name)
+		prompt.Triggered:Connect(function(player)
+			onStand(player, Areas.byId(Config, 1), prompt, name)
+		end)
+	end
+
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do
 		onPlayerAdded(player)

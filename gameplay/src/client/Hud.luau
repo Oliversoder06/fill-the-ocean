@@ -154,16 +154,19 @@ function Hud.offer(levels: { [string]: number }, id: string, money: number): (an
 	return level, status, status == "buy" and money + MONEY_EPSILON >= level.cost
 end
 
--- The open area whose `name` part (Source or Pour) is within reach of `position`, and that part
--- (Zones.openSpot, as the server checks it).
-function Hud.openSpot(ocean: Model, name: string, position: Vector3)
-	return Zones.openSpot(ocean, Config, Areas.open(Hud.gatesOpen()), name, position, Hud.REACH)
+-- The open area the local player reaches (Items.reachable: Cloud Catcher needs the Jetpack Tank)
+-- whose `name` part (Source, Pour or Tap) is within `reach` studs (Hud.REACH by default) of
+-- `position`, and that part (Zones.openSpot, as the server checks it).
+function Hud.openSpot(ocean: Model, name: string, position: Vector3, reach: number?)
+	local reached = Areas.open(Items.reachable(Config, Hud.items(), Areas.openIds(Hud.gatesOpen())))
+	return Zones.openSpot(ocean, Config, reached, name, position, reach or Hud.REACH)
 end
 
--- Whether a character at `position` may pour: by an open area's Pour, or next to where the water
--- will be, past the camera and every player's character (the same check Action offers the pour with).
-function Hud.nearPour(ocean: Model, position: Vector3): boolean
-	if Hud.openSpot(ocean, "Pour", position) then
+-- Whether a character at `position` may pour from `reach` studs (Hud.REACH by default; the Water
+-- Gun's range): by an open area's Pour, or next to where the water will be, past the camera and
+-- every player's character (the same check Action offers the pour with).
+function Hud.nearPour(ocean: Model, position: Vector3, reach: number?): boolean
+	if Hud.openSpot(ocean, "Pour", position, reach) then
 		return true
 	end
 	local ignore: { Instance } = { workspace.CurrentCamera }
@@ -172,7 +175,8 @@ function Hud.nearPour(ocean: Model, position: Vector3): boolean
 			table.insert(ignore, other.Character)
 		end
 	end
-	return Zones.nearFlood(ocean, position, Hud.REACH, ignore)
+	return Zones.nearFlood(ocean, position, reach or Hud.REACH, ignore)
+
 end
 
 -- Grows on hover, shrinks while pressed (motion values from the style).

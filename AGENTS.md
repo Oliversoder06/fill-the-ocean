@@ -77,8 +77,10 @@ Client (`src/client/`, all started from `init.client.luau`):
   (`Music.duck`), plays through `SoundService.Music`.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
-- `Hotbar.luau`: the one tool slot (1 / gamepad X / click to equip or unequip) and the fill bar
-  (springs with `Ease.pop`).
+- `Hotbar.luau`: the tool slot (1 / gamepad X / click to equip or unequip), one slot per owned
+  hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
+  with `Ease.pop`; the jetpack's fuel while it is out).
+- `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
 - `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
   tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
@@ -96,7 +98,7 @@ Shared (`src/shared/`, pure unless noted):
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
-  `Reveal.luau`, `Steps.luau`, `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
+  `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`):
   maths, all Lune-tested (`Cues` too).
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
@@ -104,7 +106,9 @@ Shared (`src/shared/`, pure unless noted):
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `RunSave.luau` (pure): a team's saved run, its key, and the exact-team check (`sameTeam`).
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
-  `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus`, `standPick`, `teamOwned`.
+  `canBuy`, `nextLevel`, the worn backpack and its `capacityBonus` (plus the Jetpack Tank's),
+  `standPick` (an area's stand or a cove shop in `Config.stands`), `gadgetStat`, `slots` (hotbar
+  gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`.
 - `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore).
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps.
@@ -124,11 +128,15 @@ The server publishes state as attributes; the client only reads them.
   `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, and
   `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...); `Owned` (item ids,
   `"backpackTank,bigTank"`), `ItemLevel_<itemId>` per item and `Backpack` (the worn pack's model or
-  `""`); `Capacity` includes the pack; `ActKind` + `ActAt`
+  `""`); `Capacity` includes the pack and the Jetpack Tank; `Gadget` (the hotbar gadget out instead
+  of the tool, an item id or `""`), `HoseArea` (area id the Garden Hose is clipped to, 0 for none),
+  `Spraying`, `Flying` and `Fuel` (jetpack seconds left, only once owned); `ActKind` + `ActAt`
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
 - Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it),
-  `Equip` (boolean), `Act` (`"scoop"` or `"pour"`, sent when an action starts; the server credits
-  a scoop ActSeconds later and a pour at once), `Look` (camera pitch in degrees, range-checked and
+  `Equip` (boolean for the tool, or an owned hotbar gadget's id), `Act` (`"scoop"` or `"pour"`, sent
+  when an action starts; the server credits a scoop ActSeconds later and a pour at once; with the
+  Water Gun out a pour reaches its range), `Gadget` (`"clip"`, `"spray", on`, `"fly", on`;
+  rate-limited, water and fuel follow the server's clock), `Look` (camera pitch in degrees, range-checked and
   rate-limited), `Admin` (a fill fraction 0-1; the server checks `shared/Admins` and only jumps
   while Phase is `playing`), `Card` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish`. A new remote: add it to

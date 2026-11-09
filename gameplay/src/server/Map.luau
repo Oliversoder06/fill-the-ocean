@@ -7,12 +7,14 @@
 --   PourPoint marks the usual pour spot at the basin rim (tripDistance from Source); pouring
 --             itself works anywhere next to where the Water will be (shared/Zones.nearFlood)
 --   Basin     the floor of the sunken basin; Water rises from it to ground level
+--   Tap       the Garden Hose's tap by the pour spot, holding an Attachment "Hose" (the rope's end)
 --   Water     with a number attribute "Depth"; rises with the fill fraction. It may hold BasePart
 --             children: extra tiles for water wider than one part can be (2048 studs); every tile
 --             keeps its own X and Z and rises with it
 -- Areas 2-5 (Config.areas with a `model`): one Model each in workspace.Areas, named by that model:
 --   Source    zone over the area's water; scooping here pays the area's rate (server/Run)
 --   Pour      the channel inlet; pouring here counts as pouring into the ocean
+--   Tap       the Garden Hose's tap by the Pour, holding an Attachment "Hose" (the rope's end)
 --   Gate      Model: Blocker and Boards (parts, or models of parts) that close the way in, Sign
 --             (a SurfaceGui with a TextLabel "Label", client/Gates) and a part Prompt holding a
 --             ProximityPrompt "Prompt" (buys the gate)
@@ -20,12 +22,14 @@
 --             the area's items (server/Run); the cove's is workspace.Map.Beach.BackpackStand
 --   Pad       touching it moves you to the next open area's Spawn
 --   Spawn     where players appear in the area
+-- Cove shops that sell their own items (Config.stands): workspace.Map.Town.<name> (a part or Model)
+-- holding a ProximityPrompt "Prompt" (server/Run), e.g. Town.ToolShack sells the Water Gun.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Zones = require(ReplicatedStorage.Shared.Zones)
 
-local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water", "Pad" }
-local AREA_PARTS = { "Source", "Pour", "Pad", "Spawn" }
+local REQUIRED = { "Spawn", "Source", "PourPoint", "Basin", "Water", "Pad", "Tap" }
+local AREA_PARTS = { "Source", "Pour", "Pad", "Spawn", "Tap" }
 
 local Map = {}
 
@@ -85,6 +89,25 @@ function Map.standPrompt(stand: Instance): ProximityPrompt?
 	return if prompt and prompt:IsA("ProximityPrompt") then prompt else nil
 end
 
+-- A cove shop's ProximityPrompt (workspace.Map.Town.<name>, Config.stands); fails loudly when the
+-- place doesn't have it.
+function Map.shopPrompt(name: string): ProximityPrompt
+	local scenery = workspace:FindFirstChild("Map")
+	local town = scenery and scenery:FindFirstChild("Town")
+	local shop = town and town:FindFirstChild(name)
+	assert(shop, `workspace.Map.Town.{name} is missing (a cove shop, Config.stands)`)
+	local prompt = Map.standPrompt(shop)
+	assert(prompt, `{shop:GetFullName()} needs a ProximityPrompt "Prompt"`)
+	return prompt
+end
+
+-- A Tap's Attachment "Hose", where the Garden Hose's rope starts (server/HeldTools).
+function Map.tapAttachment(tap: BasePart): Attachment
+	local attachment = child(tap, "Hose")
+	assert(attachment:IsA("Attachment"), `{attachment:GetFullName()} must be an Attachment`)
+	return attachment
+end
+
 -- An area's Gate model (checked by Map.ensure).
 function Map.gate(ocean: Model, area): Instance
 	return child(Zones.areaModel(ocean, area) :: Instance, "Gate")
@@ -116,6 +139,7 @@ local function ensureArea(ocean: Model, area)
 	for _, name in AREA_PARTS do
 		assert(Zones.areaPart(ocean, area, name), `{model:GetFullName()} is missing part {name}`)
 	end
+	Map.tapAttachment(Zones.areaPart(ocean, area, "Tap") :: BasePart)
 	child(model, "Stand")
 	local gate = child(model, "Gate")
 	assert(gate:IsA("Model"), `{gate:GetFullName()} must be a Model`)
@@ -134,6 +158,8 @@ function Map.ensure(config): Model
 		Zones.part(model, partName) -- asserts with the part name
 	end
 	assert(type(Zones.part(model, "Water"):GetAttribute("Depth")) == "number", `Ocean: Water needs a number attribute "Depth"`)
+	Map.tapAttachment(Zones.part(model, "Tap"))
+
 	for _, area in config.areas do
 		if area.model then
 			ensureArea(model, area)
