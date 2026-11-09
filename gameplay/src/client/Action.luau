@@ -9,12 +9,16 @@
 -- gun's range; with the Garden Hose out a press by a Tap clips it there, then holding the input aimed
 -- at the water sprays (Gadget remote; the server pours while it sprays). The jetpack's hint shows here
 -- too (client/Jetpack flies it).
+-- Area mechanics (shared/AreaRules): a deep pool behind a broken rock and, with the Cloud Net, the
+-- drifting cloud from the net's range are scooped like a Source (Hud.scoopSpot); at the Glacier's
+-- Source each sweep chips the ice block (IceHits); Heat Gloves shorten sweeps in hot pools.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
+local AreaRules = require(ReplicatedStorage.Shared.AreaRules)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Items = require(ReplicatedStorage.Common.Items)
@@ -128,12 +132,13 @@ function Action.start()
 	-- The action this spot offers, the visible point aimed at (nil = not aimed at its water) and,
 	-- for a scoop, the area scooped. Scooping is at an open area's Source; pouring at an open area's
 	-- Pour, or anywhere next to where the water will be, aimed at a spot it will cover. `reach`: studs
-	-- a pour reaches (Hud.REACH by default); `pourOnly`: no scooping (a gadget in hand).
-	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera, reach: number?, pourOnly: boolean): (Kind?, Vector3?, any)
+	-- a pour reaches (Hud.REACH by default); `pourOnly`: no scooping (a gadget in hand). The last
+	-- result says whether the scoop is at a deep pool.
+	local function target(ocean: Model, root: BasePart, character: Model, camera: Camera, reach: number?, pourOnly: boolean): (Kind?, Vector3?, any, boolean)
 		local origin, look = camera.CFrame.Position, camera.CFrame.LookVector * AIM_DISTANCE
-		local area, source = nil, nil
+		local area, source, deep = nil, nil, false
 		if not pourOnly then
-			area, source = Hud.openSpot(ocean, "Source", root.Position)
+			area, source, deep = Hud.scoopSpot(ocean, root.Position)
 		end
 		-- Splash where the eye lands (the source's water or the basin), not on the invisible zone parts.
 		-- Their lookups are nil-safe: a part not streamed in yet is simply not ignored.
@@ -147,20 +152,20 @@ function Action.start()
 		if source then
 			local aim = aimAt(source, origin, look)
 			if not aim then
-				return "scoop", nil, area
+				return "scoop", nil, area, deep
 			end
 			local seen = workspace:Raycast(origin, look, seeParams)
-			return "scoop", if seen then seen.Position else aim, area
+			return "scoop", if seen then seen.Position else aim, area, deep
 		end
 		local _, pour = Hud.openSpot(ocean, "Pour", root.Position, reach)
 		if pour then
-			return "pour", aimAt(pour, origin, look), nil -- the splash plays on the channel inlet
+			return "pour", aimAt(pour, origin, look), nil, false -- the splash plays on the channel inlet
 		end
 		if not Hud.nearPour(ocean, root.Position, reach) then
-			return nil, nil, nil
+			return nil, nil, nil, false
 		end
 		local seen = workspace:Raycast(origin, look, seeParams)
-		return "pour", if seen and Zones.willFlood(ocean, seen.Position) then seen.Position else nil, nil
+		return "pour", if seen and Zones.willFlood(ocean, seen.Position) then seen.Position else nil, nil, false
 	end
 
 	local function canStart(kind: Kind): boolean
@@ -174,12 +179,13 @@ function Action.start()
 	end
 
 	local nextId = 0
-	-- `area`: the area scooped (its scoopFactor slows the sweep, as the server paces it).
+	-- `area`: the area scooped (AreaRules.scoopSeconds paces the sweep, as the server does).
 	local function begin(kind: Kind, hit: Vector3, now: number, area)
 		nextId += 1
+		local hotFill = Items.gadgetStat(Config, Hud.items(), "heatGloves", "hotFill")
 		local duration = if kind == "pour"
 			then Config.pourSeconds
-			else (player:GetAttribute("ActSeconds") or Config.start.actSeconds) * area.scoopFactor
+			else AreaRules.scoopSeconds(player:GetAttribute("ActSeconds") or Config.start.actSeconds, area, hotFill)
 		local action: Current = { kind = kind, id = nextId, started = now, duration = duration, hit = hit }
 		current = action
 		table.insert(if kind == "scoop" then pendingScoops else pendingPours, now + duration + PENDING_GRACE)
@@ -193,7 +199,8 @@ function Action.start()
 		return water.Position.Y + water.Size.Y / 2 < root.Position.Y - LOW_WATER
 	end
 
-	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?, root: BasePart?): string?
+	-- `ice`: the scoop chips an ice block (the Glacier's Source).
+	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?, root: BasePart?, ice: boolean): string?
 		if not kind or current then
 			return nil
 		end
@@ -209,6 +216,10 @@ function Action.start()
 			return "Aim at the water"
 		end
 		local verb = if kind == "scoop" and player:GetAttribute("Hold") then "Hold" else "Press"
+		if ice then
+			local needed = AreaRules.iceHits(Config, Items.gadgetStat(Config, Hud.items(), "icePick", "hits"))
+			return `{verb} {keyName()} to chip the ice ({player:GetAttribute("IceHits") or 0}/{needed})`
+		end
 		return `{verb} {keyName()} to {kind}`
 	end
 
@@ -276,7 +287,7 @@ function Action.start()
 			and humanoid.Health > 0
 			and camera
 			and not windowOpen
-		local kind, hit, area = nil, nil, nil
+		local kind, hit, area, deep = nil, nil, nil, false
 		local text, title = nil, nil
 		if ready and gadget == "gardenHose" then
 			text, title = hoseStep(ocean, root, character, camera)
@@ -284,10 +295,11 @@ function Action.start()
 			setSpray(false)
 			if ready and (player:GetAttribute("Equipped") ~= false or gun) then
 				local reach = if gun then Items.gadgetStat(Config, Hud.items(), "waterGun", "range") else nil
-				kind, hit, area = target(ocean, root, character, camera, reach, gun)
+				kind, hit, area, deep = target(ocean, root, character, camera, reach, gun)
 				title = if kind == "scoop" then "Scoop" elseif kind then "Pour" else nil
 			end
-			text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil)
+			local ice = kind == "scoop" and not deep and area.mechanic == "ice"
+			text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil, ice)
 			if ready and gadget == "jetpackTank" then
 				text = if (player:GetAttribute("Fuel") or 0) > 0 then `Hold {jumpName()} to fly` else "Out of fuel: land to refill"
 			end

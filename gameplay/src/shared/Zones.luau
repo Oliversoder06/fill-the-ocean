@@ -51,6 +51,50 @@ function Zones.openSpot(ocean: Model, config, open: { [number]: boolean }, name:
 	return nil, nil
 end
 
+-- Where a player at `position` scoops, among the `open` areas (Areas.open): an area's Source within
+-- `reach` studs, else a DeepPool behind a broken rock (`broken`: area ids) within `reach`, else the
+-- drifting cloud (the Source of a "cloud" area) within `netReach` (the Cloud Net's; nil without it).
+-- Returns the area, the part and whether it is a deep pool; nil when there is nowhere to scoop.
+function Zones.scoopSpot(ocean: Model, config, open: { [number]: boolean }, broken: { number }, position: Vector3, reach: number, netReach: number?)
+	local area, part = Zones.openSpot(ocean, config, open, "Source", position, reach)
+	if area then
+		return area, part, false
+	end
+	local deep = {}
+	for _, id in broken do
+		deep[id] = open[id]
+	end
+	area, part = Zones.openSpot(ocean, config, deep, "DeepPool", position, reach)
+	if area then
+		return area, part, true
+	end
+	if netReach then
+		local clouds = {}
+		for _, a in config.areas do
+			clouds[a.id] = open[a.id] and a.mechanic == "cloud"
+		end
+		area, part = Zones.openSpot(ocean, config, clouds, "Source", position, netReach)
+		if area then
+			return area, part, false
+		end
+	end
+	return nil, nil, false
+end
+
+local GROUND_PROBE = 1.5 -- studs below the feet that still count as standing
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+groundParams.RespectCanCollide = true -- the ground, not invisible zones
+
+-- What `character` stands on (the jetpack refuels there, snow slows walking): the hit of a ray from
+-- `root` down past its feet, or nil in the air.
+function Zones.ground(character: Model, root: BasePart): RaycastResult?
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local down = root.Size.Y / 2 + (if humanoid then humanoid.HipHeight else 2) + GROUND_PROBE
+	groundParams.FilterDescendantsInstances = { character }
+	return workspace:Raycast(root.Position, Vector3.new(0, -down, 0), groundParams)
+end
+
 -- Where the water will be once the ocean is full: inside a Water tile's footprint (server/Map), on
 -- ground lower than the full water line. Anywhere there is a place to pour.
 local LOOK_ABOVE = 30 -- studs above the full line that the ground probe starts

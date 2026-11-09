@@ -22,6 +22,15 @@
 --             the area's items (server/Run); the cove's is workspace.Map.Beach.BackpackStand
 --   Pad       touching it moves you to the next open area's Spawn
 --   Spawn     where players appear in the area
+-- Every area, the cove (in workspace.Ocean) included, also holds its deeper pool (server/Mechanics):
+--   DeepPool  zone over the deeper pool's water; scooping here brings Config.deepPool.sweepScale
+--             sweeps once its rock is broken
+--   Rock      the rock in front of it (a part or Model of parts) holding a ProximityPrompt "Prompt";
+--             the area's top tool breaks it (shared/AreaRules.rockTool)
+-- and its mechanic's parts (Config.areas `mechanic`):
+--   steam     Vents: a Folder or Model of vent parts (each bursts steam, client/Mechanics)
+--   cloud     CloudPath: a Folder or Model of 3-4 parts Point1..PointN the anchored Source drifts
+--             between (its visible cloud is welded to it, unanchored)
 -- Cove shops that sell their own items (Config.stands): workspace.Map.Town.<name> (a part or Model)
 -- holding a ProximityPrompt "Prompt" (server/Run), e.g. Town.ToolShack sells the Water Gun.
 
@@ -113,23 +122,83 @@ function Map.gate(ocean: Model, area): Instance
 	return child(Zones.areaModel(ocean, area) :: Instance, "Gate")
 end
 
+-- Makes `piece` (a part or a model of parts) stop blocking and showing.
+local function clear(piece: Instance)
+	local parts = piece:GetDescendants()
+	table.insert(parts, piece)
+	for _, part in parts do
+		if part:IsA("BasePart") then
+			part.Transparency = 1
+			part.CanCollide = false
+			part.CanQuery = false -- aim rays (client/Action) see through it
+			part.CanTouch = false
+		end
+	end
+end
+
 -- Opens a bought gate: its Boards and Blocker no longer block or show, and its prompt goes away.
 function Map.openGate(ocean: Model, area)
 	local gate = Map.gate(ocean, area)
 	for _, name in { "Boards", "Blocker" } do
-		local piece = child(gate, name)
-		local parts = piece:GetDescendants()
-		table.insert(parts, piece)
-		for _, part in parts do
-			if part:IsA("BasePart") then
-				part.Transparency = 1
-				part.CanCollide = false
-				part.CanQuery = false -- aim rays (client/Action) see through it
-				part.CanTouch = false
-			end
-		end
+		clear(child(gate, name))
 	end
 	Map.gatePrompt(gate).Enabled = false
+end
+
+-- An area's Rock in front of its deeper pool (checked by Map.ensure), and its prompt.
+function Map.rock(ocean: Model, area): Instance
+	return child(Zones.areaModel(ocean, area) :: Instance, "Rock")
+end
+
+function Map.rockPrompt(rock: Instance): ProximityPrompt
+	local prompt = Map.standPrompt(rock)
+	assert(prompt, `{rock:GetFullName()} needs a ProximityPrompt "Prompt"`)
+	return prompt
+end
+
+-- Breaks an area's rock: it no longer blocks or shows, and its prompt goes away.
+function Map.breakRock(ocean: Model, area)
+	local rock = Map.rock(ocean, area)
+	clear(rock)
+	Map.rockPrompt(rock).Enabled = false
+end
+
+-- The parts of an area's `folder` (Vents, CloudPath) in name order (Point1, Point2, ...).
+local function partsIn(ocean: Model, area, folder: string): { BasePart }
+	local parts = {}
+	for _, part in child(Zones.areaModel(ocean, area) :: Instance, folder):GetChildren() do
+		if part:IsA("BasePart") then
+			table.insert(parts, part)
+		end
+	end
+	table.sort(parts, function(a, b)
+		return a.Name < b.Name
+	end)
+	return parts
+end
+
+-- A "steam" area's vent parts.
+function Map.vents(ocean: Model, area): { BasePart }
+	return partsIn(ocean, area, "Vents")
+end
+
+-- A "cloud" area's drift points, in order.
+function Map.cloudPath(ocean: Model, area): { BasePart }
+	return partsIn(ocean, area, "CloudPath")
+end
+
+-- Checks an area's deeper pool, rock and mechanic parts (the cove's live in workspace.Ocean).
+local function ensureMechanics(ocean: Model, area)
+	local where = (Zones.areaModel(ocean, area) :: Instance):GetFullName()
+	assert(Zones.areaPart(ocean, area, "DeepPool"), `{where} is missing part DeepPool (the deeper pool, server/Mechanics)`)
+	Map.rockPrompt(Map.rock(ocean, area))
+	if area.mechanic == "steam" then
+		assert(#Map.vents(ocean, area) > 0, `{where}.Vents needs vent parts`)
+	elseif area.mechanic == "cloud" then
+		local path = #Map.cloudPath(ocean, area)
+		assert(path >= 3 and path <= 4, `{where}.CloudPath needs 3-4 parts Point1..PointN, has {path}`)
+		assert((Zones.areaPart(ocean, area, "Source") :: BasePart).Anchored, `{where}.Source must be Anchored (it drifts by tween)`)
+	end
 end
 
 -- Checks one area's model against the contract above.
@@ -164,6 +233,7 @@ function Map.ensure(config): Model
 		if area.model then
 			ensureArea(model, area)
 		end
+		ensureMechanics(model, area)
 	end
 	return model
 end

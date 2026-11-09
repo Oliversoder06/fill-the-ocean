@@ -107,16 +107,21 @@ function Hud.levels(fallback: number?): { [string]: number }?
 	return levels
 end
 
--- The open gates (area ids) from the server's GatesOpen attribute ("2,3").
-function Hud.gatesOpen(): { number }
+-- Area ids from a ReplicatedStorage attribute the server publishes as "2,3".
+local function areaIds(name: string): { number }
 	local ids = {}
-	local text = ReplicatedStorage:GetAttribute("GatesOpen")
+	local text = ReplicatedStorage:GetAttribute(name)
 	if type(text) == "string" then
 		for id in text:gmatch("%d+") do
 			table.insert(ids, tonumber(id) :: number)
 		end
 	end
 	return ids
+end
+
+-- The open gates (area ids) from the server's GatesOpen attribute ("2,3").
+function Hud.gatesOpen(): { number }
+	return areaIds("GatesOpen")
 end
 
 -- The player's items (common/Items state) from the Owned and ItemLevel_<id> attributes.
@@ -160,6 +165,16 @@ end
 function Hud.openSpot(ocean: Model, name: string, position: Vector3, reach: number?)
 	local reached = Areas.open(Items.reachable(Config, Hud.items(), Areas.openIds(Hud.gatesOpen())))
 	return Zones.openSpot(ocean, Config, reached, name, position, reach or Hud.REACH)
+end
+
+-- Where the local player at `position` scoops (Zones.scoopSpot, as the server checks it): the open
+-- area, the part (its Source, or a DeepPool behind a broken rock from the RocksBroken attribute) and
+-- whether it is a deep pool. With the Cloud Net the drifting cloud is in reach from the net's range.
+function Hud.scoopSpot(ocean: Model, position: Vector3)
+	local items = Hud.items()
+	local reached = Areas.open(Items.reachable(Config, items, Areas.openIds(Hud.gatesOpen())))
+	local net = Items.gadgetStat(Config, items, "cloudNet", "range")
+	return Zones.scoopSpot(ocean, Config, reached, areaIds("RocksBroken"), position, Hud.REACH, net)
 end
 
 -- Whether a character at `position` may pour from `reach` studs (Hud.REACH by default; the Water

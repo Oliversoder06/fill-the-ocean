@@ -23,6 +23,7 @@ export type Save = {
 	boostsPlayed: { string },
 	gatesOpen: { number }, -- area ids whose gate is bought (2-5), in the order they opened
 	buildings: { [string]: number }, -- the team's buildings (D2): upgrades bought per building id
+	rocksBroken: { number }, -- area ids (1-5) whose rock is broken, opening its deeper pool
 	finished: boolean,
 	updatedAt: number,
 }
@@ -45,6 +46,19 @@ local function team(userIds: { any }): { number }
 	end
 	table.sort(sorted)
 	return sorted
+end
+
+-- Whole area ids from `raw` between `low` and `high`, each once, in their order; anything else is dropped.
+local function areaIds(raw: any, low: number, high: number): { number }
+	local ids = {}
+	if type(raw) == "table" then
+		for _, id in raw do
+			if type(id) == "number" and id % 1 == 0 and id >= low and id <= high and not table.find(ids, id) then
+				table.insert(ids, id)
+			end
+		end
+	end
+	return ids
 end
 
 -- A finite number, negatives clamped to 0; anything else (NaN, inf, wrong type) is 0.
@@ -98,6 +112,7 @@ function RunSave.new(mapId: string, members: { number }): Save
 		boostsPlayed = {},
 		gatesOpen = {},
 		buildings = {},
+		rocksBroken = {},
 		finished = false,
 		updatedAt = 0,
 	}
@@ -172,14 +187,9 @@ function RunSave.sanitize(raw: any): Save?
 			end
 		end
 	end
-	if type(raw.gatesOpen) == "table" then
-		for _, areaId in raw.gatesOpen do
-			if type(areaId) == "number" and areaId % 1 == 0 and areaId >= 2 and areaId <= 5 and not table.find(save.gatesOpen, areaId) then
-				table.insert(save.gatesOpen, areaId)
-			end
-		end
-	end
+	save.gatesOpen = areaIds(raw.gatesOpen, 2, 5)
 	save.buildings = counts(raw.buildings)
+	save.rocksBroken = areaIds(raw.rocksBroken, 1, 5) -- saves from before 3c have none
 	save.finished = raw.finished == true
 	save.updatedAt = amount(raw.updatedAt)
 	return save

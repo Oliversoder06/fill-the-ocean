@@ -124,6 +124,17 @@ function tests.sanitize_gates(t)
 	t.expectEq(table.concat(again.gatesOpen, ","), "2,3")
 end
 
+-- Broken rocks (deeper pools, areas 1-5), each once; a save from before rocks loads with none.
+function tests.sanitize_rocks(t)
+	local save = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, rocksBroken = { 3, 1, 3, 6, 0, 2.5, "4", 0 / 0, 5 } })
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(table.concat(save.rocksBroken, ","), "3,1,5")
+	local old = RunSave.sanitize({ mapId = "ocean1", members = { 1 } })
+	assert(old, "an old save must load")
+	t.expectEq(#old.rocksBroken, 0, "no rocks broken in an old save")
+	t.expectEq(#RunSave.new("ocean1", { 1 }).rocksBroken, 0, "a new run has every rock")
+end
+
 -- Bought items (per player) and the team's buildings: ids are strings, levels whole and never negative.
 function tests.sanitize_items(t)
 	local save = RunSave.sanitize({

@@ -26,6 +26,9 @@ export type Area = {
 	gate: { fill: number, price: number }?, -- on sale once the ocean is `fill` full; nil = open from the start
 	model: string?, -- its model in workspace.Areas (server/Map); nil = the cove, whose parts are the ocean's
 	needs: string?, -- an item id: only players who own it reach this area (pads, spawn, scoop, pour)
+	-- its area mechanic (shared/AreaRules, server/Mechanics): "steam" vents knock you back and Heat
+	-- Gloves speed up its pools; "ice": its Source gives ice blocks you chip; "cloud": its Source drifts
+	mechanic: ("steam" | "ice" | "cloud")?,
 }
 
 export type Track = {
@@ -41,12 +44,12 @@ export type Track = {
 export type ItemLevel = {
 	cost: number,
 	capacity: number?, -- backpack, Jetpack Tank: litres it holds
-	range: number?, -- Water Gun: studs it pours from; Cloud Net: studs it catches a cloud from (3c)
+	range: number?, -- Water Gun: studs it pours from; Cloud Net: studs it scoops the drifting cloud from
 	rate: number?, -- Garden Hose: litres a second it pours
 	reach: number?, -- Garden Hose: studs you may walk from its tap
 	flightSeconds: number?, -- Jetpack Tank: seconds of thrust on a full tank
-	hotFill: number?, -- Heat Gloves: hot pools fill this many times faster (3c)
-	hits: number?, -- Ice Pick: hits to chip one ice block (3c)
+	hotFill: number?, -- Heat Gloves: sweeps in hot pools take 1 / this of the time
+	hits: number?, -- Ice Pick: hits to chip one ice block loose
 }
 
 -- A thing bought once at its area's stand (common/Items), then levelled in TAB.
@@ -117,11 +120,33 @@ Config.ocean = {
 Config.areas = {
 	{ id = 1, name = "Cove Well", payMultiplier = 1, scoopFactor = 1 },
 	{ id = 2, name = "Mountain Spring", payMultiplier = 5, scoopFactor = 1.5, gate = { fill = 0.07, price = 16000 }, model = "MountainSpring" },
-	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 }, model = "HotSprings" },
-	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 }, model = "Glacier" },
+	{ id = 3, name = "Hot Springs", payMultiplier = 25, scoopFactor = 2, gate = { fill = 0.22, price = 88000 }, model = "HotSprings", mechanic = "steam" },
+	{ id = 4, name = "Glacier", payMultiplier = 125, scoopFactor = 2.5, gate = { fill = 0.45, price = 1.6e6 }, model = "Glacier", mechanic = "ice" },
 	-- Up in the clouds: only players with a Jetpack Tank get there.
-	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher", needs = "jetpackTank" },
+	{ id = 5, name = "Cloud Catcher", payMultiplier = 625, scoopFactor = 3, gate = { fill = 0.7, price = 120e6 }, model = "CloudCatcher", needs = "jetpackTank", mechanic = "cloud" },
 } :: { Area }
+
+-- Area mechanics (shared/AreaRules, server/Mechanics).
+-- Steam (Hot Springs): each vent puffs `warnSeconds` before it bursts, every `period` seconds
+-- (vents staggered); a burst pushes a player within `radius` studs away at `push` and up at `lift`
+-- studs a second for `pushSeconds`. Heat Gloves stop the push, and their hotFill (1.25 / 1.5 / 2,
+-- Config.items) divides the sweep time in hot pools: 25 / 50 / 100 % faster.
+Config.steam = { period = 6, warnSeconds = 1, radius = 6, push = 60, lift = 35, pushSeconds = 0.25 }
+-- Ice (Glacier): every sweep at the Source is a hit; the `hits`-th frees a block worth `blockSweeps`
+-- normal sweeps of litres (carried like water, melted when poured). Bare hands (6 hits for 4 sweeps)
+-- are slower than scooping water; the Ice Pick's 4 / 3 / 2 hits make ice break even, then pay up to
+-- twice the sweeps. Snow terrain under the feet slows walking to `walkFactor`.
+Config.ice = { hits = 6, blockSweeps = 4 }
+Config.snow = { walkFactor = 0.8 }
+-- Cloud (Cloud Catcher): the Source drifts between its CloudPath points, `legSeconds` per leg. The
+-- Cloud Net scoops it from the net's range instead of Zones.REACH.
+Config.cloud = { legSeconds = 25 }
+-- A deeper pool in every area behind a rock that the area's top tool breaks (AreaRules.rockTool):
+-- a sweep there brings `sweepScale` sweeps of litres. Broken rocks stay broken for the team (save).
+Config.deepPool = { sweepScale = 1.5 }
+-- Golden spring: every minSeconds-maxSeconds of play one open area's Source pays `pay` times for
+-- `seconds`.
+Config.golden = { minSeconds = 480, maxSeconds = 720, seconds = 120, pay = 3 }
 
 -- Shop order. Prices: tools and Sneakers keep the ordered list's prices; each old Quick Hands price
 -- is split between Quick Scoop and Pickup.
@@ -264,8 +289,8 @@ local backpacks = {
 	}),
 }
 -- Gadgets: one mechanic each, bought once and levelled in TAB. Water Gun, Garden Hose and Jetpack Tank
--- are used from the hotbar; Heat Gloves, Ice Pick and Cloud Net act on the area mechanics of 3c (their
--- stats are here, their effects come with steam, ice and clouds). Prices sit in their area's band
+-- are used from the hotbar; Heat Gloves, Ice Pick and Cloud Net act on the area mechanics on their own
+-- once owned (shared/AreaRules: steam, ice, clouds). Prices sit in their area's band
 -- like the backpacks (tools/simulate retunes them in Phase 4); the Jetpack Tank opens Cloud Catcher,
 -- so it costs well under that gate (120M).
 --   Water Gun (1, cove Tool Shack): pours from 30 / 40 / 50 studs instead of Zones.REACH (12).

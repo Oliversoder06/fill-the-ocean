@@ -15,6 +15,10 @@
 -- accepted action is published as ActKind + ActAt (server time) so other clients can play it on
 -- that player's body (client/Bodies).
 -- Clients also send Look(pitch in degrees) a few times a second; it goes out as the Look attribute.
+-- Area mechanics (server/Mechanics, shared/AreaRules): steam vents, snow, the drifting cloud (the
+-- Cloud Net scoops it from its range), ice blocks at the Glacier's Source (each sweep is a hit; the
+-- last one frees a block of litres), Heat Gloves' faster sweeps in hot pools, the deeper pools
+-- behind breakable rocks (1.5x litres a sweep; save.rocksBroken) and the golden spring (3x pay).
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
@@ -31,6 +35,7 @@ local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 
 local Admins = require(ReplicatedStorage.Shared.Admins)
+local AreaRules = require(ReplicatedStorage.Shared.AreaRules)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
@@ -49,6 +54,7 @@ local RunStore = require(ReplicatedStorage.Common.RunStore)
 local RunTicket = require(ReplicatedStorage.Common.RunTicket)
 local HeldTools = require(script.Parent.HeldTools)
 local Map = require(script.Parent.Map)
+local Mechanics = require(script.Parent.Mechanics)
 
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
 local PARTY_WAIT = 20 -- party: start when everyone is in, or this long after the first arrival
@@ -57,7 +63,6 @@ local MAX_BUYS_PER_SECOND = 5
 local MAX_EQUIPS_PER_SECOND = 5 -- each one swaps the model in hand (server/HeldTools)
 local MAX_GADGET_PER_SECOND = 10 -- clip / spray / fly toggles; water and fuel follow server time, not these
 local HOSE_TICK = 0.5 -- seconds between the hose's credits while it sprays
-local GROUND_PROBE = 1.5 -- studs below the feet that still count as standing (jetpack refuel)
 local MONEY_EPSILON = 1e-6 -- pours add fractional coins; 19.9999999 must still buy a 20-coin item
 local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
@@ -101,10 +106,6 @@ local run = {
 	boostToken = 0,
 }
 local states: { [Player]: any } = {}
-
-local groundParams = RaycastParams.new()
-groundParams.FilterType = Enum.RaycastFilterType.Exclude
-groundParams.RespectCanCollide = true -- the ground, not invisible zones
 
 local function setGlobal(name: string, value: any)
 	ReplicatedStorage:SetAttribute(name, value)
@@ -172,6 +173,7 @@ local function publish(player: Player)
 	player:SetAttribute("Spraying", state.hose ~= nil and state.hose.spraying)
 	player:SetAttribute("Flying", state.flying)
 	publishFuel(player, state)
+	player:SetAttribute("IceHits", state.iceHits) -- hits on the Glacier's current ice block
 	-- The hose's rope and the jetpack's lift follow the state at once (server/HeldTools).
 	local hose = state.hose
 	local reach = if hose then Items.gadgetStat(Config, state, "gardenHose", "reach") :: number else 0
@@ -183,7 +185,8 @@ end
 local function applyWalkSpeed(player: Player)
 	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = boosted(states[player]).walkSpeed
+		local state = states[player]
+		humanoid.WalkSpeed = AreaRules.walkSpeed(Config, boosted(state).walkSpeed, state.onSnow)
 	end
 end
 
@@ -385,6 +388,7 @@ local function snapshot(): RunSave.Save
 	copy.boostsPlayed = table.clone(save.boostsPlayed)
 	copy.gatesOpen = table.clone(save.gatesOpen)
 	copy.buildings = table.clone(save.buildings)
+	copy.rocksBroken = table.clone(save.rocksBroken)
 	return copy
 end
 
@@ -600,6 +604,7 @@ local function startRun()
 		Map.openGate(ocean, Areas.byId(Config, id))
 	end
 	publishGates()
+	Mechanics.load(save)
 
 	local scale = workspace:GetAttribute("WaterScale") -- Studio test shortcut
 	local studioScale = if RunService:IsStudio() and type(scale) == "number" and scale > 0 then scale else 1
@@ -687,6 +692,9 @@ local function onPlayerAdded(player: Player)
 		hose = nil :: { area: any, tap: BasePart, spraying: boolean, due: number }?, -- clipped Garden Hose
 		flying = false, -- the jetpack's lift is on (server/HeldTools)
 		fuel = math.huge, -- jetpack seconds left; Gadgets.fuel clamps it to the tank's size
+		iceHits = 0, -- hits on the current ice block (server/Mechanics, AreaRules.sweep)
+		onSnow = false, -- standing on snow terrain (server/Mechanics): walking is slower
+		rockAt = 0, -- os.clock() of the last accepted rock prompt (server/Mechanics)
 	}
 	if run.save then
 		applySaved(player)
@@ -842,6 +850,20 @@ local function openSpot(player: Player, name: string, reach: number?)
 	return Zones.openSpot(ocean, Config, reached, name, root.Position, (reach or ACT_REACH) + DISTANCE_SLACK)
 end
 
+-- Where the player scoops (Zones.scoopSpot): an open area's Source they reach, a deep pool behind a
+-- broken rock, or the drifting cloud from the Cloud Net's range. The area and whether it is a deep pool.
+local function scoopSpot(player: Player)
+	local root = rootOf(player)
+	if not root then
+		return nil, false
+	end
+	local state = states[player]
+	local reached = Areas.open(reachableIds(state))
+	local net = Items.gadgetStat(Config, state, "cloudNet", "range")
+	local area, _, deep = Zones.scoopSpot(ocean, Config, reached, Mechanics.rocksBroken(), root.Position, ACT_REACH + DISTANCE_SLACK, net and net + DISTANCE_SLACK)
+	return area, deep
+end
+
 -- Pouring works anywhere within `reach` studs (Zones.REACH by default) of where the ocean's water
 -- will be (shared/Zones.nearFlood).
 local function nearFlood(player: Player, reach: number?): boolean
@@ -858,11 +880,19 @@ local function nearFlood(player: Player, reach: number?): boolean
 	return Zones.nearFlood(ocean, (root :: BasePart).Position, (reach or ACT_REACH) + DISTANCE_SLACK, characters)
 end
 
--- A sweep at `area`'s Source: its litres are worth that area's pay.
-local function creditScoop(state, area)
-	local litres = Water.scoopAmount(state.carried, state.stats.capacity, boosted(state).sweeps)
+-- A sweep at `area`'s Source (deep: its deeper pool): its litres are worth that area's pay, times
+-- the golden spring's. AreaRules.sweep scales the litres (an ice hit brings none until the block is free).
+local function creditScoop(state, area, deep: boolean)
+	local pick = Items.gadgetStat(Config, state, "icePick", "hits")
+	local hits, scale = AreaRules.sweep(Config, area, deep, state.iceHits, pick)
+	state.iceHits = hits
+	if scale <= 0 then
+		return
+	end
+	local litres = Water.scoopAmount(state.carried, state.stats.capacity, boosted(state).sweeps / scale)
+	local pay = Config.ocean.coinsPerLitre * area.payMultiplier * AreaRules.payScale(Config, area.id, deep, Mechanics.goldenId())
 	state.carried += litres
-	state.carriedValue = Water.mix(state.carriedValue, litres, Config.ocean.coinsPerLitre * area.payMultiplier)
+	state.carriedValue = Water.mix(state.carriedValue, litres, pay)
 end
 
 -- Tells every client an accepted action started, so they can play it on this player's body.
@@ -895,8 +925,8 @@ local function creditPour(state): boolean
 end
 
 -- A scoop sweep or a pour. Checked when it starts (distance, room or water). A scoop is at an open
--- area's Source and is credited when it ends (it always plays out in full on the client); it is
--- paced: on average one per actSeconds x the area's scoopFactor, with slack for latency. A pour is
+-- area's Source (or deep pool, scoopSpot) and is credited when it ends (it always plays out in full on
+-- the client); it is paced: on average one per AreaRules.scoopSeconds, with slack for latency. A pour is
 -- by the ocean or at an open area's Pour, instant and needs no pacing: it empties the tool. With the
 -- Water Gun in hand instead of the tool, a pour reaches the gun's range.
 -- lihfolk-ignore: remote-unvalidated-args (kind is checked against exactly "scoop" / "pour" below)
@@ -910,16 +940,17 @@ local function onAct(player: Player, kind: unknown)
 		return
 	end
 	local reach = if gun then Items.gadgetStat(Config, state, "waterGun", "range") :: number else ACT_REACH
-	local area = nil
+	local area, deep = nil, false
 	if kind == "scoop" then
-		area = openSpot(player, "Source")
+		area, deep = scoopSpot(player)
 		if not area then
 			return
 		end
 	elseif not (nearFlood(player, reach) or openSpot(player, "Pour", reach)) then
 		return
 	end
-	local act = state.stats.actSeconds * (if area then area.scoopFactor else 1)
+	local hotFill = Items.gadgetStat(Config, state, "heatGloves", "hotFill")
+	local act = if area then AreaRules.scoopSeconds(state.stats.actSeconds, area, hotFill) else state.stats.actSeconds
 	local slack = math.min(HOLD_SLACK, act / 2)
 	local now = os.clock()
 	if kind == "scoop" and now < state.nextActAt - slack then
@@ -945,7 +976,7 @@ local function onAct(player: Player, kind: unknown)
 		if states[player] ~= state or run.phase ~= "playing" or not state.equipped then
 			return
 		end
-		creditScoop(state, area)
+		creditScoop(state, area, deep)
 		publish(player)
 	end)
 end
@@ -1057,11 +1088,7 @@ end
 
 -- Whether the character stands on something (the jetpack refuels only then).
 local function grounded(player: Player, root: BasePart): boolean
-	local character = player.Character :: Model
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local down = root.Size.Y / 2 + (if humanoid then humanoid.HipHeight else 2) + GROUND_PROBE
-	groundParams.FilterDescendantsInstances = { character }
-	return workspace:Raycast(root.Position, Vector3.new(0, -down, 0), groundParams) ~= nil
+	return Zones.ground(player.Character :: Model, root) ~= nil
 end
 
 -- The jetpack's fuel burns while flying and refills on the ground; the lift stops when it is empty.
@@ -1166,6 +1193,25 @@ function Run.start(oceanModel: Model)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
 	remotes.Gadget.OnServerEvent:Connect(onGadget)
+	Mechanics.start(ocean, {
+		states = states,
+		playing = function()
+			return run.phase == "playing"
+		end,
+		openIds = function()
+			return Areas.openIds(gatesOpen())
+		end,
+		rootOf = rootOf,
+		inReach = inReach,
+		card = card,
+		tell = function(player, text)
+			remotes.Card:FireClient(player, text, CARD_SECONDS)
+		end,
+		walkChanged = applyWalkSpeed,
+		save = function(reason)
+			task.spawn(saveRun, reason)
+		end,
+	})
 	RunService.Heartbeat:Connect(function(dt)
 		if run.phase ~= "playing" then
 			return

@@ -42,6 +42,9 @@ Server (`src/server/`):
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it, on a `HeldGrip`
   Motor6D (hand to tool) that client `Bodies` turns to suit the carry pose.
 - `Map.luau`: checks the baked ocean model and moves the water.
+- `Mechanics.luau`: area mechanics (steam vents and their knockback, snow, the drifting cloud, the
+  rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
+  `rocksBroken` and `goldenId` when it credits a scoop.
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
@@ -81,6 +84,7 @@ Client (`src/client/`, all started from `init.client.luau`):
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
   with `Ease.pop`; the jetpack's fuel while it is out).
 - `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
+- `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
 - `Viewmodel.luau`: first-person tool (sweep / pour poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
   tilt (`CameraFeel.walk()` shares the walk cycle). `Mood.luau`: lighting.
@@ -98,7 +102,8 @@ Shared (`src/shared/`, pure unless noted):
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
-  `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
+  `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
+  golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`):
   maths, all Lune-tested (`Cues` too).
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested).
@@ -122,7 +127,9 @@ The server publishes state as attributes; the client only reads them.
 - `ReplicatedStorage` attributes: `Phase` (`loading`, `intro`, `playing`, `ending`, `done`),
   `MapId`, `MapName`, `Current`, `Target`, `Fill`, `Waiting`, `RunStartedAt` (server time) and
   `PlaySeconds` (time played on this save before this session), for the stopwatch, `Boost`
-  (running boost id or `""`) and `BoostEndsAt` (server time). `Sweeps` is published with the
+  (running boost id or `""`) and `BoostEndsAt` (server time), `RocksBroken` (`"1,3"`), `Golden`
+  (area id of the golden spring, 0 for none) and `GoldenEndsAt`; vent parts carry `VentState`
+  (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the
   boost applied.
 - Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
   `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, and
@@ -130,7 +137,8 @@ The server publishes state as attributes; the client only reads them.
   `"backpackTank,bigTank"`), `ItemLevel_<itemId>` per item and `Backpack` (the worn pack's model or
   `""`); `Capacity` includes the pack and the Jetpack Tank; `Gadget` (the hotbar gadget out instead
   of the tool, an item id or `""`), `HoseArea` (area id the Garden Hose is clipped to, 0 for none),
-  `Spraying`, `Flying` and `Fuel` (jetpack seconds left, only once owned); `ActKind` + `ActAt`
+  `Spraying`, `Flying` and `Fuel` (jetpack seconds left, only once owned), `IceHits` (hits on the
+  current Glacier ice block); `ActKind` + `ActAt`
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
 - Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it),
   `Equip` (boolean for the tool, or an owned hotbar gadget's id), `Act` (`"scoop"` or `"pour"`, sent

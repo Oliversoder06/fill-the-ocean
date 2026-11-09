@@ -50,7 +50,7 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
 - Studio test helpers (gameplay), workspace attributes: `WaterScale` (less water needed),
   `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins given to every
   player) and `StudioFill` (a fraction 0-1:
-  jumps the fill). Teleports and saving need the published game / Studio API access.
+  jumps the fill) and `StudioGolden` (true: starts a golden spring now). Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.
 

@@ -104,6 +104,15 @@ Cues.carry = {
 	drips = "Drips",
 }
 
+-- Area mechanics (client/Mechanics). Each steam vent part holds ParticleEmitters `puff` (the warning)
+-- and `burst`, each with a number attribute "Burst" (particles per event). `golden` is an Attachment
+-- in ReplicatedStorage.Vfx with enabled emitters, put on the golden spring's Source while it lasts.
+Cues.mechanics = {
+	puff = "Puff",
+	burst = "Burst",
+	golden = "GoldenSpring",
+}
+
 -- Ambience (client/Ambience): one looping bed (the ocean), plus a heat layer. A dry ocean is hot
 -- and quiet; as it fills, the heat fades and the life in the bed comes back.
 Cues.ambience = {
