@@ -128,6 +128,20 @@ function tests.targets_by_job(t)
 	local owned = { "tanker", "waterGun", "fireTruck" }
 	t.expectEq(table.concat(StaffRules.targets(Config, list.firefighter, owned, { 1 }), ","), "2,3", "owned vehicles' areas, in order")
 	t.expectEq(table.concat(StaffRules.targets(Config, list.plumber, {}, { 1, 2 }), ","), "1")
+	t.expectEq(#StaffRules.targets(Config, list.firefighter, { "waterBomber" }, { 1 }), 0, "the bomber flies: no truck loop")
+	t.expectEq(StaffRules.post(Config, list.firefighter, { "fireTruck", "waterBomber" }, { 1 }, nil), 2, "the best truck, not the bomber")
+	t.expectEq(StaffRules.post(Config, list.firefighter, { "fireTruck", "waterBomber" }, { 1 }, 5), 2, "never posted to the bomber")
+end
+
+-- The vehicle a Firefighter drives at an area: that area's truck (never the flying bomber), only an
+-- owned one when the owned ids are given.
+function tests.truck_by_area(t)
+	t.expectEq(StaffRules.truck(Config, 2), Items.get(Config, "fireTruck"))
+	t.expectEq(StaffRules.truck(Config, 4), Items.get(Config, "snowcatTanker"))
+	t.expectEq(StaffRules.truck(Config, 5), nil, "the Water Bomber flies")
+	t.expectEq(StaffRules.truck(Config, 1), nil, "no vehicle at the cove")
+	t.expectEq(StaffRules.truck(Config, 3, { "fireTruck" }), nil, "the Tanker isn't owned")
+	t.expectEq(StaffRules.truck(Config, 3, { "tanker" }), Items.get(Config, "tanker"))
 end
 
 -- A saved post that is still allowed stays; otherwise the default: a carrier's own area, a

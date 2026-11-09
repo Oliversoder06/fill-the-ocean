@@ -39,6 +39,16 @@ function Zones.areaPart(ocean: Model, area, name: string): BasePart?
 	return if part and part:IsA("BasePart") then part else nil
 end
 
+-- Where an area's carried water is poured: its Pour, the cove's usual pour spot (PourPoint). Nil
+-- when it isn't there (not streamed in).
+function Zones.pourPart(ocean: Model, area): BasePart?
+	if area.model then
+		return Zones.areaPart(ocean, area, "Pour")
+	end
+	local part = ocean:FindFirstChild("PourPoint")
+	return if part and part:IsA("BasePart") then part else nil
+end
+
 -- The first open area (`open`: Areas.open) whose `name` part lies within `radius` studs of
 -- `position`, and that part; nil when none does.
 function Zones.openSpot(ocean: Model, config, open: { [number]: boolean }, name: string, position: Vector3, radius: number)

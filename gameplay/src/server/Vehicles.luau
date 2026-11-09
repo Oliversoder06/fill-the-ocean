@@ -49,7 +49,7 @@ export type Hooks = {
 	allow: (any, string, number) -> boolean, -- server/Run's per-player rate limit
 	nearFlood: (Player) -> boolean, -- the player stands where they may pour into the ocean
 	water: () -> (number, number), -- the ocean's current and target litres
-	pour: (Player, number, number) -> (), -- litres worth coins land in the ocean, paid to the player
+	pour: (Player, number, number, number) -> (), -- litres worth coins land in the ocean, paid to the player, who worked area id
 	stopHose: (Player) -> (), -- the Garden Hose stops spraying (server/Run)
 	vehicle: RemoteEvent, -- ReplicatedStorage.Remotes.Vehicle
 }
@@ -355,7 +355,7 @@ local function empty(player: Player, v: Out, want: number)
 	if v.tank <= 1e-9 then
 		v.tank, v.value = 0, 0
 	end
-	hooks.pour(player, litres, value)
+	hooks.pour(player, litres, value, v.item.area)
 end
 
 local function tick(player: Player, v: Out, step: number)

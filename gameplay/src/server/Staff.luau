@@ -2,7 +2,7 @@
 -- Firefighter and Plumber, hired at the Lifeguard Tower (a cove shop, server/Run onStand) and
 -- levelled in TAB, where the 2nd and 3rd hire are levels. Assigned in TAB: Staff("assign", itemId,
 -- areaId) sets where an owned one works (StaffRules.targets: an area the owner reaches, an owned
--- vehicle's area for a Firefighter, the cove's plots for a Plumber), kept per player in state.assign
+-- truck's area for a Firefighter (StaffRules.truck: never the flying bomber), the cove's plots for a Plumber), kept per player in state.assign
 -- (saved by server/Run). Unassigned, or no longer allowed, they work their default post
 -- (StaffRules.post).
 -- No bodies here (client/Staff draws them): every TICK while the run plays, each present player's
@@ -10,8 +10,8 @@
 -- (hooks.fill), paid to their owner in batches (server/Payroll) at half the hand pay of the area they
 -- work (StaffRules.payPerLitre), and twice as fast while the owner scooped or poured in that area
 -- within Config.staff.workSeconds (state.workArea / state.workedAt, set by server/Run's onAct).
--- Lifeguards: players within Config.staff.lifeguardRadius of a Source a present player's Lifeguard
--- works walk faster (state.nearLifeguard; server/Run applies it with the other walk factors).
+-- Lifeguards: players within Config.staff.lifeguardRadius of the Source or Pour a present player's
+-- Lifeguard works walk faster (state.nearLifeguard; server/Run applies it with the other walk factors).
 -- Plumbers: the best present, assigned one sets server/Buildings.setPlumber for the team.
 -- Published: player attribute Staff ("helper:2@2,firefighter:1@0", StaffRules.encode: id:hires@post,
 -- post 0 = nowhere to work yet), read by client/Staff and client/Shop.
@@ -72,17 +72,11 @@ local function publish(player: Player, list: { Hire })
 	end
 end
 
--- Litres a second a hire makes (a Firefighter: a tank of the owner's vehicle of its post's area).
+-- Litres a second a hire makes (a Firefighter: a tank of the owner's truck at its post).
 local function rateOf(state, hire: Hire): number
 	local item = hire.item
-	local tank = nil
-	if item.job == "truck" then
-		for _, vehicle in Config.items do
-			if vehicle.kind == "vehicle" and vehicle.area == hire.post and Items.owned(state, vehicle.id) then
-				tank = Items.stat(state, vehicle, "tank")
-			end
-		end
-	end
+	local truck = if item.job == "truck" then StaffRules.truck(Config, hire.post :: number, state.owned) else nil
+	local tank = if truck then Items.stat(state, truck, "tank") else nil
 	local carry = if item.job == "area" then Items.stat(state, item, "carry") else nil
 	return StaffRules.rate(item.job, hire.hires, carry, Items.stat(state, item, "tripSeconds"), tank)
 end
@@ -123,14 +117,18 @@ local function tick(dt: number)
 	setPlumbers(boosts)
 end
 
--- Who stands within reach of a Source a present player's Lifeguard works (their walk speeds up).
+-- Who stands within reach of a Source or Pour a present player's Lifeguard works (their walk speeds up).
 local function checkLifeguards()
 	local watched = {}
 	for _, state in if hooks.playing() then hooks.states else {} do
 		for _, hire in roster(state) do
-			local source = if hire.item.id == "lifeguard" and hire.post then Zones.areaPart(ocean, Areas.byId(Config, hire.post), "Source") else nil
-			if source then
-				table.insert(watched, source.Position)
+			if hire.item.id == "lifeguard" and hire.post then
+				local area = Areas.byId(Config, hire.post)
+				for _, part in { Zones.areaPart(ocean, area, "Source") or false, Zones.pourPart(ocean, area) or false } do
+					if part then
+						table.insert(watched, part.Position)
+					end
+				end
 			end
 		end
 	end

@@ -8,7 +8,7 @@ export type Entry = { id: string, hires: number, post: number } -- post 0: nowhe
 local StaffRules = {}
 
 -- The area ids staff `item` may work at: a Helper or Lifeguard ("area") any area the owner reaches
--- (`reachable`: Items.reachable), a Firefighter ("truck") the area of each owned vehicle (that
+-- (`reachable`: Items.reachable), a Firefighter ("truck") the area of each owned truck (that
 -- vehicle's loop; `owned`: the owner's item ids), a Plumber ("plots") the cove, where the plots are.
 function StaffRules.targets(config, item, owned: { string }, reachable: { number }): { number }
 	if item.job == "area" then
@@ -17,17 +17,27 @@ function StaffRules.targets(config, item, owned: { string }, reachable: { number
 		return { 1 }
 	end
 	local areas = {}
-	for _, other in config.items do
-		if other.kind == "vehicle" and table.find(owned, other.id) and not table.find(areas, other.area) then
-			table.insert(areas, other.area)
+	for _, area in config.areas do
+		if StaffRules.truck(config, area.id, owned) then
+			table.insert(areas, area.id)
 		end
 	end
-	table.sort(areas)
 	return areas
 end
 
+-- The vehicle a Firefighter drives at area `areaId` (only an owned one when `owned` is given), or
+-- nil: the flying Water Bomber has no truck loop.
+function StaffRules.truck(config, areaId: number, owned: { string }?)
+	for _, item in config.items do
+		if item.kind == "vehicle" and item.area == areaId and not item.flies and (not owned or table.find(owned, item.id)) then
+			return item
+		end
+	end
+	return nil
+end
+
 -- Where `item` works: the `assigned` post while it is still allowed, else its default (a carrier's
--- own area, else the furthest it may; a Firefighter's best vehicle; the plots). Nil: nowhere yet.
+-- own area, else the furthest it may; a Firefighter's best truck; the plots). Nil: nowhere yet.
 function StaffRules.post(config, item, owned: { string }, reachable: { number }, assigned: number?): number?
 	local targets = StaffRules.targets(config, item, owned, reachable)
 	if assigned and table.find(targets, assigned) then

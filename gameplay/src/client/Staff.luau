@@ -105,8 +105,8 @@ local function stops(item, post: number, lane: number): { { at: Vector3, face: V
 	if item.job == "area" then
 		local area = Areas.byId(Config, post)
 		local source = ocean and Zones.areaPart(ocean, area, "Source")
-		local pour = ocean and (if area.model then Zones.areaPart(ocean, area, "Pour") else ocean:FindFirstChild("PourPoint"))
-		if not (source and pour and pour:IsA("BasePart")) then
+		local pour = ocean and Zones.pourPart(ocean, area)
+		if not (source and pour) then
 			return nil
 		end
 		local way = flat(pour.Position - source.Position)
@@ -351,13 +351,14 @@ local function refresh()
 					continue
 				end
 				for i = 1, math.min(entry.hires, 3) do
-					local spot = `{item.job}@{entry.post}`
+					-- every truck loop walks the same path, whatever vehicle it runs
+					local spot = if item.job == "truck" then "truck" else `{item.job}@{entry.post}`
 					lanes[spot] = (lanes[spot] or 0) + 1
 					local lane = lanes[spot]
 					local places = stops(item, entry.post, lane)
 					local distance = if places then (places[1].at - camera.CFrame.Position).Magnitude else math.huge
 					if distance <= RANGE then
-						local key = `{owner.UserId}:{item.id}:{i}@{entry.post}`
+						local key = `{owner.UserId}:{item.id}:{i}@{entry.post}#{lane}` -- a new lane respawns the body there
 						table.insert(wanted, { key = key, item = item, post = entry.post, lane = lane, places = places, distance = distance })
 					end
 				end

@@ -253,10 +253,9 @@ local function assignText(item, post: number?): string
 	elseif not post or post == 0 then
 		return if item.job == "truck" then "BUY A VEHICLE FIRST" else "..."
 	elseif item.job == "truck" then
-		for _, vehicle in Config.items do
-			if vehicle.kind == "vehicle" and vehicle.area == post then
-				return `DRIVES THE {vehicle.name:upper()}`
-			end
+		local truck = StaffRules.truck(Config, post)
+		if truck then
+			return `DRIVES THE {truck.name:upper()}`
 		end
 	end
 	return `WORKS AT {Areas.byId(Config, post).name:upper()}`

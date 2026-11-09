@@ -1277,8 +1277,10 @@ function Run.start(oceanModel: Model)
 		water = function()
 			return run.current, run.target
 		end,
-		pour = function(player, litres, value)
-			pourIn(states[player], litres, value)
+		pour = function(player, litres, value, areaId)
+			local state = states[player]
+			pourIn(state, litres, value)
+			worked(state, areaId) -- running the vehicle's loop speeds up the Firefighters on it
 			publish(player)
 			checkFull()
 		end,
