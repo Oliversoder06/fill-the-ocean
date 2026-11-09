@@ -59,10 +59,13 @@ local function percent(bonus: number): string
 	return `+{math.floor((bonus - 1) * 100 + 0.5)}%`
 end
 
--- What the next level changes, from the stats now and after buying it.
+-- What the next level changes, from the stats now and after buying it. Litres per trip include the
+-- worn backpack; scoop counts stay the tool's.
 local function effectText(id: string, now: Ladder.Stats, after: Ladder.Stats): string
 	if id == "tool" then
-		return `{short(after.capacity)} L per trip, {scoops(after.sweeps)} to fill (now {short(now.capacity)} L)`
+		local gear = Hud.items()
+		local tripNow, tripAfter = Items.withGear(Config, gear, now).capacity, Items.withGear(Config, gear, after).capacity
+		return `{short(tripAfter)} L per trip, {scoops(after.sweeps)} to fill (now {short(tripNow)} L)`
 	elseif id == "pickup" then
 		return `Fill your tool in {scoops(after.sweeps)} (now {scoops(now.sweeps)})`
 	elseif id == "hold" then
