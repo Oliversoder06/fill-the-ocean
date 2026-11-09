@@ -166,6 +166,9 @@ Shared (`src/shared/`, pure unless noted):
   texts take an optional `priceOf` (the team's price, `Hud.price` / the server's `price`).
 - `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
   (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
+- `Honeycomb.luau` (pure, tested): the shop honeycomb: flat-top hex maths, `layout(config)` (main
+  ring, each category's chains of track / item / gate links with slots and bridges), `window`,
+  `ownedCount`, `states(layout, catId, view)`, `badges`.
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
