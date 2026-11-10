@@ -244,11 +244,14 @@ function tests.upgrades_hold_their_levels_in_order(t)
 		return table.concat(out, ",")
 	end
 	t.expectEq(links("pickup"), "pickup:1@1,pickup:2@2,pickup:3@2,pickup:4@3")
-	t.expectEq(links("waterGun"), "waterGun:1@1,waterGun:2@1,waterGun:3@1")
-	t.expectEq(
-		links("backpacks"),
-		"backpackTank:1@1,backpackTank:2@1,backpackTank:3@1,bigTank:1@2,bigTank:2@2,bigTank:3@2,twinTanks:1@3,twinTanks:2@3,twinTanks:3@3,insulatedTank:1@4,insulatedTank:2@4,insulatedTank:3@4,cloudBag:1@5,cloudBag:2@5,cloudBag:3@5"
-	)
+	t.expectEq(links("waterGun"), "waterGun:1@1,waterGun:2@1,waterGun:3@1,waterGun:4@1,waterGun:5@1,waterGun:6@1")
+	local packs = {}
+	for area, id in { "backpackTank", "bigTank", "twinTanks", "insulatedTank", "cloudBag" } do
+		for level = 1, 6 do
+			table.insert(packs, `{id}:{level}@{area}`)
+		end
+	end
+	t.expectEq(links("backpacks"), table.concat(packs, ","))
 	local gate = upgrade(layout, "gate:4")
 	t.expectEq(gate.kind, "gate")
 	t.expectEq(links("gate:4"), "gate:4:1@4")
@@ -261,7 +264,7 @@ function tests.owned_count_is_the_furthest_level_owned(t)
 	local backpacks = upgrade(layout, "backpacks")
 	t.expectEq(Honeycomb.ownedCount(backpacks, view({})), 0)
 	t.expectEq(Honeycomb.ownedCount(backpacks, view({ items = { backpackTank = 2 } })), 2)
-	t.expectEq(Honeycomb.ownedCount(backpacks, view({ items = { backpackTank = 1, bigTank = 1 } })), 4, "a bigger pack passes the earlier links")
+	t.expectEq(Honeycomb.ownedCount(backpacks, view({ items = { backpackTank = 1, bigTank = 1 } })), 7, "a bigger pack passes the earlier links")
 	t.expectEq(Honeycomb.ownedCount(upgrade(layout, "gate:2"), view({})), 0)
 	t.expectEq(Honeycomb.ownedCount(upgrade(layout, "gate:2"), view({ openAreas = { [1] = true, [2] = true } })), 1)
 end
@@ -272,18 +275,18 @@ function tests.states_count_levels_owned_of_all(t)
 	t.expectEq(s.pickup.owned, 1)
 	t.expectEq(s.pickup.total, 4)
 	t.expectEq(s.quick.owned, 3)
-	t.expectEq(s.quick.total, 7)
+	t.expectEq(s.quick.total, 10)
 	t.expectEq(s.hold.owned, 0)
 	local main = Honeycomb.states(layout, "main", view({ levels = { tool = 2 } }))
 	t.expectEq(main.tool.owned, 2)
-	t.expectEq(main.tool.total, 19)
+	t.expectEq(main.tool.total, 24)
 end
 
 function tests.states_next_affordable_is_buy(t)
 	local layout = Honeycomb.layout(Config)
-	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 20000 }))
+	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 4e6 }))
 	t.expectEq(s.pickup.state, "buy")
-	t.expectEq(s.pickup.price, 14062, "the next level's price")
+	t.expectEq(s.pickup.price, 3.2e6, "the next level's price")
 	s = Honeycomb.states(layout, "boosts", view({ wallet = 39.9999999 }))
 	t.expectEq(s.hold.state, "buy", "fractional coins still buy")
 	t.expectEq(Honeycomb.states(layout, "main", view({ wallet = 20 })).tool.state, "buy", "Cup (20)")
@@ -291,9 +294,9 @@ end
 
 function tests.states_short_shows_progress(t)
 	local layout = Honeycomb.layout(Config)
-	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 7031 }))
+	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 1.6e6 }))
 	t.expectEq(s.pickup.state, "short")
-	t.expectEq(s.pickup.price, 14062)
+	t.expectEq(s.pickup.price, 3.2e6)
 	t.expectNear(s.pickup.progress, 0.5, 1e-9)
 	s = Honeycomb.states(layout, "boosts", view({ wallet = -5 }))
 	t.expectEq(s.hold.state, "short")
@@ -343,11 +346,11 @@ function tests.states_a_bigger_backpack_passes_the_earlier_links(t)
 	local v = view({ items = { backpackTank = 1, bigTank = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 1e12 })
 	local st = Honeycomb.states(layout, "gear", v).backpacks
 	t.expectEq(st.state, "buy")
-	t.expectEq(st.owned, 4)
-	t.expectEq(st.total, 15)
+	t.expectEq(st.owned, 7)
+	t.expectEq(st.total, 30)
 	local link = Honeycomb.link(upgrade(layout, "backpacks"), st.owned)
 	t.expectEq(`{link.id}:{link.level}`, "bigTank:2", "the worn pack's next upgrade")
-	st = Honeycomb.states(layout, "gear", view({ items = { backpackTank = 3, bigTank = 3 }, openAreas = { [1] = true, [2] = true }, wallet = 1e12 })).backpacks
+	st = Honeycomb.states(layout, "gear", view({ items = { backpackTank = 6, bigTank = 6 }, openAreas = { [1] = true, [2] = true }, wallet = 1e12 })).backpacks
 	t.expectEq(st.state, "locked", "the next pack's area is closed")
 end
 
@@ -358,11 +361,11 @@ function tests.gate_states_follow_the_gates_price(t)
 			return if link.id == id then costOf(link) else nil
 		end
 	end
-	local s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:2"), wallet = 8000 }))
+	local s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:2"), wallet = 46500 }))
 	t.expectEq(s["gate:2"].state, "short", "on sale, not enough yet")
 	t.expectNear(s["gate:2"].progress, 0.5, 1e-9)
 	t.expectEq(s["gate:3"].state, "locked", "not on sale")
-	s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:2"), wallet = 16000 }))
+	s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:2"), wallet = 93000 }))
 	t.expectEq(s["gate:2"].state, "buy")
 	s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:3"), openAreas = { [1] = true, [2] = true } }))
 	t.expectEq(s["gate:2"].state, "max", "open")
@@ -373,7 +376,7 @@ end
 
 function tests.badges_count_buy_hexes(t)
 	local layout = Honeycomb.layout(Config)
-	local rich = Honeycomb.badges(layout, view({ openAreas = allOpen(), wallet = 1e12 }))
+	local rich = Honeycomb.badges(layout, view({ openAreas = allOpen(), wallet = 1e15 }))
 	local sum = rich.main
 	t.expectEq(rich.main, 1, "the tool")
 	for _, catId in CATEGORIES do
@@ -391,7 +394,7 @@ function tests.badges_count_buy_hexes(t)
 	t.expectEq(start.gear, 0)
 	t.expectEq(start.areas, 0)
 	t.expectEq(start.total, 4)
-	local gates = Honeycomb.badges(layout, view({ wallet = 1e12, levels = { tool = 19, pickup = 4, hold = 1, quick = 7, walk = 7, tip = 4 } }))
+	local gates = Honeycomb.badges(layout, view({ wallet = 1e15, levels = { tool = 24, pickup = 4, hold = 1, quick = 10, walk = 10, tip = 9 } }))
 	t.expectEq(gates.areas, 4, "every gate priced here and paid for")
 end
 
@@ -518,7 +521,7 @@ function tests.pick_selects_an_ids_hex_else_the_first_buy_else_short(t)
 	t.expectEq(Honeycomb.pick(layout, "boosts", s, "tip"), "tip")
 	s = Honeycomb.states(layout, "boosts", view({ wallet = 0 }))
 	t.expectEq(Honeycomb.pick(layout, "boosts", s), "pickup", "nothing buys: the first short")
-	local maxed = { pickup = 4, hold = 1, quick = 7, walk = 7, tip = 4 }
+	local maxed = { pickup = 4, hold = 1, quick = 10, walk = 10, tip = 9 }
 	s = Honeycomb.states(layout, "boosts", view({ levels = maxed, openAreas = allOpen() }))
 	t.expectEq(Honeycomb.pick(layout, "boosts", s, "pickup"), "pickup", "a maxed id: still its hex")
 	t.expectEq(Honeycomb.pick(layout, "boosts", s), nil, "nothing to buy or save for")
@@ -530,7 +533,7 @@ function tests.owned_share_counts_levels(t)
 	local layout = Honeycomb.layout(Config)
 	local owned, total = Honeycomb.ownedShare(layout, "boosts", view({ levels = { pickup = 2, quick = 1 } }))
 	t.expectEq(owned, 3)
-	t.expectEq(total, 4 + 1 + 7 + 7 + 4)
+	t.expectEq(total, 4 + 1 + 10 + 10 + 9)
 	owned, total = Honeycomb.ownedShare(layout, "areas", view({ openAreas = { [1] = true, [2] = true } }))
 	t.expectEq(owned, 1)
 	t.expectEq(total, 4)

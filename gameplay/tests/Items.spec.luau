@@ -371,15 +371,15 @@ end
 
 -- Everything costs more for a bigger team: x (1 + priceStep x (players - 1)), in whole coins.
 function tests.price_scales_with_team_size(t)
-	t.expectEq(Config.team.priceStep, 0.6)
+	t.expectEq(Config.team.priceStep, 0.25)
 	t.expectEq(Items.priceScale(Config, 1), 1)
-	t.expectNear(Items.priceScale(Config, 2), 1.6, 1e-9)
-	t.expectNear(Items.priceScale(Config, 4), 2.8, 1e-9)
+	t.expectNear(Items.priceScale(Config, 2), 1.25, 1e-9)
+	t.expectNear(Items.priceScale(Config, 4), 1.75, 1e-9)
 	t.expectEq(Items.price(Config, 1200, 1), 1200, "solo pays the listed price")
-	t.expectEq(Items.price(Config, 1200, 2), 1920)
-	t.expectEq(Items.price(Config, 69, 2), 110, "rounded to whole coins (110.4)")
-	t.expectEq(Items.price(Config, 192, 3), 422, "422.4")
-	t.expectEq(Items.price(Config, 35, 2), 56)
+	t.expectEq(Items.price(Config, 1200, 2), 1500)
+	t.expectEq(Items.price(Config, 69, 2), 86, "rounded to whole coins (86.25)")
+	t.expectEq(Items.price(Config, 193, 3), 290, "289.5")
+	t.expectEq(Items.price(Config, 35, 2), 44)
 end
 
 -- The stand checks and shows the team's price.

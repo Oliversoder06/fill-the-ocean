@@ -60,10 +60,10 @@ function tests.gates_rise(t)
 		end
 		last, lastFill, lastPrice = area, gate.fill, gate.price
 	end
-	t.expectEq(Config.areas[2].gate.fill, 0.07)
-	t.expectEq(Config.areas[3].gate.fill, 0.22)
-	t.expectEq(Config.areas[4].gate.fill, 0.45)
-	t.expectEq(Config.areas[5].gate.fill, 0.7)
+	t.expectEq(Config.areas[2].gate.fill, 0.15)
+	t.expectEq(Config.areas[3].gate.fill, 0.33)
+	t.expectEq(Config.areas[4].gate.fill, 0.56)
+	t.expectEq(Config.areas[5].gate.fill, 0.77)
 end
 
 function tests.every_level_costs_more_than_the_last(t)
@@ -88,7 +88,7 @@ function tests.tools_grow_to_the_moon(t)
 		end
 		last = level.capacity
 	end
-	t.expectEq(#levels, 19)
+	t.expectEq(#levels, 24)
 	t.expectEq(levels[#levels].name, "The Moon Lv4")
 	t.expectEq(last, 10e6)
 end

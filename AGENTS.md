@@ -175,11 +175,13 @@ Client (`src/client/`, all started from `init.client.luau`):
 
 Shared (`src/shared/`, pure unless noted):
 - `Config.luau`: every run number: the one ocean (`Config.ocean`: flat `coinsPerLitre`, the fill
-  curve `firstPercent` and `growth`, and `standInOpens`, the fill points that open areas 2 and 3
-  until Phase 2 builds the gates) and the upgrade tracks (`Config.tracks`: tool, pickup, hold,
+  curve `firstPercent`, `growth` and per-area `stretches`, and `teamStep`, how much bigger a team's
+  ocean is; `shared/Water`) and the upgrade tracks (`Config.tracks`: tool, pickup, hold,
   quick, walk, tip), each level with its price and the `area` that opens it; `Config.team.priceStep`
-  (every price x (1 + step x (players - 1))). Balance changes go
-  here; check them with `lune run tools/simulate [quiet] [team size]`.
+  (every price x (1 + step x (players - 1))). Balance changes go here; check them with
+  `lune run tools/simulate [quiet] [team size]` (timeline) and `lune run tools/simulate targets`
+  (the Phase 4 targets, also run by `tests/Simulator.spec`; the model is `tools/Simulator.luau`).
+  Formulas and reasons: `C:\RobloxDev\library\balance\README.md`.
 - `Ladder.luau`: `stats(config, levels)` (what the team's levels add up to, including `sweeps`),
   `openAreas(config, fill)` (areas open at a fill fraction), `offer(config, levels, trackId,
   openAreas)` (next level and `"buy"` / `"locked"` / `"max"`), `helps` (pickup only while the tool

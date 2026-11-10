@@ -64,8 +64,8 @@ end
 
 -- How a closed area opens: the fill first, then the gate's price.
 function tests.gate_hint(t)
-	t.expectEq(Format.gateHint(area(2), 0.01), "fill the ocean to 7%")
-	t.expectEq(Format.gateHint(area(2), 0.08), "open its gate for 16,000")
+	t.expectEq(Format.gateHint(area(2), 0.01), "fill the ocean to 15%")
+	t.expectEq(Format.gateHint(area(2), 0.16), "open its gate for 93,000")
 end
 
 function tests.stand_names(t)
@@ -77,16 +77,16 @@ end
 -- The stand prompt names the item and its price, or says why a press buys nothing.
 function tests.stand_action_texts(t)
 	local pack = item("backpackTank")
-	t.expectEq(Format.standAction(pack, "buy", 2000, area(1)), "Buy Backpack Tank (1,200)")
-	t.expectEq(Format.standAction(pack, "money", 30, area(1)), "Need 1,200 for the Backpack Tank (the team has 30)")
+	t.expectEq(Format.standAction(pack, "buy", 50000, area(1)), "Buy Backpack Tank (40,000)")
+	t.expectEq(Format.standAction(pack, "money", 30, area(1)), "Need 40,000 for the Backpack Tank (the team has 30)")
 	t.expectEq(Format.standAction(item("fireTruck"), "locked", 30, area(2)), "Fire Truck opens with Mountain Spring")
 	t.expectEq(Format.standAction(nil, "owned", 30, nil), "You own everything here")
 end
 
 -- The card after a press that bought nothing adds how a locked item's area opens.
 function tests.stand_card_texts(t)
-	t.expectEq(Format.standCard(item("fireTruck"), "locked", 30, area(2), 0.01), "Fire Truck opens with Mountain Spring (fill the ocean to 7%)")
-	t.expectEq(Format.standCard(item("backpackTank"), "money", 30, area(1), 0.01), "Need 1,200 for the Backpack Tank (the team has 30)")
+	t.expectEq(Format.standCard(item("fireTruck"), "locked", 30, area(2), 0.01), "Fire Truck opens with Mountain Spring (fill the ocean to 15%)")
+	t.expectEq(Format.standCard(item("backpackTank"), "money", 30, area(1), 0.01), "Need 40,000 for the Backpack Tank (the team has 30)")
 	t.expectEq(Format.standCard(nil, "owned", 30, nil, 0.01), "You own everything here")
 end
 
@@ -96,10 +96,10 @@ function tests.stand_texts_show_the_team_price(t)
 		return cost * 2
 	end
 	local pack = item("backpackTank")
-	t.expectEq(Format.standAction(pack, "buy", 5000, area(1), double), "Buy Backpack Tank (2,400)")
-	t.expectEq(Format.standCard(pack, "money", 30, area(1), 0.01, double), "Need 2,400 for the Backpack Tank (the team has 30)")
-	t.expectEq(select(2, Format.standSign(pack, "buy", area(1), "Cove Well Stand", double)), "2,400")
-	t.expectEq(Format.gateHint(area(2), 0.08, double), "open its gate for 32,000")
+	t.expectEq(Format.standAction(pack, "buy", 100000, area(1), double), "Buy Backpack Tank (80,000)")
+	t.expectEq(Format.standCard(pack, "money", 30, area(1), 0.01, double), "Need 80,000 for the Backpack Tank (the team has 30)")
+	t.expectEq(select(2, Format.standSign(pack, "buy", area(1), "Cove Well Stand", double)), "80,000")
+	t.expectEq(Format.gateHint(area(2), 0.16, double), "open its gate for 186.0K")
 end
 
 -- A track level's name: tools have their own, a one-level track its name, the rest "<track> <n>".
@@ -122,7 +122,7 @@ end
 function tests.stand_sign_texts(t)
 	local title, line = Format.standSign(item("backpackTank"), "money", area(1), "Cove Well Stand")
 	t.expectEq(title, "Backpack Tank")
-	t.expectEq(line, "1,200")
+	t.expectEq(line, "40,000")
 	title, line = Format.standSign(item("fireTruck"), "locked", area(2), "Fire Station")
 	t.expectEq(title, "Fire Truck")
 	t.expectEq(line, "Opens with Mountain Spring")

@@ -71,6 +71,23 @@ function tests.fill_and_litresAt_round_trip(t)
 	end
 end
 
+-- A stretch grows by its own growth up to its last percent `to`; `growth` takes over after the last.
+-- Percents: 10, 30, 90 (x3 up to percent 2), then 180, 360 (x2).
+local STRETCHED = { firstPercent = 10, growth = 2, stretches = { { to = 2, growth = 3 } } }
+
+function tests.stretches_grow_at_their_own_pace(t)
+	t.expectEq(Water.litresAt(0.01, STRETCHED, 1), 10)
+	t.expectEq(Water.litresAt(0.02, STRETCHED, 1), 40)
+	t.expectEq(Water.litresAt(0.03, STRETCHED, 1), 130)
+	t.expectEq(Water.litresAt(0.04, STRETCHED, 1), 310)
+	t.expectEq(Water.litresAt(0.05, STRETCHED, 1), 670)
+	t.expectEq(Water.fill(130, STRETCHED, 1), 0.03)
+	t.expectEq(Water.fill(220, STRETCHED, 1), 0.035, "straight between whole percents")
+	for _, fraction in { 0, 0.015, 0.03, 0.42, 1 } do
+		t.expectNear(Water.fill(Water.litresAt(fraction, STRETCHED, 2), STRETCHED, 2), fraction, 1e-9, `fraction {fraction}`)
+	end
+end
+
 -- A tool keeps the coin value of what it holds, so water scooped in two areas pays each one's rate.
 function tests.mix_pays_each_area(t)
 	t.expectEq(Water.mix(0, 10, 10), 100, "an empty tool takes the new water's value")
@@ -92,6 +109,15 @@ function tests.fill_scales_with_players(t)
 	t.expectEq(Water.fill(140, OCEAN, 2), 0.03)
 	t.expectEq(Water.litresAt(0.03, OCEAN, 4), 280)
 	t.expectEq(Water.fill(10, OCEAN, 0), 0.01, "no players counts as one")
+end
+
+-- teamStep: a team of n needs 1 + teamStep * (n - 1) times the water (Config.ocean.teamStep).
+function tests.team_step_scales_the_ocean(t)
+	local ocean = { firstPercent = 10, growth = 2, teamStep = 0.5 }
+	t.expectEq(Water.litresAt(0.01, ocean, 1), 10)
+	t.expectEq(Water.litresAt(0.01, ocean, 2), 15)
+	t.expectEq(Water.litresAt(0.03, ocean, 3), 140)
+	t.expectEq(Water.fill(45, ocean, 2), 0.02)
 end
 
 return tests

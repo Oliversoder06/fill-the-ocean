@@ -34,13 +34,15 @@ function tests.cup_takes_two_sweeps_and_pickup_takes_one_off(t)
 	t.expectEq(Ladder.stats(Config, { pickup = 1 }).sweeps, 1, "never below one")
 end
 
-function tests.base_sweeps_grow_every_two_tools_up_to_eight(t)
+function tests.base_sweeps_grow_every_three_tools_up_to_eight(t)
 	t.expectEq(Ladder.baseSweeps(Config, 1), 1, "spoon")
 	t.expectEq(Ladder.baseSweeps(Config, 2), 2, "cup")
 	t.expectEq(Ladder.baseSweeps(Config, 3), 2)
-	t.expectEq(Ladder.baseSweeps(Config, 4), 3, "bucket")
-	t.expectEq(Ladder.baseSweeps(Config, 14), 8, "cargo ship")
-	t.expectEq(Ladder.baseSweeps(Config, 20), 8, "moon is capped")
+	t.expectEq(Ladder.baseSweeps(Config, 4), 2, "bucket")
+	t.expectEq(Ladder.baseSweeps(Config, 5), 3, "bucket lv2")
+	t.expectEq(Ladder.baseSweeps(Config, 17), 7, "cargo ship")
+	t.expectEq(Ladder.baseSweeps(Config, 22), 8, "the moon")
+	t.expectEq(Ladder.baseSweeps(Config, 25), 8, "moon is capped")
 end
 
 function tests.offer_is_the_next_level(t)
