@@ -25,7 +25,7 @@ local ROCK_COOLDOWN = 0.5 -- seconds between accepted rock prompts per player (e
 local PUSH_FORCE = 20 -- the steam push's strongest force, in body weights (it must beat walking)
 
 export type Hooks = {
-	states: { [Player]: any }, -- server/Run's player states (levels, owned, iceHits, onSnow, rockAt)
+	states: { [Player]: any }, -- server/Run's player states (iceHits, onSnow, rockAt)
 	playing: () -> boolean,
 	openIds: () -> { number }, -- the open area ids (Areas.openIds)
 	rootOf: (Player) -> BasePart?,
@@ -96,14 +96,15 @@ local function push(root: BasePart, from: Vector3)
 	Debris:AddItem(attachment, steam.pushSeconds)
 end
 
--- A vent bursts: every player close enough without Heat Gloves is pushed away.
+-- A vent bursts: every player close enough is pushed away, unless the team owns Heat Gloves.
 local function burst(vent: BasePart)
-	if not hooks.playing() then
+	if not hooks.playing() or not save then
 		return
 	end
-	for player, state in hooks.states do
+	local gloves = Items.owned(save.team, "heatGloves")
+	for player in hooks.states do
 		local root = hooks.rootOf(player)
-		if root and AreaRules.knocked((root.Position - vent.Position).Magnitude, Config.steam, Items.owned(state, "heatGloves")) then
+		if root and AreaRules.knocked((root.Position - vent.Position).Magnitude, Config.steam, gloves) then
 			push(root, vent.Position)
 		end
 	end
@@ -184,7 +185,7 @@ local function onRock(player: Player, area, prompt: ProximityPrompt)
 		hooks.tell(player, "Take your tool out to break the rock")
 		return
 	end
-	if not AreaRules.canBreak(Config, state.levels, area.id) then
+	if not AreaRules.canBreak(Config, save.team.levels, area.id) then
 		local _, tool = AreaRules.rockTool(Config, area.id)
 		hooks.tell(player, `Only the {tool.name} or bigger breaks this rock`)
 		return

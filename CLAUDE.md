@@ -10,7 +10,9 @@ This file overrides the library, and the library overrides the LihFolk plugin.
 Working title: Save the Ocean. You own the ocean; a bacon-hair drank all of it while you napped.
 Starting with a spoon, you scoop water at a source, carry it and pour it back in. Every litre poured
 earns money, which buys bigger tools, gadgets, buildings, vehicles and staff, until the ocean is full
-again (target about 20 hours solo on the first map). Automation is allowed. Runs are saved per team:
+again (target about 20 hours solo on the first map). Everything is the team's (owner, 2026-11-10):
+one wallet every coin goes into and anyone spends, the same upgrades for everyone, prices scaled
+by team size (`Config.team`). Automation is allowed. Runs are saved per team:
 you create a party in the lobby, play, leave, and later load the run again, but only with exactly
 the same team. Each map has a fixed difficulty; clearing map 1 unlocks map 2. Story: an intro
 cutscene (the bacon-hair drinks the ocean) and an ending cutscene (you smack him away). Outside a run:
@@ -60,8 +62,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
   (2048 studs each, the part size cap) that rise with it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
   is kept in `ServerStorage.OldMap_Backup_2026_11_06`.
 - Studio test helpers (gameplay), workspace attributes: `WaterScale` (less water needed),
-  `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins given to every
-  player) and `StudioFill` (a fraction 0-1:
+  `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins put into the
+  team's wallet) and `StudioFill` (a fraction 0-1:
   jumps the fill) and `StudioGolden` (true: starts a golden spring now). Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.

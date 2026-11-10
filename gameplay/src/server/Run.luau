@@ -1,6 +1,12 @@
--- The run: one team's saved ocean. Owns money, carried water, purchases, the water level and the save.
+-- The run: one team's saved ocean. Owns the team's wallet and purchases, carried water, the water
+-- level and the save. Everything bought is the team's (owner, 2026-11-10): one wallet every coin goes
+-- into and every buy comes out of, track levels, items and their levels, buildings and staff (the
+-- save's `team`, published on ReplicatedStorage); every player gets the same stats and their own
+-- copy of what is worn or held. Prices scale with the save's team size (Items.price).
 -- Clients send Act("scoop" | "pour") when they start a scoop sweep or a pour (aimed at an open
--- area's Source, the basin or an open area's Pour, see client/Action) and Buy(trackId); state goes
+-- area's Source, the basin or an open area's Pour, see client/Action) and Buy(id, bought) for the
+-- next TAB level (`bought`: the levels the client saw bought, so of two members buying the same level
+-- at once only the first gets it); state goes
 -- out as attributes. The server checks the distance and, for scoops, the pace (one per ActSeconds
 -- x the area's scoopFactor) when an action starts. A scoop is credited when it ends; a pour is
 -- instant. Gates (Config.areas) are bought through their ProximityPrompt and open for the whole
@@ -23,11 +29,13 @@
 -- Vehicles (server/Vehicles) are bought at the Fire Station (a cove shop) and called, filled, sprayed
 -- and dropped there; their water lands through the same pour as a tool's.
 -- The team's buildings on the cove's plots (server/Buildings): Build(plot, itemId), TAB levels
--- through Buy(itemId), their water poured on a tick and paid to everyone present.
--- Each player's staff (server/Staff): hired at the Lifeguard Tower, assigned with Staff("assign",
--- itemId, areaId) (saved per player in `assign`), their water poured on a tick and paid to the owner,
--- faster while the owner works the same area (state.workArea, set by every accepted scoop and pour).
+-- through Buy(itemId), their water poured on a tick and paid into the wallet.
+-- The team's staff (server/Staff): hired at the Lifeguard Tower, assigned with Staff("assign",
+-- itemId, areaId) (saved in the team's `assign`), their water poured on a tick and paid into the
+-- wallet, faster while a member works the same area (state.workArea, set by every accepted scoop and pour).
 -- Ticked pay (buildings, staff) waits in server/Payroll and is paid in batches.
+-- A player's own income (pours, the hose, their vehicle) also counts in their Earned attribute
+-- (client/Payout flies it in as coins); a purchase is announced to the rest of the team.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill, or Admin("reset")
 -- to start the run over for the same team and map while everyone stays (client/Admin).
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
@@ -83,6 +91,7 @@ local HOSE_TICK = 0.5 -- seconds between the hose's credits while it sprays
 local ACT_REACH = Zones.REACH -- studs from a Source or Pour / from where the water will be (as client/Action)
 local DISTANCE_SLACK = 6 -- studs of latency allowance on the server's distance checks
 local STAND_COOLDOWN = 0.5 -- seconds between accepted stand prompts per player (exploits can fire prompts)
+local STAND_RACE = 2 -- seconds after a stand buy in which a teammate's press there buys nothing (they pressed for the same thing)
 local HOLD_SLACK = 0.75 -- seconds of latency allowance on the server's action pace check (mobile lag spikes)
 local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
@@ -122,19 +131,27 @@ local run = {
 	boostToken = 0,
 }
 local states: { [Player]: any } = {}
+-- The team's wallet, levels and items (the save's `team`; a blank one until the save is applied).
+local team: RunSave.Team = RunSave.newTeam()
 
 local function setGlobal(name: string, value: any)
 	ReplicatedStorage:SetAttribute(name, value)
 end
 
--- A player's stats with the running boost applied. state.stats stays what they bought.
+-- A player's stats with the running boost applied. state.stats stays what the team bought.
 local function boosted(state)
 	return Boosts.apply(Config, state.stats, run.boost and run.boost.id)
 end
 
--- What a player's levels and gear add up to (a worn backpack adds to the tool's capacity).
-local function statsOf(state)
-	return Items.withGear(Config, state, Ladder.stats(Config, state.levels))
+-- What the team's levels and gear add up to (a worn backpack adds to the tool's capacity); the same
+-- for every player.
+local function teamStats()
+	return Items.withGear(Config, team, Ladder.stats(Config, team.levels))
+end
+
+-- What a listed price costs this team (Items.price: the save's team size).
+local function price(cost: number): number
+	return Items.price(Config, cost, run.teamSize)
 end
 
 local function remote(name: string): RemoteEvent
@@ -147,18 +164,37 @@ end
 -- The jetpack's fuel, to a tenth of a second (it changes every frame while flying or refuelling).
 -- Nil without a jetpack.
 local function publishFuel(player: Player, state)
-	local max = Items.gadgetStat(Config, state, "jetpackTank", "flightSeconds")
+	local max = Items.gadgetStat(Config, team, "jetpackTank", "flightSeconds")
 	player:SetAttribute("Fuel", if max then math.floor(math.min(state.fuel, max) * 10 + 0.5) / 10 else nil)
 end
 
--- Nothing goes out before the save is applied: clients would show the fresh start as the player's
--- money and levels.
+-- The team's economy, on ReplicatedStorage (client/Hud): Wallet, TeamSize and PriceScale
+-- (Items.price), the levels bought per track ("Level_tool", ...), the items bought ("Owned":
+-- "backpackTank,bigTank") and each one's upgrades ("ItemLevel_bigTank"). Nothing goes out before the
+-- save is applied: clients would show the fresh start as the team's.
+local function publishTeam()
+	if not run.save then
+		return
+	end
+	setGlobal("Wallet", team.wallet)
+	setGlobal("TeamSize", run.teamSize)
+	setGlobal("PriceScale", Items.priceScale(Config, run.teamSize))
+	for _, track in Config.tracks do
+		setGlobal(`Level_{track.id}`, team.levels[track.id] or 0)
+	end
+	setGlobal("Owned", table.concat(team.owned, ","))
+	for _, item in Config.items do
+		setGlobal(`ItemLevel_{item.id}`, team.itemLevels[item.id] or 0)
+	end
+end
+
+-- A player's own state. Nothing goes out before the save is applied.
 local function publish(player: Player)
 	local state = states[player]
 	if not run.save then
 		return
 	end
-	player:SetAttribute("Money", state.money)
+	player:SetAttribute("Earned", state.earned)
 	player:SetAttribute("Carried", state.carried)
 	player:SetAttribute("Capacity", state.stats.capacity)
 	player:SetAttribute("WalkSpeed", state.stats.walkSpeed)
@@ -170,17 +206,8 @@ local function publish(player: Player)
 	player:SetAttribute("Hold", state.stats.hold)
 	player:SetAttribute("CoinBonus", state.stats.coinBonus)
 	player:SetAttribute("Equipped", state.equipped)
-	-- Levels bought per track ("Level_tool", "Level_walk", ...): the shop reads these.
-	for _, track in Config.tracks do
-		player:SetAttribute(`Level_{track.id}`, state.levels[track.id] or 0)
-	end
-	-- Items bought ("backpackTank,bigTank"), each one's upgrades ("ItemLevel_bigTank") and the worn
-	-- backpack's model ("" for none; server/HeldTools puts it on the back).
-	player:SetAttribute("Owned", table.concat(state.owned, ","))
-	for _, item in Config.items do
-		player:SetAttribute(`ItemLevel_{item.id}`, state.itemLevels[item.id] or 0)
-	end
-	local worn = Items.backpack(Config, state)
+	-- The worn backpack's model ("" for none; server/HeldTools puts it on the back).
+	local worn = Items.backpack(Config, team)
 	player:SetAttribute("Backpack", if worn then worn.model else "")
 	-- The gadget in hand (an item id, "" for none), the area whose Tap the hose is clipped to (0 for
 	-- none) and whether it sprays, and the jetpack: Flying and Fuel (seconds of thrust left).
@@ -192,7 +219,7 @@ local function publish(player: Player)
 	player:SetAttribute("IceHits", state.iceHits) -- hits on the Glacier's current ice block
 	-- The hose's rope and the jetpack's lift follow the state at once (server/HeldTools).
 	local hose = state.hose
-	local reach = if hose then Items.gadgetStat(Config, state, "gardenHose", "reach") :: number else 0
+	local reach = if hose then Items.gadgetStat(Config, team, "gardenHose", "reach") :: number else 0
 	HeldTools.setHose(player, hose and hose.tap, reach)
 	HeldTools.setLift(player, if state.flying then Items.get(Config, "jetpackTank").riseSpeed else nil)
 end
@@ -230,14 +257,14 @@ local function areaPart(area, name: string): BasePart
 	return Zones.areaPart(ocean, area, name) :: BasePart
 end
 
--- The open area ids this player reaches, in order (Items.reachable: Cloud Catcher needs the jetpack).
-local function reachableIds(state): { number }
-	return Items.reachable(Config, state, Areas.openIds(gatesOpen()))
+-- The open area ids the team reaches, in order (Items.reachable: Cloud Catcher needs the jetpack).
+local function reachableIds(): { number }
+	return Items.reachable(Config, team, Areas.openIds(gatesOpen()))
 end
 
 -- Players appear at the furthest open area they reach.
 local function moveToSpawn(player: Player)
-	local open = reachableIds(states[player])
+	local open = reachableIds()
 	moveTo(player, areaPart(Areas.byId(Config, open[#open]), "Spawn"))
 end
 
@@ -303,6 +330,43 @@ local function refreshAll()
 	for player in states do
 		applyWalkSpeed(player)
 		publish(player)
+	end
+end
+
+-- The team bought something: everyone's stats follow it, and the team's state goes out.
+local function teamChanged()
+	local stats = teamStats()
+	for _, state in states do
+		state.stats = stats
+	end
+	publishTeam()
+	refreshAll()
+end
+
+-- `coins` go into the team's wallet. `player`: whose own income it is (their pour, hose or vehicle):
+-- it also counts in their Earned, which client/Payout flies in as coins.
+local function earn(player: Player?, coins: number)
+	team.wallet += coins
+	setGlobal("Wallet", team.wallet)
+	local state = player and states[player]
+	if state then
+		state.earned += coins
+		(player :: Player):SetAttribute("Earned", state.earned)
+	end
+end
+
+-- `coins` (already checked with Items.affords) leave the team's wallet.
+local function spend(coins: number)
+	team.wallet = math.max(0, team.wallet - coins)
+	setGlobal("Wallet", team.wallet)
+end
+
+-- Tells the rest of the team what `buyer` bought with the team's coins.
+local function announce(buyer: Player, thing: string)
+	for other in states do
+		if other ~= buyer then
+			remotes.Card:FireClient(other, `{buyer.DisplayName} bought {thing} for the team`, CARD_SECONDS)
+		end
 	end
 end
 
@@ -381,19 +445,12 @@ local function playSeconds(): number
 	return run.playBase + (if run.playSince then os.clock() - run.playSince else 0)
 end
 
--- A member's money, levels and litres go into the save (on every save, and when they leave). Each
--- entry is a new table that is never changed afterwards, so a copy of the players map is a snapshot.
+-- A member's own litres go into the save (on every save, and when they leave). Each entry is a new
+-- table that is never changed afterwards, so a copy of the players map is a snapshot.
 local function keepPlayer(player: Player, state)
 	local save = run.save
 	if save and table.find(save.members, player.UserId) then
-		save.players[tostring(player.UserId)] = {
-			money = state.money,
-			levels = table.clone(state.levels),
-			litres = state.litres,
-			owned = table.clone(state.owned),
-			itemLevels = table.clone(state.itemLevels),
-			assign = table.clone(state.assign),
-		}
+		save.players[tostring(player.UserId)] = { litres = state.litres }
 	end
 end
 
@@ -408,6 +465,13 @@ local function snapshot(): RunSave.Save
 	-- always newer than what this run loaded or last wrote, even if this server's clock is behind
 	save.updatedAt = math.max(os.time(), save.updatedAt + 1)
 	local copy = table.clone(save)
+	copy.team = {
+		wallet = save.team.wallet,
+		levels = table.clone(save.team.levels),
+		owned = table.clone(save.team.owned),
+		itemLevels = table.clone(save.team.itemLevels),
+		assign = table.clone(save.team.assign),
+	}
 	copy.players = table.clone(save.players)
 	copy.boostsPlayed = table.clone(save.boostsPlayed)
 	copy.gatesOpen = table.clone(save.gatesOpen)
@@ -573,16 +637,12 @@ local function openRun(key: string, mapId: string, members: { number }, replaceF
 	return save or RunSave.new(mapId, members), nil
 end
 
--- Gives a player what the save holds for them; a member with nothing saved keeps the fresh start.
+-- Gives a player what the save holds for them (their litres); a member with nothing saved starts at 0.
 local function applySaved(player: Player)
 	local saved = (run.save :: RunSave.Save).players[tostring(player.UserId)]
-	if saved then
-		local state = states[player]
-		state.money, state.levels, state.litres = saved.money, table.clone(saved.levels), saved.litres
-		state.owned, state.itemLevels = table.clone(saved.owned), table.clone(saved.itemLevels)
-		state.assign = table.clone(saved.assign)
-		state.stats = statsOf(state)
-	end
+	local state = states[player]
+	state.litres = if saved then saved.litres else 0
+	state.stats = teamStats()
 end
 
 -- The team is in: open their run, apply it and play.
@@ -627,6 +687,7 @@ local function startRun()
 		run.key = key
 	end
 	run.save = save
+	team = save.team
 	for _, id in save.gatesOpen do
 		Map.openGate(ocean, Areas.byId(Config, id))
 	end
@@ -644,7 +705,7 @@ local function startRun()
 		applySaved(player)
 		moveToSpawn(player) -- those who spawned before the load go to the furthest open area
 	end
-	refreshAll()
+	teamChanged()
 	run.playBase, run.playSince = save.playSeconds, os.clock()
 	setGlobal("PlaySeconds", save.playSeconds)
 	setGlobal("RunStartedAt", workspace:GetServerTimeNow()) -- the HUD stopwatch counts from here
@@ -694,16 +755,14 @@ local function tryStart()
 	end
 end
 
--- A player's state at the start of a run (and after an admin reset).
+-- A player's state at the start of a run (and after an admin reset): only what is their own; what
+-- is bought is the team's.
 local function newState()
 	return {
-		money = 0,
+		earned = 0, -- coins their own pours, hose and vehicle brought the team this session
 		carried = 0, -- litres in the tool
 		carriedValue = 0, -- their coins before coinBonus (Water.mix: each area's litres at its pay)
-		levels = {} :: { [string]: number },
-		owned = {} :: { string }, -- item ids bought at the stands (common/Items)
-		itemLevels = {} :: { [string]: number },
-		stats = Ladder.stats(Config, {}),
+		stats = teamStats(),
 		litres = 0,
 		nextActAt = 0, -- os.clock() pace budget for Act (see onAct)
 		windows = {} :: { [string]: { start: number, count: number } }, -- per-remote rate limits (allow)
@@ -717,7 +776,6 @@ local function newState()
 		iceHits = 0, -- hits on the current ice block (server/Mechanics, AreaRules.sweep)
 		onSnow = false, -- standing on snow terrain (server/Mechanics): walking is slower
 		rockAt = 0, -- os.clock() of the last accepted rock prompt (server/Mechanics)
-		assign = {} :: { [string]: number }, -- where each hired staff works (server/Staff)
 		workArea = 0, -- the area of the last accepted scoop or pour, at os.clock() workedAt (server/Staff)
 		workedAt = -math.huge,
 		nearLifeguard = false, -- near a Source a Lifeguard works (server/Staff): walking is faster
@@ -731,7 +789,6 @@ local function onPlayerAdded(player: Player)
 		sendToLobby({ player }, "not part of a run from the lobby")
 		return
 	end
-	Payroll.payNow() -- what the buildings made before they came is the others'
 	states[player] = newState()
 	if run.save then
 		applySaved(player)
@@ -767,35 +824,49 @@ local function allow(state, key: string, max: number): boolean
 	return true
 end
 
--- Buy the next level of one upgrade track (only levels of the open areas), or the next upgrade of
--- an owned item (TAB). Items themselves are bought at their stand (onStand).
-local function onBuy(player: Player, id: unknown)
+-- Buy(id, bought): the next level of one upgrade track (only levels of the open areas), the next
+-- upgrade of an owned item, or of a built building (server/Buildings), for the whole team from its
+-- wallet at the team's price. `bought` is how many levels of `id` the buyer's client saw bought (-1:
+-- an item not owned, a building not built): when a teammate bought that level first, the buyer is
+-- told instead of buying the one after it. Items themselves are bought at their stand (onStand).
+local function onBuy(player: Player, id: unknown, bought: unknown)
 	local state = states[player]
-	if not state or type(id) ~= "string" or run.phase ~= "playing" or not allow(state, "buy", MAX_BUYS_PER_SECOND) then
+	local save = run.save
+	if not state or not save or type(id) ~= "string" or type(bought) ~= "number" or run.phase ~= "playing" or not allow(state, "buy", MAX_BUYS_PER_SECOND) then
 		return
 	end
-	if Buildings.buy(player, state, id) then
-		return -- a building: the team's level (server/Buildings)
-	end
+	local item = Items.get(Config, id)
 	local isTrack = Config.track(id) ~= nil
+	local isBuilding = item ~= nil and item.kind == "building"
+	local counts = if isTrack then team.levels elseif isBuilding then save.buildings else team.itemLevels
+	local have = counts[id] or (if isTrack then 0 else -1)
+	if bought < have then
+		remotes.Card:FireClient(player, "A teammate just bought that", CARD_SECONDS)
+		return
+	elseif bought ~= have then
+		return
+	elseif isBuilding then
+		Buildings.buy(player, id)
+		return
+	end
 	local level, status
 	if isTrack then
-		level, status = Ladder.offer(Config, state.levels, id, openAreas())
-		if not Ladder.helps(Config, state.levels, id) then
+		level, status = Ladder.offer(Config, team.levels, id, openAreas())
+		if not Ladder.helps(Config, team.levels, id) then
 			return
 		end
 	else
-		level, status = Items.nextLevel(Config, state, id)
+		level, status = Items.nextLevel(Config, team, id)
 	end
-	if status ~= "buy" or not Items.affords(state.money, level.cost) then
+	local cost = if status == "buy" then price(level.cost) else 0
+	if status ~= "buy" or not Items.affords(team.wallet, cost) then
 		return
 	end
-	state.money = math.max(0, state.money - level.cost)
-	local bought = if isTrack then state.levels else state.itemLevels
-	bought[id] = (bought[id] or 0) + 1
-	state.stats = statsOf(state)
-	applyWalkSpeed(player)
-	publish(player)
+	spend(cost)
+	counts[id] = have + 1
+	teamChanged()
+	local track = Config.track(id)
+	announce(player, if track then Format.levelName(track, have + 1, level) else `the {(item :: Config.Item).name} Lv {have + 2}`)
 end
 
 -- Hotbar: true takes the tool out, false puts whatever is in hand away, and a gadget's id takes that
@@ -811,7 +882,7 @@ local function onEquip(player: Player, value: unknown)
 		equipped, gadget = value, ""
 	else
 		local item = Items.get(Config, value)
-		if not (item and table.find(Items.slots(Config, state), item)) then
+		if not (item and table.find(Items.slots(Config, team), item)) then
 			return
 		end
 		equipped, gadget = false, item.id
@@ -854,8 +925,8 @@ local function jumpFill(fraction: number)
 end
 
 -- Admin "Reset run": the run starts over for the same team and map while everyone stays. A blank save
--- (RunSave.blank: no water, gates, rocks, buildings or boosts) replaces it, every player starts fresh
--- (money, levels, items, staff posts), the world is rebuilt from it (gates shut, rocks back, plots
+-- (RunSave.blank: no water, wallet, levels, items, staff posts, gates, rocks, buildings or boosts)
+-- replaces it, every player starts fresh, the world is rebuilt from it (gates shut, rocks back, plots
 -- empty), and it is saved. Leaving "playing" for the swap puts vehicles, hoses and jetpacks away and
 -- drops scoops in flight (their state is replaced).
 local function resetRun()
@@ -864,6 +935,7 @@ local function resetRun()
 	Payroll.payNow() -- so nothing earned before the reset is paid after it
 	local save = RunSave.blank(run.save :: RunSave.Save, os.time())
 	run.save = save
+	team = save.team
 	for _, area in Config.areas do
 		if area.model then
 			Map.closeGate(ocean, area)
@@ -877,7 +949,7 @@ local function resetRun()
 		states[player] = newState()
 		moveToSpawn(player)
 	end
-	refreshAll()
+	teamChanged()
 	run.playBase, run.playSince = 0, os.clock()
 	setGlobal("PlaySeconds", 0)
 	setGlobal("RunStartedAt", workspace:GetServerTimeNow())
@@ -933,7 +1005,7 @@ local function openSpot(player: Player, name: string, reach: number?)
 	if not root then
 		return nil, nil
 	end
-	local reached = Areas.open(reachableIds(states[player]))
+	local reached = Areas.open(reachableIds())
 	return Zones.openSpot(ocean, Config, reached, name, root.Position, (reach or ACT_REACH) + DISTANCE_SLACK)
 end
 
@@ -944,9 +1016,8 @@ local function scoopSpot(player: Player)
 	if not root then
 		return nil, false
 	end
-	local state = states[player]
-	local reached = Areas.open(reachableIds(state))
-	local net = Items.gadgetStat(Config, state, "cloudNet", "range")
+	local reached = Areas.open(reachableIds())
+	local net = Items.gadgetStat(Config, team, "cloudNet", "range")
 	local area, _, deep = Zones.scoopSpot(ocean, Config, reached, Mechanics.rocksBroken(), root.Position, ACT_REACH + DISTANCE_SLACK, net and net + DISTANCE_SLACK)
 	return area, deep
 end
@@ -970,7 +1041,7 @@ end
 -- A sweep at `area`'s Source (deep: its deeper pool): its litres are worth that area's pay, times
 -- the golden spring's. AreaRules.sweep scales the litres (an ice hit brings none until the block is free).
 local function creditScoop(state, area, deep: boolean)
-	local pick = Items.gadgetStat(Config, state, "icePick", "hits")
+	local pick = Items.gadgetStat(Config, team, "icePick", "hits")
 	local hits, scale = AreaRules.sweep(Config, area, deep, state.iceHits, pick)
 	state.iceHits = hits
 	if scale <= 0 then
@@ -1002,15 +1073,18 @@ local function raise(litres: number)
 	checkBoost(before, fillOf(run.current))
 end
 
--- `litres` worth `value` coins (before the tip and boosts) land in the ocean: pay the player and
--- raise the water. Callers check that the ocean takes them (Water.pourAmount) and then checkFull.
-local function pourIn(state, litres: number, value: number)
-	state.money += value * boosted(state).coinBonus
+-- `litres` worth `value` coins (before the tip and boosts) land in the ocean: the team earns them as
+-- `player`'s income and the water rises. Callers check that the ocean takes them
+-- (Water.pourAmount) and then checkFull.
+local function pourIn(player: Player, litres: number, value: number)
+	local state = states[player]
 	state.litres += litres
+	earn(player, value * boosted(state).coinBonus)
 	raise(litres)
 end
 
-local function creditPour(state): boolean
+local function creditPour(player: Player): boolean
+	local state = states[player]
 	local litres = Water.pourAmount(state.carried, run.current, run.target)
 	if litres <= 0 then
 		return false
@@ -1019,7 +1093,7 @@ local function creditPour(state): boolean
 	local value = Water.share(state.carriedValue, state.carried, litres)
 	state.carried -= litres
 	state.carriedValue = if state.carried > 0 then state.carriedValue - value else 0
-	pourIn(state, litres, value)
+	pourIn(player, litres, value)
 	return true
 end
 
@@ -1038,7 +1112,7 @@ local function onAct(player: Player, kind: unknown)
 	if not (state.equipped or gun) then
 		return
 	end
-	local reach = if gun then Items.gadgetStat(Config, state, "waterGun", "range") :: number else ACT_REACH
+	local reach = if gun then Items.gadgetStat(Config, team, "waterGun", "range") :: number else ACT_REACH
 	local area, deep, poured = nil, false, 0
 	if kind == "scoop" then
 		area, deep = scoopSpot(player)
@@ -1053,7 +1127,7 @@ local function onAct(player: Player, kind: unknown)
 		end
 		poured = into.id
 	end
-	local hotFill = Items.gadgetStat(Config, state, "heatGloves", "hotFill")
+	local hotFill = Items.gadgetStat(Config, team, "heatGloves", "hotFill")
 	local act = if area then AreaRules.scoopSeconds(state.stats.actSeconds, area, hotFill) else state.stats.actSeconds
 	local slack = math.min(HOLD_SLACK, act / 2)
 	local now = os.clock()
@@ -1067,7 +1141,7 @@ local function onAct(player: Player, kind: unknown)
 	end
 	if kind == "pour" then
 		local before = state.carried
-		if creditPour(state) then
+		if creditPour(player) then
 			worked(state, poured)
 			publishAct(player, kind)
 			setGlobal("LastPour", PourFlow.encode(poured, before - state.carried, workspace:GetServerTimeNow()))
@@ -1089,34 +1163,42 @@ local function onAct(player: Player, kind: unknown)
 	end)
 end
 
--- The gate prompt of `area`: when it is the next gate and on sale, the buyer pays and it opens for
--- the whole team.
+-- The gate prompt of `area`: when it is the next gate and on sale, the team's wallet pays its price
+-- and it opens for the whole team.
 local function onGate(player: Player, area)
 	local state = states[player]
 	local save = run.save
 	if not state or not save or run.phase ~= "playing" then
 		return
 	end
+	if table.find(save.gatesOpen, area.id) then
+		remotes.Card:FireClient(player, `A teammate already opened {area.name}`, CARD_SECONDS)
+		return
+	end
+	local cost = price(area.gate.price)
 	local nextId, onSale = Areas.nextGate(Config, save.gatesOpen, fillOf(run.current))
-	if nextId ~= area.id or not onSale or not Items.affords(state.money, area.gate.price) then
+	if nextId ~= area.id or not onSale or not Items.affords(team.wallet, cost) then
 		return
 	end
 	if not inReach(player, Map.gatePrompt(Map.gate(ocean, area))) then
 		return
 	end
-	state.money = math.max(0, state.money - area.gate.price)
+	spend(cost)
 	table.insert(save.gatesOpen, area.id)
 	Map.openGate(ocean, area)
 	publishGates()
-	publish(player)
-	card(`{player.DisplayName} opened {area.name}!`)
+	card(`{player.DisplayName} opened {area.name} for the team!`)
 	task.spawn(saveRun, `gate {area.id} opened`)
 end
 
--- The stand prompt of `area`: buys the cheapest item sold there that the player can buy now
+-- The last stand buy per stand (keyed by area id or cove shop): a teammate's press there within
+-- STAND_RACE was for the same thing, so it buys nothing.
+local standBuys: { [any]: { at: number, by: Player, name: string } } = {}
+
+-- The stand prompt of `area`: buys the cheapest item sold there that the team can buy now
 -- (Items.standPick; one prompt per stand), or says why it can't (Items.standOffer). `stand`: a cove
 -- shop (Config.stands) selling its own items instead. The area must be open, the item not owned and
--- affordable, and the player by the stand.
+-- affordable at the team's price, and the player by the stand.
 local function onStand(player: Player, area, prompt: ProximityPrompt, stand: string?)
 	local state = states[player]
 	local now = os.clock()
@@ -1127,19 +1209,26 @@ local function onStand(player: Player, area, prompt: ProximityPrompt, stand: str
 	if not Areas.open(gatesOpen())[area.id] or not inReach(player, prompt) then
 		return
 	end
-	local item, status = Items.standOffer(Config, state, area.id, openAreas(), state.money, stand)
+	local key = stand or area.id
+	local last = standBuys[key]
+	if last and last.by ~= player and now - last.at < STAND_RACE then
+		remotes.Card:FireClient(player, `{last.by.DisplayName} just bought the {last.name} for the team`, CARD_SECONDS)
+		return
+	end
+	local item, status = Items.standOffer(Config, team, area.id, openAreas(), team.wallet, stand, run.teamSize)
 	if status ~= "buy" then
-		local why = Format.standCard(item, status, state.money, item and Areas.byId(Config, item.area), fillOf(run.current))
+		local why = Format.standCard(item, status, team.wallet, item and Areas.byId(Config, item.area), fillOf(run.current), price)
 		remotes.Card:FireClient(player, why, CARD_SECONDS)
 		return
 	end
-	state.money = math.max(0, state.money - item.price)
-	table.insert(state.owned, item.id)
-	state.itemLevels[item.id] = 0
-	state.stats = statsOf(state)
-	publish(player)
-	local bought = if item.kind == "staff" then `You hired a {item.name}! Assign them in TAB (Staff)` else `You bought the {item.name}!`
+	spend(price(item.price))
+	table.insert(team.owned, item.id)
+	team.itemLevels[item.id] = 0
+	standBuys[key] = { at = now, by = player, name = item.name }
+	teamChanged()
+	local bought = if item.kind == "staff" then `You hired a {item.name} for the team! Assign them in TAB (Staff)` else `You bought the {item.name} for the team!`
 	remotes.Card:FireClient(player, bought, CARD_SECONDS)
+	announce(player, `the {item.name}`)
 	task.spawn(saveRun, `{player.Name} bought {item.id}`)
 end
 
@@ -1181,7 +1270,7 @@ end
 
 -- The jetpack's fuel burns while flying and refills on the ground; the lift stops when it is empty.
 local function tickJetpack(player: Player, state, dt: number)
-	local max = Items.gadgetStat(Config, state, "jetpackTank", "flightSeconds")
+	local max = Items.gadgetStat(Config, team, "jetpackTank", "flightSeconds")
 	if not max then
 		return
 	end
@@ -1206,7 +1295,7 @@ local function tickHose(player: Player, state, dt: number)
 		return
 	end
 	local root = rootOf(player)
-	local reach = Items.gadgetStat(Config, state, "gardenHose", "reach") :: number
+	local reach = Items.gadgetStat(Config, team, "gardenHose", "reach") :: number
 	if not root or (root.Position - hose.tap.Position).Magnitude > reach + DISTANCE_SLACK then
 		state.hose = nil
 		publish(player)
@@ -1220,11 +1309,11 @@ local function tickHose(player: Player, state, dt: number)
 	if hose.due < HOSE_TICK then
 		return
 	end
-	local rate = Items.gadgetStat(Config, state, "gardenHose", "rate") :: number
+	local rate = Items.gadgetStat(Config, team, "gardenHose", "rate") :: number
 	local litres = Water.pourAmount(rate * hose.due, run.current, run.target)
 	hose.due = 0
 	if litres > 0 then
-		pourIn(state, litres, litres * Config.ocean.coinsPerLitre * hose.area.payMultiplier)
+		pourIn(player, litres, litres * Config.ocean.coinsPerLitre * hose.area.payMultiplier)
 		publish(player)
 		checkFull()
 	end
@@ -1284,6 +1373,14 @@ function Run.start(oceanModel: Model)
 	-- What the area mechanics, the vehicles, the buildings and the staff may see and do in the run.
 	local hooks = {
 		states = states,
+		team = function()
+			return team
+		end,
+		price = price,
+		spend = spend,
+		pay = function(coins)
+			earn(nil, coins)
+		end,
 		playing = function()
 			return run.phase == "playing"
 		end,
@@ -1302,7 +1399,6 @@ function Run.start(oceanModel: Model)
 			task.spawn(saveRun, reason)
 		end,
 		allow = allow,
-		publish = publish,
 		nearFlood = function(player)
 			return nearFlood(player)
 		end,
@@ -1310,9 +1406,8 @@ function Run.start(oceanModel: Model)
 			return run.current, run.target
 		end,
 		pour = function(player, litres, value, areaId)
-			local state = states[player]
-			pourIn(state, litres, value)
-			worked(state, areaId) -- running the vehicle's loop speeds up the Firefighters on it
+			pourIn(player, litres, value)
+			worked(states[player], areaId) -- running the vehicle's loop speeds up the Firefighters on it
 			publish(player)
 			checkFull()
 		end,
@@ -1380,7 +1475,7 @@ function Run.start(oceanModel: Model)
 		Vehicles.leave(player)
 		local state = states[player]
 		if state then
-			Payroll.payNow() -- the leaver keeps their share and their staff's pay
+			Payroll.payNow() -- the ticked pay so far goes into this save
 			keepPlayer(player, state)
 			states[player] = nil
 			task.spawn(saveRun, `{player.Name} left`)
@@ -1422,15 +1517,12 @@ function Run.start(oceanModel: Model)
 				jumpFill(fraction)
 			end
 		end)
-		-- StudioMoney: a number of coins given to every player in the run.
+		-- StudioMoney: a number of coins put into the team's wallet.
 		workspace:GetAttributeChangedSignal("StudioMoney"):Connect(function()
 			local coins = workspace:GetAttribute("StudioMoney")
 			if type(coins) == "number" and coins > 0 and run.phase == "playing" then
 				workspace:SetAttribute("StudioMoney", nil)
-				for player, state in states do
-					state.money += coins
-					publish(player)
-				end
+				earn(nil, coins)
 			end
 		end)
 	end

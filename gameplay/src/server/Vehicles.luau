@@ -1,10 +1,11 @@
 -- Vehicles (Config.items kind "vehicle", shared/VehicleRules): Fire Truck, Tanker, Snowcat Tanker and
 -- Water Bomber. Bought at the Fire Station like a cove shop (Config.stands, server/Run onStand) and
--- levelled in TAB. The station's CallPrompt brings one of the player's owned vehicles out at its
--- VehicleSpawn: the best (the furthest area's) first, then each call while one is out swaps it for the
+-- levelled in TAB. The station's CallPrompt brings one of the team's owned vehicles out for the caller
+-- at its VehicleSpawn: the best (the furthest area's) first, then each call while one is out swaps it for the
 -- next one down (Items.nextOwned; client/Vehicles names it in the prompt). A clone of
 -- ReplicatedStorage.Vehicles.<model> named Vehicle_<UserId>. One out per
--- player; it goes when they leave, call again or play ends. Only its owner gets in, through the seat's
+-- player (any member may call any of the team's); it goes when they leave, call again or play ends.
+-- Only its caller gets in, through the seat's
 -- DrivePrompt (touch seating is off). The driver owns its physics while seated
 -- (client/Vehicles sets the Drive and Turn constraints made here); vehicles pass through characters
 -- and each other (collision groups).
@@ -44,7 +45,8 @@ local UPRIGHT_RESPONSIVENESS = 10
 local TIP_COS = math.cos(math.rad(45))
 
 export type Hooks = {
-	states: { [Player]: any }, -- server/Run's player states (owned, itemLevels, windows)
+	states: { [Player]: any }, -- server/Run's player states (rate limits)
+	team: () -> any, -- the team's owned and itemLevels (RunSave.Team)
 	playing: () -> boolean,
 	openIds: () -> { number }, -- the open area ids (Areas.openIds)
 	rootOf: (Player) -> BasePart?,
@@ -53,7 +55,7 @@ export type Hooks = {
 	allow: (any, string, number) -> boolean, -- server/Run's per-player rate limit
 	nearFlood: (Player) -> boolean, -- the player stands where they may pour into the ocean
 	water: () -> (number, number), -- the ocean's current and target litres
-	pour: (Player, number, number, number) -> (), -- litres worth coins land in the ocean, paid to the player, who worked area id
+	pour: (Player, number, number, number) -> (), -- litres worth coins land in the ocean, into the team's wallet as the player's earnings, who worked area id
 	stopHose: (Player) -> (), -- the Garden Hose stops spraying (server/Run)
 	vehicle: RemoteEvent, -- ReplicatedStorage.Remotes.Vehicle
 }
@@ -82,8 +84,8 @@ local spawnPart: BasePart
 local out: { [Player]: Out } = {}
 local calledAt: { [Player]: number } = {}
 
-local function stat(player: Player, v: Out, name: string): number
-	return Items.stat(hooks.states[player], v.item, name)
+local function stat(v: Out, name: string): number
+	return Items.stat(hooks.team(), v.item, name)
 end
 
 local function publish(player: Player)
@@ -92,7 +94,7 @@ local function publish(player: Player)
 	local has = v ~= nil and state ~= nil
 	player:SetAttribute("Vehicle", if has then v.item.id else "")
 	player:SetAttribute("Tank", if has then math.floor(v.tank) else 0)
-	player:SetAttribute("TankMax", if has then stat(player, v, "tank") else 0)
+	player:SetAttribute("TankMax", if has then stat(v, "tank") else 0)
 	player:SetAttribute("Filling", has and v.filling)
 	player:SetAttribute("VehicleSpraying", has and v.spraying)
 end
@@ -227,7 +229,7 @@ local function spawn(player: Player, item)
 	model:SetAttribute("Owner", player.UserId)
 	model:SetAttribute("ItemId", item.id)
 	model:SetAttribute("Flies", item.flies == true)
-	model:SetAttribute("Speed", Items.stat(hooks.states[player], item, "speed"))
+	model:SetAttribute("Speed", Items.stat(hooks.team(), item, "speed"))
 	local root = model.PrimaryPart :: BasePart
 	local seat = model:FindFirstChild("Seat", true) :: VehicleSeat
 	seat.HeadsUpDisplay = false
@@ -270,7 +272,8 @@ local function spawn(player: Player, item)
 	publish(player)
 end
 
--- The CallPrompt: brings out the owned vehicle after the one out now (Items.nextOwned), replacing it.
+-- The CallPrompt: brings out the team's owned vehicle after the one this player has out now
+-- (Items.nextOwned), replacing it.
 local function onCall(player: Player, prompt: ProximityPrompt)
 	local state = hooks.states[player]
 	local now = os.clock()
@@ -282,7 +285,7 @@ local function onCall(player: Player, prompt: ProximityPrompt)
 		return
 	end
 	local current = out[player]
-	local item = Items.nextOwned(Config, state, "vehicle", current and current.item.id)
+	local item = Items.nextOwned(Config, hooks.team(), "vehicle", current and current.item.id)
 	if not item then
 		hooks.tell(player, "Buy a vehicle here at the Fire Station first")
 		return
@@ -391,18 +394,18 @@ local function tick(player: Player, v: Out, step: number)
 			v.upright.Enabled = tipped
 		end
 	end
-	local max = stat(player, v, "tank")
+	local max = stat(v, "tank")
 	local area = if v.item.flies then skimArea(position) else hydrantArea(v, position)
 	v.filling = area ~= nil and v.tank < max
 	if v.filling then
-		local litres = VehicleRules.fill(v.tank, max, stat(player, v, "fillRate"), step) - v.tank
+		local litres = VehicleRules.fill(v.tank, max, stat(v, "fillRate"), step) - v.tank
 		v.value = Water.mix(v.value, litres, Config.ocean.coinsPerLitre * area.payMultiplier)
 		v.tank += litres
 	end
 	if area then
 		v.filledAt, v.filledPos = now, position
 	end
-	local speed = stat(player, v, "speed")
+	local speed = stat(v, "speed")
 	if v.model:GetAttribute("Speed") ~= speed then
 		v.model:SetAttribute("Speed", speed) -- levelled up while it is out
 	end
@@ -416,7 +419,7 @@ local function tick(player: Player, v: Out, step: number)
 			v.spraying = false
 			showSpray(player, v)
 		elseif travelled then
-			empty(player, v, VehicleRules.spray(v.tank, stat(player, v, "sprayRate"), step))
+			empty(player, v, VehicleRules.spray(v.tank, stat(v, "sprayRate"), step))
 		end
 	end
 	if out[player] == v then -- a pour that filled the ocean ends play, which removes every vehicle

@@ -37,11 +37,12 @@ function BuildingRules.affords(money: number, price: number): boolean
 end
 
 -- Whether building `item` can be built now with `openAreas` areas open (Ladder.openAreas) and
--- `money`, plot aside. The reason when not: "locked" (its area is closed) or "money".
-function BuildingRules.buildable(item, openAreas: number, money: number): (boolean, string?)
+-- `money`, plot aside. `priceOf` turns a listed price into the team's (common/Items.price); nil:
+-- the listed price. The reason when not: "locked" (its area is closed) or "money".
+function BuildingRules.buildable(item, openAreas: number, money: number, priceOf: ((number) -> number)?): (boolean, string?)
 	if item.area > openAreas then
 		return false, "locked"
-	elseif not BuildingRules.affords(money, item.price) then
+	elseif not BuildingRules.affords(money, if priceOf then priceOf(item.price) else item.price) then
 		return false, "money"
 	end
 	return true, nil
@@ -49,9 +50,9 @@ end
 
 -- Whether `item` may be built on plot `index` (1..plotCount; a remote value) now, with `plots` the
 -- save's plots (plot number as a string -> building id), `openAreas` areas open (Ladder.openAreas)
--- and `money`. The reason when not: "plot" (no such plot), "taken", "unknown" (not a building),
--- or buildable's "locked" / "money".
-function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, index: any, item, openAreas: number, money: number): (boolean, string?)
+-- and `money` (`priceOf` as buildable). The reason when not: "plot" (no such plot), "taken",
+-- "unknown" (not a building), or buildable's "locked" / "money".
+function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, index: any, item, openAreas: number, money: number, priceOf: ((number) -> number)?): (boolean, string?)
 	if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > plotCount then
 		return false, "plot"
 	elseif plots[tostring(index)] ~= nil then
@@ -59,7 +60,7 @@ function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, 
 	elseif not item or item.kind ~= "building" then
 		return false, "unknown"
 	end
-	return BuildingRules.buildable(item, openAreas, money)
+	return BuildingRules.buildable(item, openAreas, money, priceOf)
 end
 
 -- The aqueduct a plot's water runs down (Town.Aqueduct_<side>): the shop side is +X.

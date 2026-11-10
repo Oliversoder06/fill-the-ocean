@@ -90,6 +90,26 @@ function tests.stand_card_texts(t)
 	t.expectEq(Format.standCard(nil, "owned", 30, nil, 0.01), "You own everything here")
 end
 
+-- A team sees its own prices (priceOf: common/Items.price for its size) on stands, cards and gate hints.
+function tests.stand_texts_show_the_team_price(t)
+	local function double(cost: number): number
+		return cost * 2
+	end
+	local pack = item("backpackTank")
+	t.expectEq(Format.standAction(pack, "buy", 5000, area(1), double), "Buy Backpack Tank (2,400)")
+	t.expectEq(Format.standCard(pack, "money", 30, area(1), 0.01, double), "Need 2,400 for the Backpack Tank (you have 30)")
+	t.expectEq(select(2, Format.standSign(pack, "buy", area(1), "Cove Well Stand", double)), "2,400")
+	t.expectEq(Format.gateHint(area(2), 0.08, double), "open its gate for 32,000")
+end
+
+-- A track level's name: tools have their own, a one-level track its name, the rest "<track> <n>".
+function tests.level_names(t)
+	local tool, walk, hold = Config.track("tool") :: any, Config.track("walk") :: any, Config.track("hold") :: any
+	t.expectEq(Format.levelName(tool, 3, tool.levels[3]), "Bucket")
+	t.expectEq(Format.levelName(walk, 2, walk.levels[2]), "Sneakers 2")
+	t.expectEq(Format.levelName(hold, 1, hold.levels[1]), "Hold to Scoop")
+end
+
 -- The sign over a stand: the item and its price, where it opens, or that all of it is owned.
 function tests.stand_sign_texts(t)
 	local title, line = Format.standSign(item("backpackTank"), "money", area(1), "Cove Well Stand")

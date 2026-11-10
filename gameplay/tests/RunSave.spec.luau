@@ -78,12 +78,13 @@ function tests.sanitize_repairs_bad_fields(t)
 	t.expectEq(save.current, 0, "negative clamped")
 	t.expectEq(count(save.players), 1, "only well-formed player entries kept")
 	local player = save.players["10"]
-	t.expectEq(player.money, 0, "negative money clamped")
 	t.expectEq(player.litres, 0, "NaN litres")
-	t.expectEq(player.levels.tool, 3)
-	t.expectEq(player.levels.walk, 0, "negative level clamped")
-	t.expectEq(count(player.levels), 2, "bad level entries dropped")
+	t.expectEq((player :: any).money, nil, "money moved to the team")
 	t.expectEq((player :: any).extra, nil, "unknown player field dropped")
+	t.expectEq(save.team.wallet, 0, "negative money clamped")
+	t.expectEq(save.team.levels.tool, 3)
+	t.expectEq(save.team.levels.walk, 0, "negative level clamped")
+	t.expectEq(count(save.team.levels), 2, "bad level entries dropped")
 	t.expectEq(save.playSeconds, 0)
 	t.expectEq(save.introSeen, false)
 	t.expectEq(#save.boostsPlayed, 2)
@@ -95,15 +96,18 @@ function tests.sanitize_repairs_bad_fields(t)
 
 	local fresh = RunSave.new("ocean1", { 1 })
 	fresh.current = 12.5
-	fresh.players["1"] = { money = 300, levels = { tool = 2 }, litres = 12.5 }
+	fresh.players["1"] = { litres = 12.5 }
+	fresh.team.wallet = 300
+	fresh.team.levels = { tool = 2 }
 	fresh.boostsPlayed = { "tide" }
 	fresh.introSeen = true
 	fresh.updatedAt = 1700000000
 	local again = RunSave.sanitize(fresh)
 	assert(again, "a valid save must survive sanitize")
 	t.expectEq(again.current, 12.5)
-	t.expectEq(again.players["1"].money, 300)
-	t.expectEq(again.players["1"].levels.tool, 2)
+	t.expectEq(again.players["1"].litres, 12.5)
+	t.expectEq(again.team.wallet, 300)
+	t.expectEq(again.team.levels.tool, 2)
 	t.expectEq(again.introSeen, true)
 	t.expectEq(again.boostsPlayed[1], "tide")
 	t.expectEq(again.updatedAt, 1700000000)
@@ -135,28 +139,23 @@ function tests.sanitize_rocks(t)
 	t.expectEq(#RunSave.new("ocean1", { 1 }).rocksBroken, 0, "a new run has every rock")
 end
 
--- Bought items (per player) and the team's buildings: ids are strings, levels whole and never negative.
+-- The team's items and buildings: ids are strings, levels whole and never negative.
 function tests.sanitize_items(t)
 	local save = RunSave.sanitize({
 		mapId = "ocean1",
 		members = { 1 },
-		players = {
-			["1"] = {
-				money = 5,
-				levels = {},
-				litres = 0,
-				owned = { "backpackTank", 7, "bigTank", "backpackTank", true },
-				itemLevels = { backpackTank = 2.7, bigTank = -1, [3] = 1, twinTanks = "x" },
-			},
+		team = {
+			wallet = 5,
+			owned = { "backpackTank", 7, "bigTank", "backpackTank", true },
+			itemLevels = { backpackTank = 2.7, bigTank = -1, [3] = 1, twinTanks = "x" },
 		},
 		buildings = { pump = 1, tower = -4, [2] = 1, rain = 0 / 0 },
 	})
 	assert(save, "sanitize returned nil for a repairable save")
-	local player = save.players["1"]
-	t.expectEq(table.concat(player.owned, ","), "backpackTank,bigTank", "strings, each once")
-	t.expectEq(player.itemLevels.backpackTank, 2)
-	t.expectEq(player.itemLevels.bigTank, 0, "negative level clamped")
-	t.expectEq(count(player.itemLevels), 2, "bad level entries dropped")
+	t.expectEq(table.concat(save.team.owned, ","), "backpackTank,bigTank", "strings, each once")
+	t.expectEq(save.team.itemLevels.backpackTank, 2)
+	t.expectEq(save.team.itemLevels.bigTank, 0, "negative level clamped")
+	t.expectEq(count(save.team.itemLevels), 2, "bad level entries dropped")
 	t.expectEq(save.buildings.pump, 1)
 	t.expectEq(save.buildings.tower, 0)
 	t.expectEq(save.buildings.rain, 0, "NaN level")
@@ -165,22 +164,84 @@ function tests.sanitize_items(t)
 	-- A save from before items loads with none.
 	local old = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { money = 5, levels = { tool = 1 }, litres = 2 } } })
 	assert(old, "an old save must load")
-	t.expectEq(#old.players["1"].owned, 0)
-	t.expectEq(count(old.players["1"].itemLevels), 0)
+	t.expectEq(#old.team.owned, 0)
+	t.expectEq(count(old.team.itemLevels), 0)
 	t.expectEq(count(old.buildings), 0)
-	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { owned = "all", itemLevels = 3 } }, buildings = "many" })
+	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, team = { owned = "all", itemLevels = 3, wallet = "lots" }, buildings = "many" })
 	assert(broken, "bad item fields must not drop the save")
-	t.expectEq(#broken.players["1"].owned, 0)
+	t.expectEq(#broken.team.owned, 0)
+	t.expectEq(count(broken.team.itemLevels), 0)
+	t.expectEq(broken.team.wallet, 0)
 	t.expectEq(count(broken.buildings), 0)
 
 	local fresh = RunSave.new("ocean1", { 1 })
-	fresh.players["1"] = { money = 1, levels = {}, litres = 0, owned = { "bigTank" }, itemLevels = { bigTank = 1 } }
+	fresh.team.owned = { "bigTank" }
+	fresh.team.itemLevels = { bigTank = 1 }
 	fresh.buildings = { pump = 2 }
 	local again = RunSave.sanitize(fresh)
 	assert(again, "a valid save must survive sanitize")
-	t.expectEq(again.players["1"].owned[1], "bigTank")
-	t.expectEq(again.players["1"].itemLevels.bigTank, 1)
+	t.expectEq(again.team.owned[1], "bigTank")
+	t.expectEq(again.team.itemLevels.bigTank, 1)
 	t.expectEq(again.buildings.pump, 2)
+end
+
+-- A save from before the team economy (2026-11-10) kept money, levels and items per player: the
+-- team gets the money added up, the best level of each, every item anyone had, and each staff's post
+-- from the first member (lowest user id) who set one.
+function tests.sanitize_migrates_per_player_saves(t)
+	local save = RunSave.sanitize({
+		mapId = "ocean1",
+		members = { 20, 10 },
+		players = {
+			["20"] = { money = 500, levels = { tool = 2, walk = 4 }, litres = 30, owned = { "bigTank", "waterGun" }, itemLevels = { bigTank = 1, waterGun = 2 }, assign = { helper = 3 } },
+			["10"] = { money = 1200.5, levels = { tool = 5, quick = 1 }, litres = 70, owned = { "waterGun", "helper" }, itemLevels = { waterGun = 1, helper = 2 }, assign = { helper = 2, lifeguard = 4 } },
+		},
+	})
+	assert(save, "an old save must load")
+	t.expectEq(save.team.wallet, 1700.5, "the members' money added up")
+	t.expectEq(save.team.levels.tool, 5, "the best tool level")
+	t.expectEq(save.team.levels.walk, 4)
+	t.expectEq(save.team.levels.quick, 1)
+	t.expectEq(count(save.team.levels), 3)
+	t.expectEq(table.concat(save.team.owned, ","), "waterGun,helper,bigTank", "every item once, first member first")
+	t.expectEq(save.team.itemLevels.bigTank, 1)
+	t.expectEq(save.team.itemLevels.waterGun, 2, "the best level of each")
+	t.expectEq(save.team.itemLevels.helper, 2)
+	t.expectEq(save.team.assign.helper, 2, "the first member's post")
+	t.expectEq(save.team.assign.lifeguard, 4)
+	t.expectEq(save.players["10"].litres, 70, "litres stay each player's")
+	t.expectEq(save.players["20"].litres, 30)
+	t.expectEq((save.players["10"] :: any).money, nil, "nothing else stays per player")
+	t.expectEq((save.players["10"] :: any).owned, nil)
+end
+
+-- Once a save has a team section, left-over per-player fields don't add to it again.
+function tests.sanitize_team_section_wins(t)
+	local save = RunSave.sanitize({
+		mapId = "ocean1",
+		members = { 1 },
+		team = { wallet = 40, levels = { tool = 1 } },
+		players = { ["1"] = { money = 999, levels = { tool = 9 }, litres = 3, owned = { "bigTank" } } },
+	})
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(save.team.wallet, 40)
+	t.expectEq(save.team.levels.tool, 1)
+	t.expectEq(#save.team.owned, 0)
+	t.expectEq(save.players["1"].litres, 3)
+end
+
+function tests.new_save_has_an_empty_team(t)
+	local save = RunSave.new("ocean1", { 1, 2 })
+	t.expectEq(save.team.wallet, 0)
+	t.expectEq(count(save.team.levels), 0)
+	t.expectEq(#save.team.owned, 0)
+	t.expectEq(count(save.team.itemLevels), 0)
+	t.expectEq(count(save.team.assign), 0)
+	save.team.wallet = 50
+	save.team.owned = { "bigTank" }
+	local blank = RunSave.blank(save, 10)
+	t.expectEq(blank.team.wallet, 0, "erasing a run empties the wallet")
+	t.expectEq(#blank.team.owned, 0)
 end
 
 -- Which building stands on which plot: plot numbers as string keys, building ids as values.
@@ -203,26 +264,24 @@ function tests.sanitize_plots(t)
 	t.expectEq(count(broken.plots), 0)
 end
 
--- 3f: where each of a player's staff works (staff item id -> area id 1-5).
+-- 3f: where each of the team's staff works (staff item id -> area id 1-5).
 function tests.sanitize_staff_assignments(t)
 	local save = RunSave.sanitize({
 		mapId = "ocean1",
 		members = { 1 },
-		players = {
-			["1"] = { money = 1, assign = { helper = 2, lifeguard = 3.5, plumber = 1, firefighter = 6, x = 0, [2] = 2, y = "2", z = 0 / 0 } },
-		},
+		team = { assign = { helper = 2, lifeguard = 3.5, plumber = 1, firefighter = 6, x = 0, [2] = 2, y = "2", z = 0 / 0 } },
 	})
 	assert(save, "sanitize returned nil for a repairable save")
-	local assign = save.players["1"].assign
+	local assign = save.team.assign
 	t.expectEq(assign.helper, 2)
 	t.expectEq(assign.plumber, 1)
 	t.expectEq(count(assign), 2, "areas are whole numbers 1-5 by string id")
 	local old = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { money = 5 } } })
 	assert(old, "an old save must load")
-	t.expectEq(count(old.players["1"].assign), 0, "a save from before staff has no assignments")
-	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, players = { ["1"] = { assign = "all" } } })
+	t.expectEq(count(old.team.assign), 0, "a save from before staff has no assignments")
+	local broken = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, team = { assign = "all" } })
 	assert(broken, "bad assignments must not drop the save")
-	t.expectEq(count(broken.players["1"].assign), 0)
+	t.expectEq(count(broken.team.assign), 0)
 end
 
 function tests.sanitize_rejects_non_tables(t)

@@ -112,6 +112,20 @@ function tests.buildable_checks_area_and_money(t)
 	t.expectEq(check(1, 0), "locked", "a closed area shows as locked, not as too dear")
 end
 
+-- A team pays its own price (priceOf: common/Items.price for the team's size).
+function tests.build_charges_the_team_price(t)
+	local pump = Items.get(Config, "pump")
+	local function duo(cost: number): number
+		return Items.price(Config, cost, 2)
+	end
+	local ok, reason = BuildingRules.canBuild({}, 6, 1, pump, 2, pump.price, duo)
+	t.expectEq(ok, false, "the solo price isn't enough for two")
+	t.expectEq(reason, "money")
+	t.expectEq((BuildingRules.canBuild({}, 6, 1, pump, 2, duo(pump.price), duo)), true)
+	t.expectEq(select(2, BuildingRules.buildable(pump, 2, pump.price, duo)), "money")
+	t.expectEq((BuildingRules.buildable(pump, 2, duo(pump.price) - 1e-9, duo)), true, "pour rounding still builds it")
+end
+
 -- The shop side is +X, the staff side -X (the plots sit at x +-62).
 function tests.aqueduct_side_by_x(t)
 	t.expectEq(BuildingRules.side(62), "ShopSide")

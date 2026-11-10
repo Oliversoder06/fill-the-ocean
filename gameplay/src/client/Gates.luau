@@ -26,11 +26,11 @@ local function signOf(area, gatesOpen: { number }, fill: number): (string, Color
 	if table.find(gatesOpen, area.id) then
 		return `{title}\nOpen`, colors.speedTag, false
 	elseif nextId == area.id and onSale then
-		return `{title}\n{Hud.money(area.gate.price)} · hold E`, colors.toolTag, true
+		return `{title}\n{Hud.money(Hud.price(area.gate.price))} · hold E`, colors.toolTag, true
 	elseif fill >= area.gate.fill and nextId then
 		return `{title}\nOpen {Areas.byId(Config, nextId).name} first`, colors.foam, false
 	end
-	return `{title}\nFill to {Format.percent(area.gate.fill)} · {Hud.money(area.gate.price)}`, colors.foam, false
+	return `{title}\nFill to {Format.percent(area.gate.fill)} · {Hud.money(Hud.price(area.gate.price))}`, colors.foam, false
 end
 
 -- An area's Gate model, or nil while it hasn't streamed in.

@@ -1,10 +1,10 @@
--- Every stand's prompt and price sign, for this player; the server sells and checks every buy
+-- Every stand's prompt and price sign, for the team; the server sells and checks every buy
 -- (server/Run onStand). The stands: each area's own (Zones.stand, the cove's first) and each cove
 -- shop (Config.stands, Zones.shop). Each gets a copy of StarterGui.Hud.Templates.StandSign (a
 -- BillboardGui with TextLabels Title and Line, built in Studio) over its prompt: the item a press
--- buys or saves up for and its price (teal when you can afford it), where a locked one opens, or
+-- buys or saves up for and its price for the team (teal when the wallet affords it), where a locked one opens, or
 -- "Owned". The prompt names the stand and says what a press does (Items.standOffer, shared/Format).
--- The Fire Station's CallPrompt shows only once you own a vehicle. Stands not streamed in yet are
+-- The Fire Station's CallPrompt shows only once the team owns a vehicle. Stands not streamed in yet are
 -- picked up when they arrive.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -62,9 +62,9 @@ function Stands.prompt(stand: Stand): ProximityPrompt?
 	return holder and Zones.standPrompt(holder)
 end
 
--- What the stand shows this player now (Items.standOffer, as the server picks it). `snap`: Hud.snapshot.
+-- What the stand shows the team now (Items.standOffer, as the server picks it). `snap`: Hud.snapshot.
 function Stands.offer(stand: Stand, snap: Hud.Snapshot, money: number)
-	return Items.standOffer(Config, snap.items, stand.area.id, snap.openAreas, money, stand.shop)
+	return Items.standOffer(Config, snap.items, stand.area.id, snap.openAreas, money, stand.shop, snap.teamSize)
 end
 
 -- Whether this player can get to the stand (Items.reachable: Cloud Catcher's needs the Jetpack Tank).
@@ -92,7 +92,7 @@ function Stands.start()
 		end
 		nextAt = now + REFRESH_SECONDS
 		local snap = Hud.snapshot()
-		local money = player:GetAttribute("Money") or 0
+		local money = Hud.wallet()
 		for _, stand in stands do
 			local prompt = prompts[stand.key]
 			if not (prompt and prompt:IsDescendantOf(workspace)) then
@@ -114,12 +114,12 @@ function Stands.start()
 			if shown then
 				local item, status = Stands.offer(stand, snap, money)
 				local area = item and Areas.byId(Config, item.area)
-				local title, line = Format.standSign(item, status, area, stand.place)
+				local title, line = Format.standSign(item, status, area, stand.place, Hud.price)
 				set(Hud.find(s, "Title"), "Text", title)
 				set(Hud.find(s, "Line"), "Text", line)
 				set(Hud.find(s, "Line"), "TextColor3", LINE_COLORS[status])
 				set(shown, "ObjectText", stand.place)
-				set(shown, "ActionText", Format.standAction(item, status, nil, area))
+				set(shown, "ActionText", Format.standAction(item, status, nil, area, Hud.price))
 			end
 		end
 		-- Calling a vehicle out needs one to call.

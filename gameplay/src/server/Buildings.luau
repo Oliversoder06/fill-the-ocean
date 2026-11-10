@@ -2,13 +2,13 @@
 -- plots. server/Run starts it with hooks, hands it the save (Buildings.load) and passes it the TAB
 -- buys of building ids (Buildings.buy).
 -- Building: a plot's Prompt opens client/Buildings' picker; the client sends Build(plot number, item
--- id) and the server checks it (plot empty, area open, price, near the plot, rate limit), takes the
--- coins from the buyer and clones ReplicatedStorage.Buildings.<model> onto the plot. save.plots
+-- id) and the server checks it (plot empty, area open, the team's price, near the plot, rate limit),
+-- takes the coins from the team's wallet and clones ReplicatedStorage.Buildings.<model> onto the plot. save.plots
 -- keeps which building stands on which plot; save.buildings the upgrades bought per building id: a
 -- level counts on every plot with that building (one TAB tile per kind, levelled by anyone).
 -- Output: while playing with someone present (D4), every building pours its rate (litres a second)
--- into the ocean; its coins (BuildingRules.payPerLitre) are split evenly between the players
--- present and paid in batches (server/Payroll).
+-- into the ocean; its coins (BuildingRules.payPerLitre) go into the team's wallet in batches
+-- (server/Payroll).
 -- Clogs: after BuildingRules.clogDelay seconds of play a building clogs and makes half until someone
 -- holds E on its Unclog prompt.
 -- Published: ReplicatedStorage BuildingLevel_<id> (upgrades bought; nil until the team builds one),
@@ -35,13 +35,14 @@ local MAX_UNCLOGS_PER_SECOND = 2
 local SIDES = { "ShopSide", "StaffSide" }
 
 export type Hooks = {
-	states: { [Player]: any }, -- server/Run's player states (money)
+	states: { [Player]: any }, -- server/Run's player states (rate limits)
 	playing: () -> boolean,
 	openIds: () -> { number }, -- the open area ids (Areas.openIds)
 	openAreas: () -> number, -- areas open so far (Ladder.openAreas)
 	inReach: (Player, ProximityPrompt) -> boolean,
 	allow: (any, string, number) -> boolean, -- server/Run's per-player rate limit (state, key, max a second)
-	publish: (Player) -> (), -- publish a player's money
+	price: (number) -> number, -- a listed price for the team (Items.price)
+	spend: (number) -> (), -- takes coins from the team's wallet
 	fill: (number) -> number, -- pours litres into the ocean; returns the litres it took
 	card: (string) -> (), -- a card for everyone
 	tell: (Player, string) -> (), -- a card for one player
@@ -178,10 +179,12 @@ local function onBuild(player: Player, index: unknown, id: unknown)
 		return
 	end
 	local item = Items.get(Config, id)
-	local ok, reason = BuildingRules.canBuild(save.plots, #plots, index, item, hooks.openAreas(), state.money)
+	local ok, reason = BuildingRules.canBuild(save.plots, #plots, index, item, hooks.openAreas(), save.team.wallet, hooks.price)
 	if not ok then
 		if reason == "money" then
 			hooks.tell(player, "Not enough coins")
+		elseif reason == "taken" then
+			hooks.tell(player, "A teammate already built on this plot")
 		end
 		return
 	end
@@ -189,32 +192,30 @@ local function onBuild(player: Player, index: unknown, id: unknown)
 	if not hooks.inReach(player, plots[plotIndex].prompt) then
 		return
 	end
-	state.money = math.max(0, state.money - item.price)
+	hooks.spend(hooks.price(item.price))
 	save.plots[tostring(plotIndex)] = item.id
 	if save.buildings[item.id] == nil then
 		save.buildings[item.id] = 0
 	end
 	place(plotIndex, item)
 	publishLevels()
-	hooks.publish(player)
-	hooks.card(`{player.DisplayName} built a {item.name}!`)
+	hooks.card(`{player.DisplayName} built a {item.name} for the team!`)
 	hooks.save(`{player.Name} built {item.id} on plot {plotIndex}`)
 end
 
--- TAB's Buy(id) for a building id: the buyer pays the next level of that building for the whole
--- team (Items.buildingOffer). True when `id` is a building (handled here, bought or not). A level
--- needs one standing on a plot: a saved one the place lost (Buildings.load) makes nothing.
-function Buildings.buy(player: Player, state, id: string): boolean
+-- TAB's Buy(id) for building `id` (server/Run checks it is one and that nobody bought this level
+-- first): the team's wallet pays the next level of that building for the whole team
+-- (Items.buildingOffer). A level needs one standing on a plot: a saved one the place lost
+-- (Buildings.load) makes nothing.
+function Buildings.buy(player: Player, id: string)
 	local item = Items.get(Config, id)
-	if not item or item.kind ~= "building" then
-		return false
-	end
-	if not save then
-		return true
+	if not save or not item then
+		return
 	end
 	local level, status = Items.buildingOffer(Config, save.buildings, id, hooks.openAreas())
-	if status ~= "buy" or not Items.affords(state.money, level.cost) then
-		return true
+	local cost = if status == "buy" then hooks.price(level.cost) else 0
+	if status ~= "buy" or not Items.affords(save.team.wallet, cost) then
+		return
 	end
 	local standing = false
 	for _, building in placed do
@@ -222,15 +223,13 @@ function Buildings.buy(player: Player, state, id: string): boolean
 	end
 	if not standing then
 		hooks.tell(player, `Build a {item.name} on a plot first`)
-		return true
+		return
 	end
-	state.money = math.max(0, state.money - level.cost)
+	hooks.spend(cost)
 	save.buildings[id] += 1
 	publishLevels()
-	hooks.publish(player)
-	hooks.card(`{player.DisplayName} levelled up the {item.name}: Lv {save.buildings[id] + 1}!`)
+	hooks.card(`{player.DisplayName} levelled up the team's {item.name}: Lv {save.buildings[id] + 1}!`)
 	hooks.save(`{player.Name} levelled {id}`)
-	return true
 end
 
 -- An aqueduct's water shows while a plot on its side has a building and the run plays.
@@ -267,7 +266,7 @@ local function tick(dt: number)
 		end
 	end
 	if litres > 0 then
-		Payroll.share(hooks.fill(litres) * BuildingRules.payPerLitre(Config, hooks.openIds()))
+		Payroll.owe(hooks.fill(litres) * BuildingRules.payPerLitre(Config, hooks.openIds()))
 	end
 end
 

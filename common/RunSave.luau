@@ -2,15 +2,20 @@
 -- A team's saved run: its shape, its key and the exact-team check. Pure: Lune-tested.
 -- RunStore does the DataStore calls; the gameplay server is the only writer.
 
--- owned: item ids bought at the stands (common/Items); itemLevels: upgrades bought per owned item;
--- assign: where each hired staff works (staff item id -> area id, shared/StaffRules.post).
-export type PlayerState = {
-	money: number,
+-- Everything bought is the team's (owner, 2026-11-10): one wallet, the upgrade track `levels`, the
+-- items bought at the stands (`owned`, common/Items) and upgrades per owned item (`itemLevels`), and
+-- where each hired staff works (`assign`: staff item id -> area id, shared/StaffRules.post).
+export type Team = {
+	wallet: number,
 	levels: { [string]: number },
-	litres: number,
 	owned: { string },
 	itemLevels: { [string]: number },
 	assign: { [string]: number },
+}
+
+-- What stays a player's own: the litres they poured.
+export type PlayerState = {
+	litres: number,
 }
 
 -- players is keyed by user id as a string: DataStores need string keys.
@@ -19,6 +24,7 @@ export type Save = {
 	mapId: string,
 	members: { number },
 	current: number,
+	team: Team,
 	players: { [string]: PlayerState },
 	playSeconds: number,
 	introSeen: boolean,
@@ -86,31 +92,89 @@ local function counts(raw: any): { [string]: number }
 end
 
 local function sanitizePlayer(raw: { [any]: any }): PlayerState
+	return { litres = amount(raw.litres) }
+end
+
+-- Item ids: strings, each once, in their order.
+local function itemIds(raw: any): { string }
 	local owned = {}
-	if type(raw.owned) == "table" then
-		for _, id in raw.owned do
+	if type(raw) == "table" then
+		for _, id in raw do
 			if type(id) == "string" and not table.find(owned, id) then
 				table.insert(owned, id)
 			end
 		end
 	end
-	-- staff posts are area ids 1-5; saves from before 3f have none
+	return owned
+end
+
+-- Staff posts: area ids 1-5 by staff item id; saves from before 3f have none.
+local function posts(raw: any): { [string]: number }
 	local assign = {}
-	if type(raw.assign) == "table" then
-		for id, area in raw.assign do
+	if type(raw) == "table" then
+		for id, area in raw do
 			if type(id) == "string" and type(area) == "number" and area % 1 == 0 and area >= 1 and area <= 5 then
 				assign[id] = area
 			end
 		end
 	end
+	return assign
+end
+
+function RunSave.newTeam(): Team
+	return { wallet = 0, levels = {}, owned = {}, itemLevels = {}, assign = {} }
+end
+
+local function sanitizeTeam(raw: { [any]: any }): Team
 	return {
-		money = amount(raw.money),
+		wallet = amount(raw.wallet),
 		levels = counts(raw.levels),
-		litres = amount(raw.litres),
-		owned = owned,
+		owned = itemIds(raw.owned),
 		itemLevels = counts(raw.itemLevels),
-		assign = assign,
+		assign = posts(raw.assign),
 	}
+end
+
+-- A save from before the team economy kept money, levels, items and staff posts per player: the
+-- team gets the money added up, the best level of each track and item, every item anyone had and each
+-- staff's post from the first player (lowest user id) who set one.
+local function mergePlayers(players: { [any]: any }): Team
+	local keys = {}
+	for userId, state in players do
+		if type(userId) == "string" and type(state) == "table" then
+			table.insert(keys, userId)
+		end
+	end
+	table.sort(keys, function(a, b)
+		local x, y = tonumber(a) or math.huge, tonumber(b) or math.huge
+		return if x ~= y then x < y else a < b
+	end)
+	local merged = RunSave.newTeam()
+	for _, key in keys do
+		local old = sanitizeTeam({
+			wallet = players[key].money,
+			levels = players[key].levels,
+			owned = players[key].owned,
+			itemLevels = players[key].itemLevels,
+			assign = players[key].assign,
+		})
+		merged.wallet += old.wallet
+		for id, level in old.levels do
+			merged.levels[id] = math.max(merged.levels[id] or 0, level)
+		end
+		for id, level in old.itemLevels do
+			merged.itemLevels[id] = math.max(merged.itemLevels[id] or 0, level)
+		end
+		for _, id in old.owned do
+			if not table.find(merged.owned, id) then
+				table.insert(merged.owned, id)
+			end
+		end
+		for id, area in old.assign do
+			merged.assign[id] = merged.assign[id] or area
+		end
+	end
+	return merged
 end
 
 function RunSave.new(mapId: string, members: { number }): Save
@@ -119,6 +183,7 @@ function RunSave.new(mapId: string, members: { number }): Save
 		mapId = mapId,
 		members = team(members),
 		current = 0,
+		team = RunSave.newTeam(),
 		players = {},
 		playSeconds = 0,
 		introSeen = false,
@@ -211,6 +276,11 @@ function RunSave.sanitize(raw: any): Save?
 				save.players[userId] = sanitizePlayer(state)
 			end
 		end
+	end
+	if type(raw.team) == "table" then
+		save.team = sanitizeTeam(raw.team)
+	elseif type(raw.players) == "table" then
+		save.team = mergePlayers(raw.players)
 	end
 	save.playSeconds = amount(raw.playSeconds)
 	save.introSeen = raw.introSeen == true

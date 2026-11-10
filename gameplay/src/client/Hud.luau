@@ -67,12 +67,13 @@ function Hud.ocean(): Model?
 	return if model and model:IsA("Model") then model else nil
 end
 
--- The save's upgrade levels by track id, from the Level_<track> attributes. A missing one counts as
--- `fallback`; with no fallback the whole table is nil until the server has published them all.
+-- The save's upgrade levels by track id (the team's), from the ReplicatedStorage Level_<track>
+-- attributes. A missing one counts as `fallback`; with no fallback the whole table is nil until the
+-- server has published them all.
 function Hud.levels(fallback: number?): { [string]: number }?
 	local levels = {}
 	for _, track in Config.tracks do
-		local level = player:GetAttribute(`Level_{track.id}`)
+		local level = ReplicatedStorage:GetAttribute(`Level_{track.id}`)
 		if type(level) ~= "number" then
 			if fallback == nil then
 				return nil
@@ -101,10 +102,10 @@ function Hud.gatesOpen(): { number }
 	return areaIds("GatesOpen")
 end
 
--- The player's items (common/Items state) from the Owned and ItemLevel_<id> attributes.
+-- The team's items (common/Items state) from the ReplicatedStorage Owned and ItemLevel_<id> attributes.
 function Hud.items(): Items.State
 	local owned = {}
-	local text = player:GetAttribute("Owned")
+	local text = ReplicatedStorage:GetAttribute("Owned")
 	if type(text) == "string" then
 		for id in text:gmatch("[^,]+") do
 			table.insert(owned, id)
@@ -112,10 +113,27 @@ function Hud.items(): Items.State
 	end
 	local itemLevels = {}
 	for _, item in Config.items do
-		local level = player:GetAttribute(`ItemLevel_{item.id}`)
+		local level = ReplicatedStorage:GetAttribute(`ItemLevel_{item.id}`)
 		itemLevels[item.id] = if type(level) == "number" then level else 0
 	end
 	return { owned = owned, itemLevels = itemLevels }
+end
+
+-- The team's coins (the server's Wallet attribute).
+function Hud.wallet(): number
+	local coins = ReplicatedStorage:GetAttribute("Wallet")
+	return if type(coins) == "number" then coins else 0
+end
+
+-- The save's team size (the server's TeamSize attribute; 1 until it is published).
+function Hud.teamSize(): number
+	local size = ReplicatedStorage:GetAttribute("TeamSize")
+	return if type(size) == "number" then size else 1
+end
+
+-- What a listed price (Config) costs this team (Items.price): every price shown goes through it.
+function Hud.price(cost: number): number
+	return Items.price(Config, cost, Hud.teamSize())
 end
 
 -- The team's buildings (save.buildings: upgrades bought per building id, only the ones built) from
@@ -131,15 +149,16 @@ function Hud.buildings(): { [string]: number }
 	return levels
 end
 
--- The attributes offers read (items, buildings, the areas the open gates open), read once per
--- refresh and passed to every Hud.offer / Stands.offer of it.
-export type Snapshot = { items: Items.State, buildings: { [string]: number }, openAreas: number }
+-- The attributes offers read (items, buildings, the areas the open gates open, the team's size), read
+-- once per refresh and passed to every Hud.offer / Stands.offer of it.
+export type Snapshot = { items: Items.State, buildings: { [string]: number }, openAreas: number, teamSize: number }
 
 function Hud.snapshot(): Snapshot
-	return { items = Hud.items(), buildings = Hud.buildings(), openAreas = Ladder.openAreas(Config, Hud.gatesOpen()) }
+	return { items = Hud.items(), buildings = Hud.buildings(), openAreas = Ladder.openAreas(Config, Hud.gatesOpen()), teamSize = Hud.teamSize() }
 end
 
--- What TAB offers next and whether `money` buys it now, with the areas the open gates open (as the
+-- What TAB offers next and whether `money` buys it now at the team's price (Hud.price), with the
+-- areas the open gates open (as the
 -- server counts them). A track (`levels`): Ladder.offer's level and "buy" / "locked" / "max", or
 -- "useless" while the level would change nothing (Ladder.helps; the server doesn't sell it). An
 -- item: Items.nextLevel's upgrade and "buy" / "max" / "replaced", or, while unowned, nil and
@@ -162,7 +181,7 @@ function Hud.offer(levels: { [string]: number }, id: string, money: number, snap
 			status = if (item :: Config.Item).area <= s.openAreas then "stand" else "locked"
 		end
 	end
-	return level, status, status == "buy" and Items.affords(money, level.cost)
+	return level, status, status == "buy" and Items.affords(money, Items.price(Config, level.cost, s.teamSize))
 end
 
 -- The open area the local player reaches (Items.reachable: Cloud Catcher needs the Jetpack Tank)
@@ -221,7 +240,7 @@ function Hud.pressable(button: GuiButton, scale: UIScale)
 		to(if hovered then Theme.motion.hoverScale else 1)
 	end)
 end
--- Money still flying in as coins (client/Payout): the wallet shows Money minus this, so it counts
+-- Money still flying in as coins (client/Payout): the wallet shows Wallet minus this, so it counts
 -- up coin by coin instead of jumping when the server pays.
 Hud.walletHold = 0
 
@@ -248,7 +267,7 @@ function Hud.start()
 
 	local coins = find(gui, "Wallet.Pill.Coins")
 	local coinPop = find(gui, "Wallet.Coin.Pop")
-	local shownMoney = math.max(0, (player:GetAttribute("Money") or 0) - Hud.walletHold)
+	local shownMoney = math.max(0, Hud.wallet() - Hud.walletHold)
 	local cardLabel = find(gui, "Card")
 	local waiting = find(gui, "Waiting")
 	local progress = find(gui, "Progress")
@@ -301,8 +320,8 @@ function Hud.start()
 	RunService.RenderStepped:Connect(function()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
 
-		-- Wallet
-		local money = math.max(0, (player:GetAttribute("Money") or 0) - Hud.walletHold)
+		-- Wallet: the team's coins
+		local money = math.max(0, Hud.wallet() - Hud.walletHold)
 		set(coins, "Text", Hud.money(money))
 		if money > shownMoney + 1e-6 then -- earned (each landing coin): the coin bounces
 			coinPop.Scale = 1.25

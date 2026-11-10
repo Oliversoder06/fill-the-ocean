@@ -1,7 +1,7 @@
 -- The first-minute guide (StarterGui.Hud.Guide, built in Studio): one goal at a time for a new save,
 -- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
 -- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
--- state (where you stand, Carried, Money, the shop), so walking away goes back a step and nothing is
+-- state (where you stand, Carried, the team's Wallet, the shop), so walking away goes back a step and nothing is
 -- saved. The goal says what to do, never where to click: yellow chevrons on the ground (clones of
 -- ReplicatedStorage.Vfx.GuideChevron, placed by shared/GuideTrail) lead to the place, a click hand
 -- (a clone of Hud.Templates.ClickHand) taps the button to press, and Action's ActHint says which
@@ -49,13 +49,14 @@ local function boughtAny(levels: { [string]: number }): boolean
 	return false
 end
 
--- The cheapest upgrade on sale now: its track, price and whether `money` buys it.
+-- The cheapest upgrade on sale now: its track, the team's price and whether `money` buys it.
 local function cheapest(levels: { [string]: number }, money: number): (Config.Track?, number, boolean)
 	local best, bestCost, bestAffordable = nil, math.huge, false
 	for _, track in Config.tracks do
 		local level, status, affordable = Hud.offer(levels, track.id, money)
-		if status == "buy" and level.cost < bestCost then
-			best, bestCost, bestAffordable = track, level.cost, affordable
+		local cost = if status == "buy" then Hud.price(level.cost) else math.huge
+		if cost < bestCost then
+			best, bestCost, bestAffordable = track, cost, affordable
 		end
 	end
 	return best, bestCost, bestAffordable
@@ -178,7 +179,7 @@ function Guide.start()
 	local function current(levels: { [string]: number }, ocean: Model): (number, string, Vector3?, GuiObject?)
 		local well, shore = target(ocean, "Source"), target(ocean, "PourPoint")
 		local source = ocean:FindFirstChild("Source")
-		local money = player:GetAttribute("Money") or 0
+		local money = Hud.wallet()
 		local track, cost, affordable = cheapest(levels, money)
 		if track and affordable then
 			if not shop.Visible then

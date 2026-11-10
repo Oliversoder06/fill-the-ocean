@@ -37,7 +37,9 @@ small change directly (see "Small tasks without a plan"). These rules apply to e
 ## Code map (gameplay/)
 Server (`src/server/`):
 - `Run.luau`: the whole run. Loads and autosaves the team's run (`common/RunSave`, `RunStore`),
-  phases, per-player state (money, carried, stats, bought levels, equipped), scoop/pour validation
+  phases, the team's economy (`team`: one wallet, track levels, items, staff posts; `earn` / `spend`,
+  prices through `Items.price` for the save's team size, `announce` to teammates), per-player state
+  (carried, earned, stats from the team's levels, equipped, gadget, hose), scoop/pour validation
   (`Act` remote), buying, publishing attributes. Most gameplay changes land here.
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it, on a `HeldGrip`
   Motor6D (hand to tool) that client `Bodies` turns to suit the carry pose.
@@ -46,29 +48,33 @@ Server (`src/server/`):
   rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
   `rocksBroken` and `goldenId` when it credits a scoop.
 - `Vehicles.luau`: vehicles (Fire Truck, Tanker, Snowcat Tanker, Water Bomber): the Fire Station's
-  `CallPrompt` brings an owned one out (`Vehicle_<UserId>`): the best first, each call while one is
-  out swaps it for the next one down (`Items.nextOwned`), owner-only `DrivePrompt`, driver
+  `CallPrompt` brings one of the team's vehicles out for the caller (`Vehicle_<UserId>`, one per
+  player): the best first, each call while one is
+  out swaps it for the next one down (`Items.nextOwned`), caller-only `DrivePrompt`, driver
   network ownership, collision groups, hydrant fill, truck hose spray, bomber skim and drop; `Run`
   starts it with the same hooks as `Mechanics` and calls `leave` / `stop`.
 - `Buildings.luau`: the team's buildings on `workspace.Map.Plots.PlotN` (`Build` remote, TAB levels
-  via `Buy`, output on a tick split between everyone present, clogs, aqueduct flow); `Run` starts it
+  via `Buy`, output on a tick paid into the team's wallet, clogs, aqueduct flow); `Run` starts it
   with hooks. 3f's Plumber hook: `Buildings.setPlumber(scale, keepClear)`, `Buildings.unclog(plot)`.
-- `Staff.luau`: each player's staff (Helper, Lifeguard, Firefighter, Plumber; hired at the Lifeguard
-  Tower, a cove shop): `Staff` remote (assign), output from rates on a tick (D4: owner present and
-  playing) at half the post's hand pay, 2x while the owner works that area (`state.workArea`, set in
-  `onAct`), Lifeguard walk bonus (`state.nearLifeguard`), Plumbers into `Buildings.setPlumber`.
-- `Payroll.luau`: ticked pay (buildings' `share`, staff's `owe`) paid in batches; `Run` calls
-  `Payroll.payNow()` before a join or leave, at the run's end and on close.
+- `Staff.luau`: the team's staff (Helper, Lifeguard, Firefighter, Plumber; hired at the Lifeguard
+  Tower, a cove shop): `Staff` remote (assign, any member), output from rates on a tick (D4: a member
+  present and playing) at half the post's hand pay, 2x while any member works that area
+  (`state.workArea`, set in `onAct`), Lifeguard walk bonus (`state.nearLifeguard`), Plumbers into
+  `Buildings.setPlumber`.
+- `Payroll.luau`: ticked pay (buildings and staff, `owe`) paid into the team's wallet in batches;
+  `Run` calls `Payroll.payNow()` before a leave, at the run's end, on close and before a reset.
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
   panel: stopwatch, map name, fill bar with `shared/Format.fill` (two decimals below 10%) and
   `Progress.Litres` (Current / Target)), frees the cursor while
   a window is open. Exposes helpers `Hud.find` (asserting path lookup), `Hud.set` (write only on
-  change), `Hud.short` (1.2K) and `Hud.money` (12,480; both `shared/Format`), `Hud.offer` (what
+  change), `Hud.short` (1.2K) and `Hud.money` (12,480; both `shared/Format`), the team's economy
+  `Hud.wallet()`, `Hud.levels`, `Hud.items`, `Hud.buildings`, `Hud.teamSize()` and `Hud.price(cost)`
+  (what a listed price costs the team; every price shown goes through it), `Hud.offer` (what
   TAB offers next; `"useless"` for a level that changes nothing, `Ladder.helps`), `Hud.ocean`,
   `Hud.pulseFill(litres)` (the fill bar's pulse when poured water reaches the ocean) and
-  `Hud.walletHold` (money still flying in as coins; the wallet shows Money minus it).
+  `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it).
 - `Action.luau`: scoop and pour input (aim at the water + hold E / LMB / RT / touch button), one
   full sweep or pour per action, the `ActHint` text. Viewmodel and Feel read `Action.current()`.
 - `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`;
@@ -78,7 +84,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   splashes at the ocean and pulses the fill bar (cove pours just pulse it); fades the seabed's
   `Ocean.PourDecal` as the ocean fills (`Cues.channel`, `shared/PourFlow`). Its `textures` / `scroll`
   also scroll the aqueducts (`Buildings`).
-- `Payout.luau`: when Money goes up, coins burst from the pour, land around you and fly into the
+- `Payout.luau`: when your `Earned` goes up (your own income; teammates' and staff/building pay
+  just raise the wallet), coins burst from the pour, land around you and fly into the
   wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
 - `Shop.luau`: the shop window: one tile per upgrade track in the Tool and Boosts panels, and a
   detail panel with the Buy button. Opens through `Window`. The `UpgradesButton` (right edge)
@@ -89,7 +96,7 @@ Client (`src/client/`, all started from `init.client.luau`):
   clicks until the last buy has landed (no double buys). `Shop.show(id)` opens on a tile.
 - `Stands.luau`: every stand's prompt texts ("Buy Backpack Tank (1,200)", the reason when a press
   buys nothing) and its price sign (copies of `Hud.Templates.StandSign`, from `Items.standOffer`
-  and `shared/Format`); hides the Fire Station's `CallPrompt` until you own a vehicle.
+  and `shared/Format`, at the team's price); hides the Fire Station's `CallPrompt` until the team owns a vehicle.
 - `Goal.luau`: the next-goal line `Hud.Progress.Goal` once the guide is gone (`shared/NextGoal`);
   a click or G opens the shop on it or points the way (`Guide.pointTo`, from ux/b1).
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
@@ -132,7 +139,7 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
 - `Buildings.luau`: the build picker (`Hud.BuildPicker`, options cloned from
   `Hud.Templates.BuildOption`) opened by a plot's prompt; scrolls flowing aqueducts' water.
-- `Staff.luau`: staff bodies: from each player's `Staff` attribute, clones of
+- `Staff.luau`: staff bodies: from the ReplicatedStorage `Staff` attribute (the team's), clones of
   `ReplicatedStorage.Staff.<Model>` (anchored root, `workspace.StaffBodies`) walk their loop
   (Source/Pour, Fire Station/refill bay, plots), posed by the animation runtime's `AnimPlayer` with
   `shared/StaffClips` (baked once per model); at most 30, nearest first, none past 250 studs.
@@ -146,15 +153,17 @@ Shared (`src/shared/`, pure unless noted):
 - `Config.luau`: every run number: the one ocean (`Config.ocean`: flat `coinsPerLitre`, the fill
   curve `firstPercent` and `growth`, and `standInOpens`, the fill points that open areas 2 and 3
   until Phase 2 builds the gates) and the upgrade tracks (`Config.tracks`: tool, pickup, hold,
-  quick, walk, tip), each level with its price and the `area` that opens it. Balance changes go
-  here; check them with `lune run tools/simulate`.
-- `Ladder.luau`: `stats(config, levels)` (what a player's levels add up to, including `sweeps`),
+  quick, walk, tip), each level with its price and the `area` that opens it; `Config.team.priceStep`
+  (every price x (1 + step x (players - 1))). Balance changes go
+  here; check them with `lune run tools/simulate [quiet] [team size]`.
+- `Ladder.luau`: `stats(config, levels)` (what the team's levels add up to, including `sweeps`),
   `openAreas(config, fill)` (areas open at a fill fraction), `offer(config, levels, trackId,
   openAreas)` (next level and `"buy"` / `"locked"` / `"max"`), `helps` (pickup only while the tool
   takes more than one sweep; the server refuses it otherwise), `baseSweeps`, `tripSeconds`.
 - `Format.luau`: words and numbers the player reads, for the client and the server's cards:
-  `short`, `money`, `litres`, `fill`, `percent`, `need`, `gateHint`, `standName`, and the stand
-  texts `standAction` (prompt), `standCard` (why a press bought nothing), `standSign`.
+  `short`, `money`, `litres`, `fill`, `percent`, `need`, `gateHint`, `standName`, `levelName`, and the stand
+  texts `standAction` (prompt), `standCard` (why a press bought nothing), `standSign`; the price
+  texts take an optional `priceOf` (the team's price, `Hud.price` / the server's `price`).
 - `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
   (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
@@ -163,7 +172,8 @@ Shared (`src/shared/`, pure unless noted):
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
-  numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check),
+  numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check with an
+  optional `priceOf`),
   `GuideTrail.luau` (where the guide's ground chevrons sit and which show):
   maths, all Lune-tested (`Cues` too).
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
@@ -185,11 +195,14 @@ runtime (pure core + `Roblox/` AnimPlayer etc.; `vendor/LICENSE`, `vendor/PROVEN
 `src`, so `selene src` doesn't lint it; don't edit it here, update it from the skill.
 
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
-- `RunSave.luau` (pure): a team's saved run (its `buildings` levels and `plots`; per player `assign`,
-  staff id -> area id), its key, the exact-team check (`sameTeam`), and `blank` / `isBlank` (what
-  erasing a run leaves).
-- `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB:
-  `canBuy`, `affords` (the one money check with the fractional-coin epsilon), `nextLevel`, the
+- `RunSave.luau` (pure): a team's saved run (its `team`: `wallet`, track `levels`, `owned` items,
+  `itemLevels`, staff `assign` (staff id -> area id); its `buildings` levels and `plots`; per player
+  only `litres`), its key, the exact-team check (`sameTeam`), `blank` / `isBlank` (what erasing a run
+  leaves), and `sanitize`, which turns a save from before the team economy (money, levels and items
+  per player) into one team: money added up, the best levels, every item, the first member's posts.
+- `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB,
+  all the team's: `price(config, cost, teamSize)` / `priceScale` (every price for the save's team
+  size), `canBuy`, `affords` (the one money check with the fractional-coin epsilon), `nextLevel`, the
   worn backpack and its `capacityBonus` (plus the Jetpack Tank's), `standPick` (an area's stand or
   a cove shop in `Config.stands`; never a building) and `standOffer` (what it shows: the pick, or
   the item and `"money"` / `"locked"`, or `"owned"`), `gadgetStat`,
@@ -218,22 +231,29 @@ The server publishes state as attributes; the client only reads them.
   (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the
   boost applied. `BuildingLevel_<id>` (the team's upgrades per building, nil until built); a placed
   building (`Plots.PlotN.Building`) carries `Clogged`; `Town.Aqueduct_<side>` carries `Flowing`.
-- Player attributes: `Money`, `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
-  `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus`, and
-  `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`, ...); `Owned` (item ids,
-  `"backpackTank,bigTank"`), `ItemLevel_<itemId>` per item and `Backpack` (the worn pack's model or
+  The team's economy (everything bought is the team's, owner 2026-11-10): `Wallet` (the team's
+  coins), `TeamSize` (the save's members, fixed for the run), `PriceScale` (every listed price x
+  this, rounded: `Items.price`), `Level_<trackId>` per upgrade track (`Level_tool`, `Level_walk`,
+  ...), `Owned` (item ids, `"backpackTank,bigTank"`), `ItemLevel_<itemId>` per item, and `Staff`
+  (server/Staff: `"helper:2@2,firefighter:1@0"`: id:hires@post, post 0 = nowhere).
+- Player attributes: `Earned` (coins this player's own pours, hose and vehicle brought the team this
+  session), `Carried`, `Capacity`, `WalkSpeed`, `ActSeconds`, `Sweeps`,
+  `ToolName`, `ToolModel`, `ToolTier`, `Equipped`, `Hold`, `CoinBonus` (all from the team's levels),
+  and `Backpack` (the worn pack's model or
   `""`); `Capacity` includes the pack and the Jetpack Tank; `Gadget` (the hotbar gadget out instead
   of the tool, an item id or `""`), `HoseArea` (area id the Garden Hose is clipped to, 0 for none),
   `Spraying`, `Flying` and `Fuel` (jetpack seconds left, only once owned), `IceHits` (hits on the
   current Glacier ice block); `ActKind` + `ActAt`
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
   Vehicles (server/Vehicles): `Vehicle` (item id out or `""`), `Tank`, `TankMax` (whole litres),
-  `Filling`, `VehicleSpraying`; the vehicle model carries `Owner` (UserId), `ItemId`, `Speed`, `Flies`.
-  Staff (server/Staff): `Staff` (`"helper:2@2,firefighter:1@0"`: id:hires@post, post 0 = nowhere).
-- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (track id, or an owned item's id to level it,
-  or a built building's id to level it for the team),
-  `Build` (plot number, building id; server checks plot empty, area open, price, reach, rate),
-  `Staff` (`"assign", itemId, areaId`: an owned staff's post, checked against
+  `Filling`, `VehicleSpraying`; the vehicle model carries `Owner` (UserId of who called it), `ItemId`, `Speed`, `Flies`.
+- Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (id, bought: a
+  track id, or an owned item's id to level it, or a built building's id to level it, for the team;
+  `bought` is how many levels of it the client saw bought (-1 for an item not owned or a building
+  not built): a lower count than the server's means a teammate bought that level first, and the
+  buyer gets a card instead of the level after it),
+  `Build` (plot number, building id; server checks plot empty, area open, the team's price, reach, rate),
+  `Staff` (`"assign", itemId, areaId`: one of the team's staff's post, checked against
   `StaffRules.targets`; rate-limited),
   `Equip` (boolean for the tool, or an owned hotbar gadget's id), `Act` (`"scoop"` or `"pour"`, sent
   when an action starts; the server credits a scoop ActSeconds later and a pour at once; with the
@@ -243,7 +263,7 @@ The server publishes state as attributes; the client only reads them.
   rate-limited), `Admin` (a fill fraction 0-1, or `"reset"`: the run starts over live for the same
   team and map, at most once per 10 s; the server checks `shared/Admins` and only acts
   while Phase is `playing`), `Card` (server to client).
-- A new attribute: set it in `Run.luau`'s `publish`. A new remote: add it to
+- A new attribute: set it in `Run.luau`'s `publish` (a player's) or `publishTeam` (the team's). A new remote: add it to
   `default.project.json` AND to the `remote(...)` list in `Run.start`, validate its arguments, and
   tell the owner to restart `rojo serve` (a running Rojo does not reload the project file; the
   server errors "missing remote" until then).

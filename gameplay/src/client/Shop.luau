@@ -2,7 +2,8 @@
 -- the on-screen Shop button opens and closes it during a run (client/Window: the frame pops in,
 -- then its parts appear layer by layer). One tile per upgrade track (Tool and
 -- Boosts panels, from Config.tracks); clicking a tile shows it in the detail panel, whose Buy button
--- sends Buy(trackId). The server checks every buy.
+-- sends Buy(trackId, bought) (`bought`: the levels seen bought, so a teammate's buy of the same level
+-- wins). Everything is the team's, bought from its wallet at the team's price (Hud.price). The server checks every buy.
 -- Tabs (Body.Tabs): Tools (the tracks), Gear (one tile per backpack and gadget in GearPanel), Vehicles
 -- (one tile per vehicle in VehiclePanel), Buildings (one tile per building in BuildingPanel: the
 -- team's levels, server/Buildings), and Staff (one tile per staff in StaffPanel; ComingSoon stands in
@@ -114,7 +115,7 @@ end
 -- Why something of area `areaId` is locked: "Behind the Hot Springs gate (fill the ocean to 22%)".
 local function behindGate(areaId: number): string
 	local area = Areas.byId(Config, areaId)
-	return `Behind the {area.name} gate ({Format.gateHint(area, fillNow())})`
+	return `Behind the {area.name} gate ({Format.gateHint(area, fillNow(), Hud.price)})`
 end
 
 -- The tab showing an item's tile.
@@ -127,8 +128,8 @@ local function tabOf(item): string
 	error(`Shop has no tab for {item.kind} items`)
 end
 
--- Upgrades bought on an item, or nil while it isn't owned: the player's own, or the team's for a
--- building (Hud.buildings). `snap`: Hud.snapshot.
+-- Upgrades bought on an item, or nil while the team doesn't own it (Hud.items), or for a building
+-- (Hud.buildings) hasn't built it. `snap`: Hud.snapshot.
 local function boughtLevel(item, snap: Hud.Snapshot): number?
 	if item.kind == "building" then
 		return snap.buildings[item.id]
@@ -183,11 +184,11 @@ local function itemNote(item, status: string?): string
 		local worn = Items.backpack(Config, Hud.items())
 		return `Replaced by the {if worn then worn.name else "next one"}`
 	elseif status == "unbuilt" then
-		return `Build one on a town plot · {Hud.money(item.price)}`
+		return `Build one on a town plot · {Hud.money(Hud.price(item.price))}`
 	elseif status == "stand" then
-		return `{verb} at the {place} · {Hud.money(item.price)}`
+		return `{verb} at the {place} · {Hud.money(Hud.price(item.price))}`
 	elseif item.stand then
-		return `{verb} at the {place} once {area.name} opens ({Format.gateHint(area, fillNow())})`
+		return `{verb} at the {place} once {area.name} opens ({Format.gateHint(area, fillNow(), Hud.price)})`
 	end
 	return behindGate(item.area)
 end
@@ -286,13 +287,8 @@ local function itemEffect(item, level, owned: boolean): string
 end
 
 
--- The display name of a track's level `n`: tools have their own, the rest are "<track> <n>".
-function Shop.levelName(track, n: number, level): string
-	if track.id == "tool" then
-		return level.name
-	end
-	return if #track.levels == 1 then track.name else `{track.name} {n}`
-end
+-- The display name of a track's level `n` (shared/Format, the server's purchase cards use it too).
+Shop.levelName = Format.levelName
 
 -- Opens the shop on the tile of track or item `id` (client/Goal).
 function Shop.show(id: string)
@@ -304,10 +300,10 @@ local function bounce(scale: UIScale)
 	TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 end
 
--- Where an owned staff works (the server's Staff attribute: an area id, 0 for nowhere), or nil until
--- the server has published it.
+-- Where one of the team's staff works (the server's Staff attribute: an area id, 0 for nowhere), or
+-- nil until the server has published it.
 local function postOf(id: string): number?
-	for _, entry in StaffRules.decode(player:GetAttribute("Staff")) do
+	for _, entry in StaffRules.decode(ReplicatedStorage:GetAttribute("Staff")) do
 		if entry.id == id then
 			return entry.post
 		end
@@ -398,7 +394,7 @@ function Shop.start()
 		if value and pick then
 			tab, selected = if Config.track(pick) then "Tools" else tabOf(Items.get(Config, pick)), pick
 		elseif value and not open then
-			local states = tabStates(levelsOf(), player:GetAttribute("Money") or 0)
+			local states = tabStates(levelsOf(), Hud.wallet())
 			tab, selected = "Tools", "tool"
 			for _, name in TABS do
 				if states[name].afford then
@@ -526,13 +522,13 @@ function Shop.start()
 		if now < guardUntil or waiting then
 			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
 		end
-		local _, _, canBuy = Hud.offer(levelsOf(), selected, player:GetAttribute("Money") or 0, snap)
+		local _, _, canBuy = Hud.offer(levelsOf(), selected, Hud.wallet(), snap)
 		if not canBuy then
 			Purchase.deny(buyButton)
 			return
 		end
 		bounce(buyButton.Press)
-		buyRemote:FireServer(selected)
+		buyRemote:FireServer(selected, have) -- what we saw bought: a teammate's buy first wins
 		pending = { id = selected, have = have, at = now }
 		guardUntil = now + BUY_GUARD
 	end)
@@ -570,14 +566,15 @@ function Shop.start()
 		end
 	end
 
-	-- A tile's price row: `cost` (red when you can't pay it, dim while `grey`) or `word` (MAX, Replaced).
+	-- A tile's price row: `cost` for the team (red when the wallet can't pay it, dim while `grey`) or `word` (MAX, Replaced).
 	local function priceRow(holder: Instance, cost: number?, word: string, grey: boolean, money: number)
 		local coin, price = Hud.find(holder, "PriceRow.Coin"), Hud.find(holder, "PriceRow.Price")
+		local teamCost = if cost then Hud.price(cost) else nil
 		set(coin, "Visible", cost ~= nil)
 		set(coin, "ImageTransparency", if grey then DIM else 0)
-		set(price, "Text", if cost then Hud.money(cost) else word)
+		set(price, "Text", if teamCost then Hud.money(teamCost) else word)
 		set(price, "TextTransparency", if grey then DIM else 0)
-		set(price, "TextColor3", if cost and not grey and not Items.affords(money, cost) then colors.buyCoral else colors.foam)
+		set(price, "TextColor3", if teamCost and not grey and not Items.affords(money, teamCost) then colors.buyCoral else colors.foam)
 	end
 
 	local shownLevels: { [string]: number } = {}
@@ -591,7 +588,7 @@ function Shop.start()
 		local clock = os.clock()
 		if clock >= tabsAt then -- badges show while the shop is closed too
 			tabsAt = clock + TAB_REFRESH
-			tabInfo = tabStates(levelsOf(), player:GetAttribute("Money") or 0)
+			tabInfo = tabStates(levelsOf(), Hud.wallet())
 			local any = false
 			for name, badge in tabBadges do
 				set(badge, "Visible", tabInfo[name].afford ~= nil)
@@ -607,7 +604,7 @@ function Shop.start()
 		if not shop.Visible then
 			return
 		end
-		local money = player:GetAttribute("Money") or 0
+		local money = Hud.wallet()
 		local levels = levelsOf()
 		local snap = Hud.snapshot()
 		local now = Ladder.stats(Config, levels)
@@ -715,7 +712,7 @@ function Shop.start()
 			-- the button fits a short word beside the price (a longer one overflows at 150.0K)
 			set(buyText, "Text", if status == "buy" then "BUY" else BUTTON_WORDS[status :: string] or "LOCKED")
 			if status == "buy" then
-				set(buyPrice, "Text", Hud.money(level.cost))
+				set(buyPrice, "Text", Hud.money(Hud.price(level.cost)))
 			end
 			set(buyButton, "ImageColor3", if canLevel then colors.buyCoral else colors.locked)
 			local hired = selectedItem.kind == "staff" and bought ~= nil
@@ -757,7 +754,7 @@ function Shop.start()
 		set(buyPrice, "Visible", status == "buy")
 		set(buyText, "Text", if status == "buy" then "BUY" else BUTTON_WORDS[status :: string] or "LOCKED")
 		if status == "buy" then
-			set(buyPrice, "Text", Hud.money(level.cost))
+			set(buyPrice, "Text", Hud.money(Hud.price(level.cost)))
 		end
 		set(buyButton, "ImageColor3", if canBuy then colors.buyCoral else colors.locked)
 	end)

@@ -1,6 +1,6 @@
--- Staff bodies (3f), client only: every present player's hires walk their loop as local NPCs, so 30
--- staff cost the server nothing (server/Staff works out their water from rates). Read from each
--- player's Staff attribute (StaffRules.decode: id:hires@post; post 0 = nowhere to work, no body).
+-- Staff bodies (3f), client only: the team's hires walk their loop as local NPCs, so 30
+-- staff cost the server nothing (server/Staff works out their water from rates). Read from the
+-- ReplicatedStorage Staff attribute (StaffRules.decode: id:hires@post; post 0 = nowhere to work, no body).
 -- Each hire is a clone of ReplicatedStorage.Staff.<item.model> (an R15 rig) in a client folder
 -- workspace.StaffBodies: its root part is anchored and moved here by PivotTo; its joints are written
 -- by the roblox-animation runtime (ReplicatedStorage.Animation: AnimPlayer, in PreSimulation) from
@@ -372,23 +372,21 @@ local function refresh()
 	local camera = workspace.CurrentCamera
 	if ReplicatedStorage:GetAttribute("Phase") == "playing" and camera then
 		local lanes: { [string]: number } = {}
-		for _, owner in Players:GetPlayers() do
-			for _, entry in StaffRules.decode(owner:GetAttribute("Staff")) do
-				local item = Items.get(Config, entry.id)
-				if not (item and kinds[item.id] and entry.post > 0) then
-					continue
-				end
-				for i = 1, math.min(entry.hires, 3) do
-					-- every truck loop walks the same path, whatever vehicle it runs
-					local spot = if item.job == "truck" then "truck" else `{item.job}@{entry.post}`
-					lanes[spot] = (lanes[spot] or 0) + 1
-					local lane = lanes[spot]
-					local places = stops(item, entry.post, lane)
-					local distance = if places then (places[1].at - camera.CFrame.Position).Magnitude else math.huge
-					if distance <= RANGE then
-						local key = `{owner.UserId}:{item.id}:{i}@{entry.post}#{lane}` -- a new lane respawns the body there
-						table.insert(wanted, { key = key, item = item, post = entry.post, lane = lane, places = places, distance = distance })
-					end
+		for _, entry in StaffRules.decode(ReplicatedStorage:GetAttribute("Staff")) do
+			local item = Items.get(Config, entry.id)
+			if not (item and kinds[item.id] and entry.post > 0) then
+				continue
+			end
+			for i = 1, math.min(entry.hires, 3) do
+				-- every truck loop walks the same path, whatever vehicle it runs
+				local spot = if item.job == "truck" then "truck" else `{item.job}@{entry.post}`
+				lanes[spot] = (lanes[spot] or 0) + 1
+				local lane = lanes[spot]
+				local places = stops(item, entry.post, lane)
+				local distance = if places then (places[1].at - camera.CFrame.Position).Magnitude else math.huge
+				if distance <= RANGE then
+					local key = `{item.id}:{i}@{entry.post}#{lane}` -- a new lane respawns the body there
+					table.insert(wanted, { key = key, item = item, post = entry.post, lane = lane, places = places, distance = distance })
 				end
 			end
 		end

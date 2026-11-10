@@ -323,6 +323,35 @@ function tests.affords_counts_fractional_coins(t)
 	t.expectEq(Items.affords(1199, 1200), false)
 end
 
+-- Everything costs more for a bigger team: x (1 + priceStep x (players - 1)), in whole coins.
+function tests.price_scales_with_team_size(t)
+	t.expectEq(Config.team.priceStep, 0.6)
+	t.expectEq(Items.priceScale(Config, 1), 1)
+	t.expectNear(Items.priceScale(Config, 2), 1.6, 1e-9)
+	t.expectNear(Items.priceScale(Config, 4), 2.8, 1e-9)
+	t.expectEq(Items.price(Config, 1200, 1), 1200, "solo pays the listed price")
+	t.expectEq(Items.price(Config, 1200, 2), 1920)
+	t.expectEq(Items.price(Config, 69, 2), 110, "rounded to whole coins (110.4)")
+	t.expectEq(Items.price(Config, 192, 3), 422, "422.4")
+	t.expectEq(Items.price(Config, 35, 2), 56)
+end
+
+-- The stand checks and shows the team's price.
+function tests.stand_charges_the_team_price(t)
+	local pack = Items.get(Config, "backpackTank")
+	local duo = Items.price(Config, pack.price, 2)
+	t.expectEq(Items.standPick(Config, fresh(), 1, 1, pack.price, nil, 2), nil, "the solo price isn't enough for two")
+	t.expectEq(Items.standPick(Config, fresh(), 1, 1, duo, nil, 2), pack)
+	t.expectEq(Items.standPick(Config, fresh(), 1, 1, duo - 1e-9, nil, 2), pack, "pour rounding still buys it")
+	local ok, reason = Items.canBuy(Config, fresh(), "backpackTank", 1, duo - 1, 2)
+	t.expectEq(ok, false)
+	t.expectEq(reason, "money")
+	local item, status = Items.standOffer(Config, fresh(), 1, 1, pack.price, nil, 2)
+	t.expectEq(item, pack)
+	t.expectEq(status, "money")
+	t.expectEq(Items.standPick(Config, fresh(), 1, 2, Items.price(Config, Items.get(Config, "fireTruck").price, 3), "FireStation", 3), Items.get(Config, "fireTruck"))
+end
+
 -- What a stand shows: the item a press buys, else the cheapest one short of money, else the
 -- cheapest locked one, else that everything there is owned.
 function tests.stand_offer_says_why(t)

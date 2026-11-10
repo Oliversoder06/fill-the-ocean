@@ -1,4 +1,5 @@
--- Your payout as coins. When Money goes up, coins burst out of the water you just poured into,
+-- Your payout as coins. When your Earned goes up (your own pours, hose and vehicle; the coins go into
+-- the team's Wallet), coins burst out of the water you just poured into,
 -- land around you, then fly into the wallet one by one with a rising tick, and the wallet counts up
 -- as each one lands (Hud.walletHold). A "+amount" pops up where they burst. Maths in
 -- shared/CoinBurst; sounds and templates named in shared/Cues, baked into ReplicatedStorage.
@@ -167,11 +168,11 @@ function Payout.start()
 		coin.part:Destroy()
 	end
 
-	local lastMoney = player:GetAttribute("Money") or 0
-	player:GetAttributeChangedSignal("Money"):Connect(function()
-		local money = player:GetAttribute("Money") or 0
-		local gained = money - lastMoney
-		lastMoney = money
+	local lastEarned = player:GetAttribute("Earned") or 0
+	player:GetAttributeChangedSignal("Earned"):Connect(function()
+		local earned = player:GetAttribute("Earned") or 0
+		local gained = earned - lastEarned
+		lastEarned = earned
 		if gained > 1e-6 then
 			burst(gained)
 		end

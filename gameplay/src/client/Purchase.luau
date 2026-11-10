@@ -1,4 +1,5 @@
--- The purchase moment. When a level is bought (its Level_<track> attribute goes up): a cash
+-- The purchase moment. When a level is bought (the team's Level_<track> attribute goes up, whoever
+-- bought it): a cash
 -- register sting, coins fly from your money into the tile, and a "BOUGHT!" stamp slams onto it.
 -- A buy you can't make shakes the Buy button with a dull thud (Shop calls Purchase.deny). A new
 -- tool swings into your hand when the shop closes (client/Viewmodel) with sparkles and a chime;
@@ -169,7 +170,7 @@ function Purchase.start()
 
 	local function bought(id: string, level: number)
 		local track = Config.track(id)
-		local cost = track and track.levels[level] and track.levels[level].cost or 0
+		local cost = track and track.levels[level] and Hud.price(track.levels[level].cost) or 0
 		play(cue.sting, cue.stingVolume, 1)
 		Music.duck(Cues.music.duckSeconds)
 		if shop.Visible then
@@ -182,9 +183,9 @@ function Purchase.start()
 
 	for _, track in Config.tracks do
 		local attribute = `Level_{track.id}`
-		local last = player:GetAttribute(attribute) or 0
-		player:GetAttributeChangedSignal(attribute):Connect(function()
-			local level = player:GetAttribute(attribute) or 0
+		local last = ReplicatedStorage:GetAttribute(attribute) or 0
+		ReplicatedStorage:GetAttributeChangedSignal(attribute):Connect(function()
+			local level = ReplicatedStorage:GetAttribute(attribute) or 0
 			if level > last then
 				bought(track.id, level)
 			end

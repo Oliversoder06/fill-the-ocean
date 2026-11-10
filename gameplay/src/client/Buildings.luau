@@ -115,9 +115,9 @@ function Buildings.start()
 		end
 	end
 
-	-- Whether a building is on sale (its area is open) and buildable now, by the server's check.
+	-- Whether a building is on sale (its area is open) and the team can build it now, by the server's check.
 	local function offer(item, openAreas: number): (boolean, boolean)
-		local ok, reason = BuildingRules.buildable(item, openAreas, player:GetAttribute("Money") or 0)
+		local ok, reason = BuildingRules.buildable(item, openAreas, Hud.wallet(), Hud.price)
 		return reason ~= "locked", ok
 	end
 
@@ -178,7 +178,7 @@ function Buildings.start()
 			local onSale, buildable = offer(item, openAreas)
 			set(option.button, "ImageColor3", if onSale then colors.shallowWater else colors.locked)
 			set(option.coin, "Visible", onSale)
-			set(option.price, "Text", if onSale then Hud.money(item.price) else `Opens with {Areas.byId(Config, item.area).name}`)
+			set(option.price, "Text", if onSale then Hud.money(Hud.price(item.price)) else `Opens with {Areas.byId(Config, item.area).name}`)
 			set(option.price, "TextColor3", if onSale and not buildable then colors.buyCoral else colors.foam)
 		end
 	end)

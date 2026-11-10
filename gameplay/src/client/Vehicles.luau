@@ -146,7 +146,7 @@ local function watchCallPrompt()
 		end
 	end)
 	player:GetAttributeChangedSignal("Vehicle"):Connect(label)
-	player:GetAttributeChangedSignal("Owned"):Connect(label)
+	ReplicatedStorage:GetAttributeChangedSignal("Owned"):Connect(label)
 end
 
 function Vehicles.start()

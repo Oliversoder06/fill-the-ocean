@@ -53,23 +53,24 @@ local function offers(money: number): { NextGoal.Offer }
 		local level, status, affordable = Hud.offer(levels, track.id, money, snap)
 		if status == "buy" then
 			local name = Shop.levelName(track, levels[track.id] + 1, level)
-			table.insert(list, { name = name, cost = level.cost, place = "in UPGRADES", affordable = affordable, target = `tab:{track.id}` })
+			table.insert(list, { name = name, cost = Hud.price(level.cost), place = "in UPGRADES", affordable = affordable, target = `tab:{track.id}` })
 		end
 	end
 	for _, item in Config.items do
 		local level, status, affordable = Hud.offer(levels, item.id, money, snap)
 		if status == "buy" then
 			local bought = if item.kind == "building" then snap.buildings[item.id] else snap.items.itemLevels[item.id]
-			table.insert(list, { name = `{item.name} Lv {bought + 2}`, cost = level.cost, place = "in UPGRADES", affordable = affordable, target = `tab:{item.id}` })
+			table.insert(list, { name = `{item.name} Lv {bought + 2}`, cost = Hud.price(level.cost), place = "in UPGRADES", affordable = affordable, target = `tab:{item.id}` })
 		elseif status == "unbuilt" and plotFree then
-			table.insert(list, { verb = "Build", name = item.name, cost = item.price, place = "on a town plot", affordable = Items.affords(money, item.price), target = "plots" })
+			local price = Hud.price(item.price)
+			table.insert(list, { verb = "Build", name = item.name, cost = price, place = "on a town plot", affordable = Items.affords(money, price), target = "plots" })
 		end
 	end
 	for _, stand in Stands.list() do
 		if Stands.reachable(stand, snap.items) and Stands.prompt(stand) then
 			local item, status = Stands.offer(stand, snap, money)
 			if status == "buy" or status == "money" then
-				table.insert(list, { name = item.name, cost = item.price, place = `at the {stand.place}`, affordable = status == "buy", target = `stand:{stand.key}` })
+				table.insert(list, { name = item.name, cost = Hud.price(item.price), place = `at the {stand.place}`, affordable = status == "buy", target = `stand:{stand.key}` })
 			end
 		end
 	end
@@ -83,7 +84,8 @@ local function nextGate(money: number, fill: number): NextGoal.Gate?
 	if not area then
 		return nil
 	end
-	return { name = area.name, fill = area.gate.fill, price = area.gate.price, onSale = onSale, affordable = Items.affords(money, area.gate.price), target = `gate:{area.id}` }
+	local price = Hud.price(area.gate.price)
+	return { name = area.name, fill = area.gate.fill, price = price, onSale = onSale, affordable = Items.affords(money, price), target = `gate:{area.id}` }
 end
 
 -- Where a world target is, or nil while it isn't streamed in.
@@ -155,7 +157,7 @@ function Goal.start()
 		if not show then
 			return
 		end
-		local money = player:GetAttribute("Money") or 0
+		local money = Hud.wallet()
 		local raw = ReplicatedStorage:GetAttribute("Fill")
 		local fill = if type(raw) == "number" then raw else 0
 		local text

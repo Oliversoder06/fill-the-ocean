@@ -109,6 +109,9 @@ local Config = {}
 
 Config.tripDistance = 80 -- studs, source centre to basin pour edge
 Config.pourSeconds = 0.25 -- a pour is instant; this is only how long the tip plays
+-- Everything bought is the team's, from one wallet; every price is x (1 + priceStep x (players - 1))
+-- for the save's team (common/Items.price): a duo pays 1.6x, a trio 2.2x.
+Config.team = { priceStep = 0.6 }
 Config.start = { capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spoon", toolModel = "Spoon" }
 -- Sweeps to fill a tool: 1 for the Spoon, then one more every `toolsPerSweep` tool levels, at most `maxSweeps`.
 -- Tools add sweeps faster than Pickup takes them off, so big tools never fill in one sweep and
