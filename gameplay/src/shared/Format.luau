@@ -85,6 +85,11 @@ function Format.levelName(track, n: number, level): string
 	return if #track.levels == 1 then track.name else `{track.name} {n}`
 end
 
+-- A tool level's name without its tier ("Bucket Lv3" -> "Bucket"), where its level shows beside it.
+function Format.toolName(name: string): string
+	return (name:gsub(" Lv%d+$", ""))
+end
+
 -- A stand's name: cove shop `stand` (Config.stands, an item's `stand`) or else `area`'s own stand.
 function Format.standName(config, stand: string?, area): string
 	return if stand then config.stands[stand] else `{area.name} Stand`

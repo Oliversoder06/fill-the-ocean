@@ -3,13 +3,15 @@
 -- Upgrades button opens and closes it during a run (client/Window pops it in). The main view: the
 -- current tool at the centre and a ring of category hexes, each with a red badge counting what can be
 -- bought inside and water showing how much of it is owned; a click glides into the category: its hex,
--- a spine and every upgrade as a chain of hexes joined by bridges (client/HoneycombHex), long chains
+-- a spine of bridges and every upgrade as a chain of hexes joined by bridges (client/HoneycombHex), long chains
 -- windowed around the next link. Selecting a hex fills the Detail strip (words: client/HoneycombText),
 -- whose Buy button sends Buy(id, bought) (`bought`: what this client saw bought, so a teammate's buy
 -- of the same level wins). Everything is the team's, from its wallet at the team's price (Hud.price);
 -- the server checks every buy and sets the buyer's LastBuy. Items are first bought at their stand
 -- (buildings on a plot), so their first hex says where. Detail.AssignButton moves a hired staff to
--- its next post (Staff("assign", itemId, areaId), StaffRules.nextPost). A landing fills its hex,
+-- its next post (Staff("assign", itemId, areaId), StaffRules.nextPost). Your confirmed buy (your
+-- LastBuy) moves the selection to the next link at once, so a quick second Buy buys it; a click on
+-- a hex still landing is ignored. A landing fills its hex,
 -- then the bridge, and wakes the next hex (a windowed chain then slides along); your own buy (your
 -- LastBuy) also gets coins, a sting and, for a first, a NEW! stamp (client/Purchase). Back (the
 -- button, Backspace, gamepad B) glides out, then closes; Roblox's menu closes it.
@@ -50,6 +52,7 @@ local PENDING_SECONDS = 2 -- a sent buy without its LastBuy by then was refused 
 local REFRESH_OPEN = 0.1 -- seconds between state refreshes (after an attribute change) while open
 local REFRESH_CLOSED = 0.25 -- only the badges while closed
 local SPACING = 1.14 -- hex centres sit this much further apart than touching, so the bridges show
+local FIT_MARGIN = 28 -- pixels of screen height the window leaves free, so its bottom never clips
 local PRESS_RATE = 25 -- per second: hover and press scales catch up in about 0.08 s
 local DRAG_SLOP = 8 -- pixels a press on the board may move and still click its hex
 
@@ -209,7 +212,7 @@ type ViewData = {
 	into: { [Hex.Hex]: Hex.Bridge }, -- the bridge leading into each chain slot
 	slots: { { Hex.Hex } }, -- per chain
 	windows: { [number]: { number } }, -- per chain: the link indices its slots show (Comb.window)
-	landing: { [{ Hex.Hex }]: boolean }, -- chains (by their slots) whose landing plays: their window holds
+	landing: { [{ Hex.Hex }]: string }, -- chains (by their slots) whose landing plays, the landing link's key: their window holds
 	centre: Hex.Hex?, -- main: the tool
 	ring: { [string]: Hex.Hex }, -- main: the category hexes
 	catHex: Hex.Hex?, -- a category view's own hex
@@ -243,6 +246,7 @@ function Honeycomb.start()
 	local levelText = Hud.find(detail, "LevelText")
 	local effect = Hud.find(detail, "Effect")
 	local needText = Hud.find(detail, "NeedText") :: TextLabel
+	local needPulse = Hud.find(needText, "Pulse") :: UIScale
 	local buyButton = Hud.find(detail, "BuyButton")
 	local buyPress = Hud.find(buyButton, "Press") :: UIScale
 	local buyLabel = Hud.find(buyButton, "Label")
@@ -274,7 +278,6 @@ function Honeycomb.start()
 	assert(hexSize > 0 and hexHeight > 0, "Hud.Templates.Hex needs an offset Size")
 	local spaced = hexSize * SPACING
 	local canvasBase = canvas.Position
-	local needSize = needText.Size
 
 	-- Tab would also toggle Roblox's player list; the game has its own Board, so hide that list.
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
@@ -343,6 +346,7 @@ function Honeycomb.start()
 	-- Zoom to fit the board, never under CUE.minHexPixels a hex on screen (then the board pans).
 	local function fitView(v: ViewData)
 		v.zoom, v.pans = Comb.zoom(v.w, v.h, boardSize.X, boardSize.Y, hexHeight * fitScale, CUE.minHexPixels, CUE.maxZoom)
+		Hex.setTextScale(v.zoom * fitScale)
 		clampPan(v)
 	end
 
@@ -356,7 +360,7 @@ function Honeycomb.start()
 
 	local function refit()
 		local size = gui.AbsoluteSize -- the Hud's area inside the top bar and safe insets
-		fitScale = math.min(size.X / design.X.Offset, size.Y / design.Y.Offset, 1)
+		fitScale = math.min(size.X / design.X.Offset, (size.Y - FIT_MARGIN) / design.Y.Offset, 1)
 		if open then
 			fit.Scale = fitScale
 		end
@@ -364,6 +368,7 @@ function Honeycomb.start()
 		if v then
 			fitView(v)
 			zoomScale.Scale = v.zoom
+			dirty = true -- hex text may cross the smallest readable size
 		end
 	end
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
@@ -466,13 +471,11 @@ function Honeycomb.start()
 		end
 		local catHex = newHex(v, cat.hex.q, cat.hex.r, cx, cy)
 		catHex.catId = catId
+		catHex.button.ZIndex = hexTemplate.ZIndex + 1 -- its badge over the chain hexes beside it
 		hook(catHex, function()
 			showView("main")
 		end)
 		v.catHex = catHex
-		for _, pos in cat.spine do
-			Hex.paintSpine(newHex(v, pos.q, pos.r, cx, cy))
-		end
 		for ci, chain in cat.chains do
 			local slots = {}
 			v.slots[ci] = slots
@@ -481,7 +484,9 @@ function Honeycomb.start()
 				hex.slots, hex.slot = slots, i
 				slots[i] = hex
 				hook(hex, function()
-					selectKey(hex.key)
+					if v.landing[slots] ~= hex.key then -- the hex you just bought: the selection moved on
+						selectKey(hex.key)
+					end
 				end)
 				local bridge = chain.bridges[i]
 				v.into[hex] = newBridge(v, bridge[1], bridge[2], cx, cy)
@@ -500,12 +505,13 @@ function Honeycomb.start()
 	end
 
 	-- A landing on `hex` (Hex.celebrate): its chain's window holds until it ends, and the selection
-	-- moves on to the next link if it still sits on the bought one.
+	-- moves on to the next link if it still sits on the bought one (a teammate's buy; yours moved at
+	-- its LastBuy).
 	local function celebrate(v: ViewData, hex: Hex.Hex): () -> ()
 		local token, key = animToken, hex.key :: string
 		local slots = hex.slots :: { Hex.Hex }
 		local nextHex = slots[(hex.slot :: number) + 1]
-		v.landing[slots] = true
+		v.landing[slots] = key
 		local function alive(): boolean
 			return token == animToken and hex.key == key
 		end
@@ -514,7 +520,9 @@ function Honeycomb.start()
 			if step == "filled" and nextHex then
 				return -- the bridge and the next hex follow
 			end
-			v.landing[slots] = nil
+			if v.landing[slots] == key then -- a quick rebuy's landing in this chain may have taken over
+				v.landing[slots] = nil
+			end
 			if step == "woke" then
 				nextRefresh = 0
 				if selectedKey == key then
@@ -539,7 +547,7 @@ function Honeycomb.start()
 		end
 		Hex.showArt(detailArt, detailView, detailIcon, template, image)
 		set(itemName, "Text", Text.name(link))
-		set(levelText, "Text", if link.kind == "gate" then "Gate" else Comb.levelText(link, state))
+		set(levelText, "Text", if link.kind == "gate" then "Gate" elseif Comb.elsewhere(link, st, view) then Text.where(link) else Comb.levelText(link, state))
 		set(effect, "Text", Text.effect(link, view))
 		local need = Text.reason(link, st, view)
 		set(needText, "Visible", need ~= nil)
@@ -589,7 +597,7 @@ function Honeycomb.start()
 		end
 
 		if viewId == "main" then
-			Hex.paintCentre(v.centre :: Hex.Hex, stats)
+			Hex.paintCentre(v.centre :: Hex.Hex, stats, view.levels.tool or 0)
 			for id, hex in v.ring do
 				Hex.paintCategory(hex, layout, id, view, badges[id], stats)
 			end
@@ -638,7 +646,7 @@ function Honeycomb.start()
 			local slots = v.slots[ci]
 			local want = Comb.window(chain, Comb.ownedCount(chain, view))
 			local shown = v.windows[ci]
-			local busy = v.landing[slots] == true or held[chain] == true or type(fresh[chain]) == "string"
+			local busy = v.landing[slots] ~= nil or held[chain] == true or type(fresh[chain]) == "string"
 			local moves = nil
 			if not shown then
 				shown = want
@@ -737,6 +745,9 @@ function Honeycomb.start()
 			if sent.id == buy.id and sent.have + 1 == buy.level then
 				pending[key] = nil
 				guardUntil = now + BUY_GUARD
+				if selectedKey == key then -- on to the next link now; the landing still plays
+					selectedKey = nextLinkKey(key) or key
+				end
 				if open then
 					landed[key] = sent
 					dirty, nextRefresh = true, 0
@@ -940,7 +951,10 @@ function Honeycomb.start()
 			return
 		end
 		expirePending(now)
-		if now < guardUntil or pending[info.link.key] then
+		local v = views[viewId]
+		local hex = if v then v.byKey[info.link.key] else nil
+		local landing = hex ~= nil and hex.slots ~= nil and v.landing[hex.slots] == info.link.key
+		if now < guardUntil or pending[info.link.key] or landing then
 			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
 		end
 		local view = readView()
@@ -949,8 +963,8 @@ function Honeycomb.start()
 		if st.state ~= "buy" then
 			Purchase.deny(buyButton)
 			if st.state == "short" then
-				needText.Size = Hex.scaled(needSize, CUE.needPulse)
-				TweenService:Create(needText, TweenInfo.new(CUE.needSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = needSize }):Play()
+				needPulse.Scale = CUE.needPulse
+				TweenService:Create(needPulse, TweenInfo.new(CUE.needSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 			end
 			return
 		end

@@ -110,6 +110,14 @@ function tests.level_names(t)
 	t.expectEq(Format.levelName(hold, 1, hold.levels[1]), "Hold to Scoop")
 end
 
+-- Where the tool's level shows beside it (the honeycomb), its name drops the tier.
+function tests.tool_name_without_its_tier(t)
+	t.expectEq(Format.toolName("Bucket Lv3"), "Bucket")
+	t.expectEq(Format.toolName("The Moon Lv4"), "The Moon")
+	t.expectEq(Format.toolName("Kiddie Pool"), "Kiddie Pool")
+	t.expectEq(Format.toolName("Spoon"), "Spoon")
+end
+
 -- The sign over a stand: the item and its price, where it opens, or that all of it is owned.
 function tests.stand_sign_texts(t)
 	local title, line = Format.standSign(item("backpackTank"), "money", area(1), "Cove Well Stand")

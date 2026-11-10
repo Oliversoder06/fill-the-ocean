@@ -169,6 +169,12 @@ function HoneycombText.gate(area): (string, boolean)
 	return Hud.money(Hud.price(area.gate.price)), true
 end
 
+-- The detail's level line for an item's first link got elsewhere (Comb.elsewhere): where.
+function HoneycombText.where(link: Comb.Link): string
+	local item = Items.get(Config, link.id)
+	return if item.kind == "building" then "On a plot" else `At the {Format.standName(Config, item.stand, Areas.byId(Config, link.areaId))}`
+end
+
 -- The detail's words for a link: why it can't be bought here (nil when it can).
 function HoneycombText.reason(link: Comb.Link, st: Comb.HexState, view: Comb.View): string?
 	local state = st.state
@@ -213,7 +219,8 @@ function HoneycombText.name(link: Comb.Link): string
 		return `{Areas.byId(Config, link.areaId).name} gate`
 	elseif link.kind == "track" then
 		local track = Config.track(link.id :: string) :: Config.Track
-		return Format.levelName(track, link.level :: number, track.levels[link.level :: number])
+		local name = Format.levelName(track, link.level :: number, track.levels[link.level :: number])
+		return if track.id == "tool" then Format.toolName(name) else name -- the level line counts tools
 	end
 	return Items.get(Config, link.id).name
 end

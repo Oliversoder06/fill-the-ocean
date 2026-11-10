@@ -3,14 +3,16 @@
 -- Pure: config is passed in, so Lune tests and Roblox load it the same way. Hexes are flat-top, in
 -- axial coordinates (q, r); q is the column, r runs down it.
 --
--- Category view arrangement: the category hex at (0, 0), a spine of hexes straight up and down
--- column 0 from it, and each chain as a row running right from the spine, one link per column
--- (columns 1..MAX_VISIBLE), in config order top to bottom. In flat-top "offset rows" (odd columns
--- half a hex lower) a row of hexes is a chain of neighbours, and column 0's hex in a row touches
--- column 1's hex in the same row, so each chain hangs off the spine hex beside it. Rows are spread
--- two apart (a free row between chains) when that still fits 7 rows, else packed: at most
--- 1 + MAX_VISIBLE columns by 7 rows. Longer chains show a window of their links (Honeycomb.window):
--- the i-th shown link sits in the chain's slot i.
+-- Category view arrangement (wide and short, like the board): the category hex at (0, 0), top
+-- centre, and a spine straight down column 0 from it (bridges only: its cells stay empty). The
+-- first half of the chains (config order, top to bottom) run right from column 0 as rows, one link
+-- per column (1..MAX_VISIBLE), the rest run left (-1..-MAX_VISIBLE); each group's first chain sits
+-- on the category hex's row. In flat-top "offset rows" (odd columns half a hex lower) a row of
+-- hexes is a chain of neighbours, and column 0's hex in a row touches columns 1 and -1 in the same
+-- row, so each chain hangs off the category or the spine beside it. Rows are spread two apart (a
+-- free row between chains) when that still fits SIDE_ROWS rows, else packed: at most
+-- 1 + 2 * MAX_VISIBLE columns by SIDE_ROWS rows. Longer chains show a window of their links
+-- (Honeycomb.window): the i-th shown link sits in the chain's slot i.
 
 export type Pos = { q: number, r: number }
 export type Bridge = { Pos } -- two neighbouring hexes, from (nearer the category) and to
@@ -26,14 +28,14 @@ export type Link = {
 export type Chain = {
 	id: string, -- track id, item id, or "backpacks" (every backpack, each the next link)
 	links: { Link },
-	slots: { Pos }, -- min(#links, MAX_VISIBLE) places, left to right
+	slots: { Pos }, -- min(#links, MAX_VISIBLE) places, outward from column 0
 	bridges: { Bridge }, -- bridges[i] leads into slots[i]; bridges[1] from the spine or the category
 }
 export type Category = {
 	id: string,
 	hex: Pos, -- (0, 0)
-	spine: { Pos },
-	bridges: { Bridge }, -- the spine's, outward from the category
+	spine: { Pos }, -- cells the spine's bridges pass through (no hexes)
+	bridges: { Bridge }, -- the spine's, down from the category
 	chains: { Chain },
 }
 export type Layout = {
@@ -57,14 +59,14 @@ export type View = {
 
 local SQRT3 = math.sqrt(3)
 local MONEY_EPSILON = 1e-6 -- as Items.affords: fractional coins from pours still buy
-local ROWS = 7
+local SIDE_ROWS = 4
 -- Flat-top neighbour steps, clockwise from straight up.
 local STEPS = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 0, 1 }, { -1, 1 }, { -1, 0 } }
 local CATEGORIES = { "tools", "boosts", "gear", "vehicles", "buildings", "staff" }
 
 local Honeycomb = {}
 
-Honeycomb.MAX_VISIBLE = 7
+Honeycomb.MAX_VISIBLE = 5
 
 function Honeycomb.toPixel(q: number, r: number, size: number): (number, number)
 	return size * 1.5 * q, size * SQRT3 * (r + q / 2)
@@ -188,31 +190,29 @@ local function chainsOf(config, catId: string): { Chain }
 end
 
 local function place(catId: string, chains: { Chain }): Category
-	local count = #chains
-	assert(count <= ROWS, `honeycomb: {catId} has {count} chains, more than {ROWS} rows`)
-	local gap = if count > 1 then math.min(2, (ROWS - 1) // (count - 1)) else 0
-	local top = -((count - 1) * gap) // 2
+	local perSide = math.ceil(#chains / 2)
+	assert(perSide <= SIDE_ROWS, `honeycomb: {catId} has {#chains} chains, more than {SIDE_ROWS} rows a side`)
+	local gap = if perSide > 1 then math.min(2, (SIDE_ROWS - 1) // (perSide - 1)) else 1
 	local cat: Category = { id = catId, hex = at(0, 0), spine = {}, bridges = {}, chains = chains }
-	local lowest, highest = 0, 0
+	local lowest = 0
 	for i, chain in chains do
-		local row = top + (i - 1) * gap
-		lowest, highest = math.min(lowest, row), math.max(highest, row)
+		local side = if i <= perSide then 1 else -1
+		local row = ((i - 1) % perSide) * gap
+		lowest = math.max(lowest, row)
 		local from = at(0, row)
-		for col = 1, math.min(#chain.links, Honeycomb.MAX_VISIBLE) do
-			local pos = at(col, row)
+		for step = 1, math.min(#chain.links, Honeycomb.MAX_VISIBLE) do
+			local pos = at(side * step, row)
 			table.insert(chain.slots, pos)
 			table.insert(chain.bridges, { from, pos })
 			from = pos
 		end
 	end
-	for _, dir in { -1, 1 } do
-		local from = cat.hex
-		for row = dir, if dir < 0 then lowest else highest, dir do
-			local pos = at(0, row)
-			table.insert(cat.spine, pos)
-			table.insert(cat.bridges, { from, pos })
-			from = pos
-		end
+	local from = cat.hex
+	for row = 1, lowest do
+		local pos = at(0, row)
+		table.insert(cat.spine, pos)
+		table.insert(cat.bridges, { from, pos })
+		from = pos
 	end
 	return cat
 end

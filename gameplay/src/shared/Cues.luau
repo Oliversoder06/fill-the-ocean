@@ -116,7 +116,8 @@ Cues.purchase = {
 -- chain, up to stingPitchMax. Opening a view: the canvas glides from glideZoomFrom and hexes pop in
 -- from enterFrom, enterStagger later per ring out (at most enterCap). A hex you can buy breathes up
 -- to breatheScale and back every breatheSeconds; a gate hex sits at gateScale. Hexes are never
--- shown under minHexPixels tall (the board pans instead), and a view grows to at most maxZoom.
+-- shown under minHexPixels tall (the board pans instead), and a view grows to at most maxZoom; hex
+-- text that would show under minTextPixels on screen hides.
 -- A windowed chain slides one slot per link over slideSeconds after a landing. Colours fade in over
 -- fadeSeconds; hovers ease over quickSeconds. The Upgrades button squishes to holdScale while held
 -- (holdDownSeconds) and springs back (holdUpSeconds).
@@ -154,6 +155,7 @@ Cues.honeycomb = {
 	breatheSeconds = 1.5,
 	gateScale = 0.85,
 	minHexPixels = 64,
+	minTextPixels = 11,
 	maxZoom = 1.5,
 }
 

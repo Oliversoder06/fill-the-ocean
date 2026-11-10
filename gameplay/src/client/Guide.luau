@@ -295,7 +295,7 @@ function Guide.start()
 			step, message, goal, click = current(levels :: { [string]: number }, ocean :: Model)
 		end
 
-		set(panel, "Visible", active)
+		set(panel, "Visible", active and not Honeycomb.isOpen()) -- the strip would cover the window's header; the hand still shows
 		set(skip, "Visible", active and not thanks)
 		set(upgradesRing, "Visible", click == upgrades)
 		set(buyRing, "Visible", click == buyButton)

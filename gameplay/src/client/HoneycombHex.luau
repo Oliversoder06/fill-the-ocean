@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
+local Format = require(ReplicatedStorage.Shared.Format)
 local Comb = require(ReplicatedStorage.Shared.Honeycomb)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
@@ -23,13 +24,16 @@ local CUE = Cues.honeycomb
 
 local FADE = TweenInfo.new(CUE.fadeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local SLIDE = TweenInfo.new(CUE.slideSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local DIM = 0.4 -- transparency of a hex that isn't next yet: still readable, clearly not for sale
-local SMALL_PRICE = 0.8 -- a future level's price text, of the template's size
+local FUTURE_SHADE = 0.5 -- a hex that isn't next yet: its colour this far toward the outline navy
+local SMALL_PRICE = 0.8 -- an item's price at its stand, of the template's size
 local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
 local RIM_SHADE = 0.4 -- a hex's rim: its colour this far toward the outline navy
 
--- Art for each track but the tool (which shows its 3D model) until real upgrade icons are drawn.
-local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = "unknown", tip = "coin" }
+-- Art for the tracks that have an icon (the tool shows its 3D model; the rest none until drawn).
+local ICONS = { pickup = "pipFull", tip = "coin" }
+
+-- On-screen pixels per template pixel in the shown view (the window's fit times the view's zoom).
+local textScale = 1
 
 export type Hex = {
 	button: ImageButton,
@@ -144,6 +148,16 @@ function HoneycombHex.scaled(size: UDim2, k: number): UDim2
 	return UDim2.new(size.X.Scale * k, size.X.Offset * k, size.Y.Scale * k, size.Y.Offset * k)
 end
 
+-- The shown view's scale (fit x zoom): hex text under CUE.minTextPixels on screen hides. The
+-- caller repaints after a change.
+function HoneycombHex.setTextScale(scale: number)
+	textScale = scale
+end
+
+local function readable(textSize: number): boolean
+	return textSize * textScale >= CUE.minTextPixels
+end
+
 local function setWater(hex: Hex, level: number)
 	set(hex.water, "Size", UDim2.new(hex.waterWidth, UDim.new(level, 0)))
 	set(hex.water, "Visible", level > 0)
@@ -160,7 +174,8 @@ function HoneycombHex.artOf(link: Comb.Link, model: boolean): (Instance?, string
 	if link.kind == "gate" then
 		return nil, nil
 	elseif link.kind == "track" and link.id ~= "tool" then
-		return nil, images[ICONS[link.id :: string]]
+		local icon = ICONS[link.id :: string]
+		return nil, if icon then images[icon] else nil
 	elseif not model then
 		return nil, nil
 	end
@@ -205,44 +220,37 @@ local function categoryColor(catId: string): Color3
 	return if catId == "tools" then colors.toolTag elseif catId == "boosts" then colors.speedTag else colors.deepWater
 end
 
--- A hex's body: colour (its rim a darker shade), transparency and outline; `fade` tweens the colours.
-local function paintBody(hex: Hex, base: Color3, dim: number, outline: Color3, fade: boolean)
+-- A hex's body: colour (its rim a darker shade) and outline; `fade` tweens the colours.
+local function paintBody(hex: Hex, base: Color3, outline: Color3, fade: boolean)
 	local rim = base:Lerp(colors.outline, RIM_SHADE)
 	if fade then
-		TweenService:Create(hex.button, FADE, { ImageColor3 = base, ImageTransparency = dim }):Play()
-		TweenService:Create(hex.bottom, FADE, { ImageColor3 = rim, ImageTransparency = dim }):Play()
+		TweenService:Create(hex.button, FADE, { ImageColor3 = base }):Play()
+		TweenService:Create(hex.bottom, FADE, { ImageColor3 = rim }):Play()
 	else
 		set(hex.button, "ImageColor3", base)
-		set(hex.button, "ImageTransparency", dim)
 		set(hex.bottom, "ImageColor3", rim)
-		set(hex.bottom, "ImageTransparency", dim)
 	end
 	set(hex.outline, "ImageColor3", outline)
-	set(hex.outline, "ImageTransparency", dim)
-	set(hex.view, "ImageTransparency", dim)
-	set(hex.icon, "ImageTransparency", dim)
 end
 
-local function paintName(hex: Hex, text: string?, dim: number)
-	set(hex.name, "Visible", text ~= nil)
+local function paintName(hex: Hex, text: string?)
+	set(hex.name, "Visible", text ~= nil and readable(hex.name.TextSize))
 	if text then
 		set(hex.name, "Text", text)
-		set(hex.name, "TextTransparency", dim)
 	end
 end
 
--- The price row: `text` (nil hides it), the coin, its colour, small for a later level.
-local function paintPrice(hex: Hex, text: string?, coin: boolean, color: Color3, small: boolean, dim: number)
-	set(hex.priceRow, "Visible", text ~= nil)
+-- The price row: `text` (nil hides it), the coin, its colour, small for an item at its stand.
+local function paintPrice(hex: Hex, text: string?, coin: boolean, color: Color3, small: boolean)
+	local size = if small then math.round(hex.priceSize * SMALL_PRICE) else hex.priceSize
+	set(hex.priceRow, "Visible", text ~= nil and readable(size))
 	if not text then
 		return
 	end
 	set(hex.price, "Text", text)
 	set(hex.price, "TextColor3", color)
-	set(hex.price, "TextTransparency", dim)
-	set(hex.price, "TextSize", if small then math.round(hex.priceSize * SMALL_PRICE) else hex.priceSize)
+	set(hex.price, "TextSize", size)
 	set(hex.coin, "Visible", coin)
-	set(hex.coin, "ImageTransparency", dim)
 end
 
 -- A link's listed price (Config), before the team's scale.
@@ -254,11 +262,12 @@ local function listedCost(link: Comb.Link): number
 	return if link.level == 1 then item.price else item.levels[(link.level :: number) - 1].cost
 end
 
--- A link hex in its state (shared/Honeycomb.states); `model`: it may show its 3D model.
+-- A link hex in its state (shared/Honeycomb.states); `model`: it may show its 3D model. Only the
+-- next link (and an item's first, at its stand) shows a price; later ones are a darker shade.
 function HoneycombHex.paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, catId: string, view: Comb.View, fade: boolean, model: boolean)
 	local state = st.state
-	local base, dim, outline = categoryColor(catId), 0, colors.outline
-	local water, waterColor, check, lock, art = 0, colors.shallowWater, false, false, true
+	local base, outline = categoryColor(catId), colors.outline
+	local water, waterColor, check, lock, art, iconColor = 0, colors.shallowWater, false, false, true, colors.foam
 	local name, priceText, coin, priceColor, small = nil, nil, false, colors.foam, false
 	hex.base = 1
 	if state == "owned" then
@@ -270,33 +279,34 @@ function HoneycombHex.paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, ca
 	elseif state == "short" then
 		base, water, waterColor = colors.locked, st.progress :: number, colors.shallowWater:Lerp(colors.locked, 0.5)
 		priceText, coin, priceColor = Hud.money(st.price :: number), true, colors.buyCoral
-	elseif state == "future" or Comb.elsewhere(link, st, view) then
-		dim, small = DIM, true
+	elseif Comb.elsewhere(link, st, view) then
+		base, small = base:Lerp(colors.outline, FUTURE_SHADE), true
 		priceText, coin = Hud.money(Hud.price(listedCost(link))), true
+	elseif state == "future" then
+		base = base:Lerp(colors.outline, FUTURE_SHADE)
+	elseif state == "gateOpen" then
+		-- passed: a small lock in water blue (the theme has no open-lock image yet)
+		base, art, hex.base, iconColor = colors.locked, false, CUE.gateScale, colors.shallowWater
 	elseif link.kind == "gate" then
 		local area = Areas.byId(Config, link.areaId)
-		base, art, name = colors.locked, false, area.name
-		if state == "gateOpen" then
-			dim, hex.base = DIM, CUE.gateScale
-		else
-			lock = true
-			priceText, coin = Text.gate(area)
-		end
+		base, art, name, lock = colors.locked, false, area.name, true
+		priceText, coin = Text.gate(area)
 	else
 		base, art, lock = colors.locked, false, true
 	end
-	paintBody(hex, base, dim, outline, fade)
+	paintBody(hex, base, outline, fade)
 	set(hex.fill, "ImageColor3", waterColor)
 	setWater(hex, water)
 	set(hex.check, "Visible", check)
 	set(hex.lock, "Visible", lock)
-	paintName(hex, name, dim)
-	paintPrice(hex, priceText, coin, priceColor, small, dim)
-	local template, image = nil, nil
+	paintName(hex, name)
+	paintPrice(hex, priceText, coin, priceColor, small)
+	local template, image = nil, if state == "gateOpen" then images.lock else nil
 	if art then
 		template, image = HoneycombHex.artOf(link, model)
 	end
 	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
+	set(hex.icon, "ImageColor3", iconColor)
 	hex.breathe = state == "buy"
 end
 
@@ -305,6 +315,7 @@ local function paintBadge(hex: Hex, count: number)
 	local was = hex.badgeCount
 	hex.badgeCount = count
 	set(hex.count, "Text", tostring(count))
+	set(hex.count, "Visible", readable(hex.count.TextSize))
 	local info = TweenInfo.new(CUE.badgeSeconds, Enum.EasingStyle.Back, if count > 0 then Enum.EasingDirection.Out else Enum.EasingDirection.In)
 	if was < 0 then
 		set(hex.badge, "Visible", count > 0)
@@ -328,7 +339,7 @@ end
 function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string, view: Comb.View, count: number, stats: Ladder.Stats)
 	local owned, total = Comb.ownedShare(layout, catId, view)
 	local share = if total > 0 then owned / total else 0
-	paintBody(hex, categoryColor(catId), 0, colors.outline, false)
+	paintBody(hex, categoryColor(catId), colors.outline, false)
 	set(hex.fill, "ImageColor3", colors.shallowWater)
 	if hex.share >= 0 and share > hex.share then -- a buy: the water rises
 		hex.water.Visible = true
@@ -339,34 +350,24 @@ function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string
 	hex.share = share
 	set(hex.check, "Visible", false)
 	set(hex.lock, "Visible", false)
-	paintName(hex, Text.category(catId):upper(), 0)
-	paintPrice(hex, `{owned}/{total}`, false, colors.foam, true, 0)
+	paintName(hex, Text.category(catId):upper())
+	paintPrice(hex, `{owned}/{total}`, false, colors.foam, true)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, categoryArt(layout, catId, stats))
 	paintBadge(hex, count)
 	hex.breathe = false
 end
 
--- The main view's centre: the tool in hand and its level.
-function HoneycombHex.paintCentre(hex: Hex, stats: Ladder.Stats)
-	paintBody(hex, colors.toolTag, 0, colors.outline, false)
+-- The main view's centre: the tool in hand and its level (the tool chain's level, as its hexes
+-- and the detail count; none for the starting tool).
+function HoneycombHex.paintCentre(hex: Hex, stats: Ladder.Stats, level: number)
+	paintBody(hex, colors.toolTag, colors.outline, false)
 	setWater(hex, 0)
 	set(hex.check, "Visible", false)
 	set(hex.lock, "Visible", false)
-	paintName(hex, stats.toolName, 0)
-	paintPrice(hex, `Lv {stats.toolTier}`, false, colors.foam, true, 0)
+	paintName(hex, Format.toolName(stats.toolName))
+	paintPrice(hex, if level > 0 then `Lv {level}` else nil, false, colors.foam, true)
 	local template = ToolModels.find(stats.toolModel)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, template, if template then nil else images.unknown)
-end
-
--- A spine hex: a quiet connector between the category and its chains.
-function HoneycombHex.paintSpine(hex: Hex)
-	paintBody(hex, colors.deepSea, 0, colors.outline, false)
-	setWater(hex, 0)
-	for _, part in { hex.check, hex.lock, hex.name, hex.priceRow, hex.view, hex.icon, hex.badge } do
-		set(part, "Visible", false)
-	end
-	hex.button.Active = false
-	hex.button.Selectable = false
 end
 
 -- The scale an animation adds at `now` (1 when none plays).

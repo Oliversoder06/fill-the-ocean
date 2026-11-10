@@ -231,13 +231,13 @@ function tests.window_keeps_last_owned_next_and_max(t)
 	local function shown(owned, max)
 		return table.concat(Honeycomb.window(tool, owned, max), ",")
 	end
-	t.expectEq(shown(0), "1,2,3,4,5,6,21", "start: the first links and the max end")
-	t.expectEq(shown(4), "4,5,6,7,8,9,21", "last owned, the gate, next, following, max")
-	t.expectEq(shown(18), "15,16,17,18,19,20,21", "near the end it runs into the max")
-	t.expectEq(shown(19), "15,16,17,18,19,20,21", "all owned")
+	t.expectEq(shown(0), "1,2,3,4,21", "start: the first links and the max end")
+	t.expectEq(shown(4), "4,5,6,7,21", "last owned, the gate, next, following, max")
+	t.expectEq(shown(18), "17,18,19,20,21", "near the end it runs into the max")
+	t.expectEq(shown(19), "17,18,19,20,21", "all owned")
 	t.expectEq(shown(9, 4), "10,11,12,21", "a smaller window still keeps last owned, next and max")
-	local short = chain(layout, "boosts", "pickup")
-	t.expectEq(table.concat(Honeycomb.window(short, 2), ","), "1,2,3,4,5,6", "a short chain shows everything")
+	local short = chain(layout, "gear", "gardenHose")
+	t.expectEq(table.concat(Honeycomb.window(short, 2), ","), "1,2,3,4", "a short chain shows everything")
 	for owned = 0, 19 do
 		local list = Honeycomb.window(tool, owned)
 		t.expectEq(#list, Honeycomb.MAX_VISIBLE)
@@ -469,7 +469,7 @@ function tests.last_buy_round_trips(t)
 	t.expectEq(Honeycomb.decodeBuy("tool@x@1"), nil)
 end
 
-function tests.every_category_fits_11_columns_by_7_rows(t)
+function tests.every_category_fits_11_columns_by_4_rows(t)
 	local layout = Honeycomb.layout(Config)
 	for _, catId in CATEGORIES do
 		local cat = layout.categories[catId]
@@ -489,8 +489,54 @@ function tests.every_category_fits_11_columns_by_7_rows(t)
 				grow(pos)
 			end
 		end
-		if maxC - minC + 1 > 11 or maxR - minR + 1 > 7 then
+		if maxC - minC + 1 > 11 or maxR - minR + 1 > 4 then
 			error(`{catId} is {maxC - minC + 1} x {maxR - minR + 1}`)
+		end
+	end
+end
+
+-- The first half of a category's chains run right from the category's column, the rest left, one
+-- row each from the top, so the view is wide and short like the board.
+function tests.chains_run_outward_in_two_groups(t)
+	local layout = Honeycomb.layout(Config)
+	for _, catId in CATEGORIES do
+		local chains = layout.categories[catId].chains
+		local perSide = math.ceil(#chains / 2)
+		local lastRow = { [1] = -1, [-1] = -1 }
+		for i, c in chains do
+			local side = if i <= perSide then 1 else -1
+			local row = c.slots[1].r + (c.slots[1].q - c.slots[1].q % 2) / 2
+			t.expectEq(row > lastRow[side], true, `{catId} {c.id}: below the chain before it on its side`)
+			lastRow[side] = row
+			for step, pos in c.slots do
+				t.expectEq(pos.q, side * step, `{catId} {c.id} slot {step} column`)
+				t.expectEq(pos.r + (pos.q - pos.q % 2) / 2, row, `{catId} {c.id} slot {step} stays on its row`)
+			end
+			if side == 1 and i == 1 or side == -1 and i == perSide + 1 then
+				t.expectEq(row, 0, `{catId}: each group starts beside the category hex`)
+			end
+		end
+	end
+end
+
+-- The Studio board (912 x 412 px, hexes 110 x 96 at zoom 1, client/Honeycomb's spacing 1.14):
+-- every category view fits it at zoom 0.7 or more, without panning.
+function tests.every_category_fits_the_board_without_panning(t)
+	local layout = Honeycomb.layout(Config)
+	local spaced = 55 * 1.14
+	for _, catId in CATEGORIES do
+		local cat = layout.categories[catId]
+		local hexes = { cat.hex }
+		for _, c in cat.chains do
+			for _, pos in c.slots do
+				table.insert(hexes, pos)
+			end
+		end
+		local _, _, w, h = Honeycomb.bounds(hexes, spaced)
+		local zoom, pans = Honeycomb.zoom(w, h, 912, 412, 96, 64, 1.5)
+		t.expectEq(pans, false, `{catId} pans`)
+		if zoom < 0.7 then
+			error(`{catId} fits at zoom {zoom}, under 0.7`)
 		end
 	end
 end

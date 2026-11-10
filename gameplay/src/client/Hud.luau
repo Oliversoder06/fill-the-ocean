@@ -248,8 +248,9 @@ function Hud.start()
 	local cardEvent = remotes:WaitForChild("Card") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 
-	local coins = find(gui, "Wallet.Pill.Coins")
-	local coinPop = find(gui, "Wallet.Coin.Pop")
+	local walletFrame = find(gui, "Wallet")
+	local coins = find(walletFrame, "Pill.Coins")
+	local coinPop = find(walletFrame, "Coin.Pop")
 	local shownMoney = math.max(0, Hud.wallet() - Hud.walletHold)
 	local cardLabel = find(gui, "Card")
 	local waiting = find(gui, "Waiting")
@@ -281,6 +282,7 @@ function Hud.start()
 	-- this runs right after the camera and overrides that while a window is showing. In play the
 	-- mouse icon is hidden and the place's cursor image (StarterGui.Cursor) marks where you aim.
 	local windows = { find(gui, "Honeycomb"), find(gui, "Admin"), find(gui, "BuildPicker") }
+	local honeycomb = windows[1]
 	local crosshair = find(player:WaitForChild("PlayerGui"):WaitForChild("Cursor"), "Cursor")
 	RunService:BindToRenderStep("HudCursor", Enum.RenderPriority.Camera.Value + 3, function()
 		local windowOpen = false
@@ -303,7 +305,8 @@ function Hud.start()
 	RunService.RenderStepped:Connect(function()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
 
-		-- Wallet: the team's coins
+		-- Wallet: the team's coins (hidden under the honeycomb, which shows its own)
+		set(walletFrame, "Visible", not honeycomb.Visible)
 		local money = math.max(0, Hud.wallet() - Hud.walletHold)
 		set(coins, "Text", Hud.money(money))
 		if money > shownMoney + 1e-6 then -- earned (each landing coin): the coin bounces
