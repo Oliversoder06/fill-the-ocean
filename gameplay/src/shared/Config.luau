@@ -113,7 +113,7 @@ Config.pourSeconds = 0.25 -- a pour is instant; this is only how long the tip pl
 -- for the save's team (common/Items.price): a duo pays 1.25x, a quad 1.75x. Teams also get a bigger
 -- ocean (Config.ocean.teamStep). Hands scale with the team but staff and buildings don't, so both
 -- steps sit well under 1; tools/simulate picked the pair that lands 2 and 4 players within a few
--- percent of solo (0.3 / 0.25: x1.00 and x1.01).
+-- percent of solo (0.3 / 0.25: x1.00 and x1.03).
 Config.team = { priceStep = 0.25 }
 Config.start = { capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spoon", toolModel = "Spoon" }
 -- Sweeps to fill a tool: 1 for the Spoon, then one more every `toolsPerSweep` tool levels, at most `maxSweeps`.
@@ -125,11 +125,10 @@ Config.sweeps = { toolsPerSweep = 3, maxSweeps = 8 }
 -- are bonuses, never penalties.
 Config.boosts = {
 	seconds = 30,
-	milestones = {} :: { number }, -- Boosts.crossed's list, filled in below from Config.milestones
 	kinds = {
-		{ id = "coins", tag = "2X COINS", card = "The sun dozed off! Double coins!", coins = 2 },
-		{ id = "gusher", tag = "GUSHER", card = "The well is gushing! Fill up in one sweep!", oneSweep = true },
-		{ id = "tailwind", tag = "TAILWIND", card = "A cool breeze! Run faster!", walk = 1.5 },
+		{ id = "coins", tag = "2X COINS", coins = 2 },
+		{ id = "gusher", tag = "GUSHER", oneSweep = true },
+		{ id = "tailwind", tag = "TAILWIND", walk = 1.5 },
 	},
 }
 
@@ -175,16 +174,6 @@ Config.milestones = {
 	{ fill = 0.95, boost = "coins", raindrops = 25, text = "The final push! It's pouring!" },
 	{ fill = 1, ending = true },
 } :: { Milestone }
-
--- Where each boost kind first plays, for Boosts.crossed (the run itself asks Milestones).
-for _, kind in Config.boosts.kinds do
-	for _, m in Config.milestones do
-		if m.boost == kind.id then
-			table.insert(Config.boosts.milestones, m.fill)
-			break
-		end
-	end
-end
 
 -- The one ocean. Pay is flat (it never rises on its own; harder areas pay more).
 -- Fill curve (shared/Water): percent 1 needs firstPercent litres and each next percent `growth`

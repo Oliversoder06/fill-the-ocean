@@ -1,20 +1,8 @@
 --!strict
 -- Milestone boosts (Config.boosts): what a boost does to a player's stats. Which milestones a fill
--- change passes is shared/Milestones; `crossed` here only reads Config.boosts.milestones (where each
--- boost first plays). Pure: config is passed in.
+-- change passes is shared/Milestones. Pure: config is passed in.
 
 local Boosts = {}
-
--- The last milestone index passed going from `before` to `after` (fill fractions), or nil.
-function Boosts.crossed(milestones: { number }, before: number, after: number): number?
-	local found = nil
-	for i, m in milestones do
-		if before < m and after >= m then
-			found = i
-		end
-	end
-	return found
-end
 
 function Boosts.kind(config, id: string)
 	for _, kind in config.boosts.kinds do

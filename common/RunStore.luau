@@ -39,7 +39,8 @@ end
 
 -- Returns the save, nil if there is none yet, or nil plus an error. A stored value that can't be
 -- read as a save is an error, not "none": treating it as empty would let a fresh run overwrite it.
-function RunStore.load(key: string): (RunSave.Save?, string?)
+-- The gameplay server passes its Config, so an older save migrates (RunSave.sanitize).
+function RunStore.load(key: string, config: any?): (RunSave.Save?, string?)
 	local ok, result = Retry.run(`load run {key}`, function()
 		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
 		return getStore():GetAsync(key)
@@ -50,7 +51,7 @@ function RunStore.load(key: string): (RunSave.Save?, string?)
 	if result == nil then
 		return nil, nil
 	end
-	local save, why = RunSave.sanitize(result)
+	local save, why = RunSave.sanitize(result, config)
 	if not save then
 		return nil, `run {key} is stored but unreadable{if why then `: {why}` else ""}`
 	end

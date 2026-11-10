@@ -38,6 +38,7 @@ local CameraFeel = {}
 
 local stepListeners: { (Humanoid) -> () } = {}
 local phase, intensity = 0, 0 -- walk cycle of the head bob, also read by the viewmodel
+local untilted: CFrame? = nil -- this frame's aim before the tilt (nil while the camera isn't ours)
 
 -- Called on each footstep (each dip of the head bob) with the local humanoid.
 function CameraFeel.onStep(fn: (Humanoid) -> ())
@@ -47,6 +48,11 @@ end
 -- The head bob's walk cycle (radians, one step every half turn) and its intensity (0 standing).
 function CameraFeel.walk(): (number, number)
 	return phase, intensity
+end
+
+-- The camera's CFrame without this frame's tilt, while the first-person camera is in use.
+function CameraFeel.untilted(): CFrame?
+	return untilted
 end
 
 local function ease(rate: number, dt: number): number
@@ -62,7 +68,6 @@ function CameraFeel.start()
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	local walkZoomMin, walkZoomMax = player.CameraMinZoomDistance, player.CameraMaxZoomDistance
 
-	local untilted: CFrame? = nil
 	local lastYaw: number? = nil
 	local roll, pitch = 0, 0
 	local dip, dipVelocity = 0, 0

@@ -1,4 +1,5 @@
 local RunSave = require("../../common/RunSave")
+local Config = require("../src/shared/Config")
 
 local tests = {}
 
@@ -70,7 +71,7 @@ function tests.sanitize_repairs_bad_fields(t)
 		cheat = 99,
 	})
 	assert(save, "sanitize returned nil for a repairable save")
-	t.expectEq(save.version, 2)
+	t.expectEq(save.version, 3)
 	t.expectEq(save.mapId, "ocean1")
 	t.expectEq(#save.members, 2, "members kept")
 	t.expectEq(save.members[1], 10)
@@ -87,9 +88,7 @@ function tests.sanitize_repairs_bad_fields(t)
 	t.expectEq(count(save.team.levels), 2, "bad level entries dropped")
 	t.expectEq(save.playSeconds, 0)
 	t.expectEq(save.introSeen, false)
-	t.expectEq(#save.boostsPlayed, 2)
-	t.expectEq(save.boostsPlayed[1], "tide")
-	t.expectEq(save.boostsPlayed[2], "surge")
+	t.expectEq((save :: any).boostsPlayed, nil, "an old save's boostsPlayed is dropped")
 	t.expectEq(save.finished, false)
 	t.expectEq(save.updatedAt, 0)
 	t.expectEq((save :: any).cheat, nil, "unknown field dropped")
@@ -99,7 +98,6 @@ function tests.sanitize_repairs_bad_fields(t)
 	fresh.players["1"] = { litres = 12.5 }
 	fresh.team.wallet = 300
 	fresh.team.levels = { tool = 2 }
-	fresh.boostsPlayed = { "tide" }
 	fresh.introSeen = true
 	fresh.updatedAt = 1700000000
 	local again = RunSave.sanitize(fresh)
@@ -109,7 +107,6 @@ function tests.sanitize_repairs_bad_fields(t)
 	t.expectEq(again.team.wallet, 300)
 	t.expectEq(again.team.levels.tool, 2)
 	t.expectEq(again.introSeen, true)
-	t.expectEq(again.boostsPlayed[1], "tide")
 	t.expectEq(again.updatedAt, 1700000000)
 end
 
@@ -147,6 +144,34 @@ function tests.sanitize_milestones(t)
 	assert(again, "a valid save must survive sanitize")
 	t.expectEq(table.concat(again.milestones :: { number }, ","), "1,2")
 	t.expectEq(#(RunSave.blank(fresh, 0).milestones :: { number }), 0, "erasing forgets them")
+end
+
+-- A milestone index past the sane max is dropped; with the gameplay Config, every index it has no
+-- milestone for too, so a bad index can't throw when the run opens.
+function tests.sanitize_drops_unknown_milestones(t)
+	local raw = { mapId = "map1", members = { 1 }, milestones = { 1, 20, 21, 1e6 }, milestonesSkipped = { 2, 21, 1e6 } }
+	local save = RunSave.sanitize(raw)
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(table.concat(save.milestones :: { number }, ","), "1,20,21", "no Config: only the sane max")
+	t.expectEq(table.concat(save.milestonesSkipped, ","), "2,21")
+	local fitted = RunSave.sanitize(raw, Config)
+	assert(fitted, "sanitize returned nil for a repairable save")
+	t.expectEq(table.concat(fitted.milestones :: { number }, ","), "1,20", "only Config's milestones")
+	t.expectEq(table.concat(fitted.milestonesSkipped, ","), "2")
+end
+
+-- The milestones an old save was marked as having reached without granting them: never paid.
+function tests.sanitize_skipped_milestones(t)
+	local save = RunSave.sanitize({ mapId = "map1", members = { 1 }, milestones = { 1, 2, 3 }, milestonesSkipped = { 2, 1, 2, 0, "3" } })
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(table.concat(save.milestonesSkipped, ","), "2,1")
+	local old = RunSave.sanitize({ mapId = "map1", members = { 1 } })
+	assert(old, "an old save must load")
+	t.expectEq(#old.milestonesSkipped, 0)
+	local fresh = RunSave.new("map1", { 1 })
+	t.expectEq(#fresh.milestonesSkipped, 0)
+	fresh.milestonesSkipped = { 1 }
+	t.expectEq(#RunSave.blank(fresh, 0).milestonesSkipped, 0, "erasing forgets them")
 end
 
 -- Broken rocks (deeper pools, areas 1-5), each once; a save from before rocks loads with none.
@@ -236,21 +261,117 @@ function tests.sanitize_migrates_per_player_saves(t)
 	t.expectEq((save.players["10"] :: any).owned, nil)
 end
 
--- Version 2 is the team economy: a version 1 save migrates and is written back as 2; a save from
--- newer code than this is refused (nil and why), never repaired into a wiped run.
+-- Version 2 is the team economy, 3 the Phase 4 ladders: older saves migrate and are written back as
+-- 3; a save from newer code than this is refused (nil and why), never repaired into a wiped run.
 function tests.sanitize_versions(t)
-	t.expectEq(RunSave.VERSION, 2)
+	t.expectEq(RunSave.VERSION, 3)
 	local old = RunSave.sanitize({ version = 1, mapId = "ocean1", members = { 1 }, players = { ["1"] = { money = 50, litres = 4 } } })
 	assert(old, "a version 1 save must load")
-	t.expectEq(old.version, 2, "written back as version 2")
+	t.expectEq(old.version, 3, "written back as version 3")
 	t.expectEq(old.team.wallet, 50, "migrated as before")
-	local same = RunSave.sanitize({ version = 2, mapId = "ocean1", members = { 1 }, team = { wallet = 7 } })
-	assert(same, "a version 2 save must load")
+	local two = RunSave.sanitize({ version = 2, mapId = "ocean1", members = { 1 }, team = { wallet = 7 } })
+	assert(two, "a version 2 save must load")
+	t.expectEq(two.version, 3)
+	t.expectEq(two.team.wallet, 7)
+	local same = RunSave.sanitize({ version = 3, mapId = "ocean1", members = { 1 }, team = { wallet = 7 } })
+	assert(same, "a version 3 save must load")
 	t.expectEq(same.team.wallet, 7)
-	local newer, why = RunSave.sanitize({ version = 3, mapId = "ocean1", members = { 1 }, team = { wallet = 7 } })
+	local raw = { version = 4, mapId = "ocean1", members = { 1 }, team = { wallet = 7, levels = { tool = 9 } } }
+	local newer, why = RunSave.sanitize(raw, Config)
 	t.expectEq(newer, nil, "a newer save is refused")
 	t.expectEq(type(why), "string", "with a reason")
+	t.expectEq(raw.version, 4, "and left unchanged")
+	t.expectEq(raw.team.levels.tool, 9)
 	t.expectEq((RunSave.sanitize({ version = math.huge, mapId = "ocean1", members = { 1 } })), nil, "infinitely new")
+end
+
+-- Phase 4 inserted tool levels: a version 2 (or 1) save's tool level becomes the first new level
+-- with the model it showed on the old ladder (git 5d73b33). Litres stay; the fill recalculates.
+function tests.sanitize_v2_remaps_the_tool_by_model(t)
+	local newLevel = { [0] = 0, 1, 1, 3, 3, 3, 6, 6, 9, 9, 12, 12, 12, 16, 16, 16, 21, 21, 21, 21 }
+	local tool = Config.track("tool") :: any
+	for old = 0, 19 do
+		local save = RunSave.sanitize({
+			version = 2,
+			mapId = "map1",
+			members = { 1 },
+			current = 900,
+			team = { levels = { tool = old } },
+			players = { ["1"] = { litres = 900 } },
+		}, Config)
+		assert(save, `old tool level {old} must load`)
+		t.expectEq(save.team.levels.tool, newLevel[old], `old tool level {old}`)
+		t.expectEq(save.current, 900, "litres stay")
+		t.expectEq(save.players["1"].litres, 900)
+		if old > 0 then
+			t.expectEq(RunSave.V2_TOOL_MODELS[old], tool.levels[newLevel[old]].model, `old tool level {old}: same model`)
+			t.expectEq(tool.levels[newLevel[old] - 1] == nil or tool.levels[newLevel[old] - 1].model ~= RunSave.V2_TOOL_MODELS[old], true, `old tool level {old}: the model's first level`)
+		end
+	end
+	t.expectEq(#RunSave.V2_TOOL_MODELS, 19, "the whole old ladder")
+	local v1 = RunSave.sanitize({ version = 1, mapId = "map1", members = { 1 }, players = { ["1"] = { money = 5, levels = { tool = 8 }, litres = 2 } } }, Config)
+	assert(v1, "a version 1 save must load")
+	t.expectEq(v1.team.levels.tool, 9, "version 1 migrates through version 2")
+	local none = RunSave.sanitize({ version = 2, mapId = "map1", members = { 1 }, team = { levels = { walk = 1 } } }, Config)
+	assert(none, "a version 2 save must load")
+	t.expectEq(none.team.levels.tool, nil, "no tool level stays none")
+	local current = RunSave.sanitize({ version = 3, mapId = "map1", members = { 1 }, team = { levels = { tool = 5 } } }, Config)
+	assert(current, "a version 3 save must load")
+	t.expectEq(current.team.levels.tool, 5, "a version 3 save is not remapped")
+end
+
+-- With the gameplay Config every track, item and building level is clamped to its ladder's length.
+-- Without it (the lobby, which never writes a loaded save back) levels are only repaired.
+function tests.sanitize_fits_levels_to_the_ladder(t)
+	local raw = {
+		version = 3,
+		mapId = "map1",
+		members = { 1 },
+		team = { levels = { tool = 99, pickup = 99, walk = 2, gone = 7 }, owned = { "backpackTank" }, itemLevels = { backpackTank = 99, helper = 1, gone = 4 } },
+		buildings = { pump = 99, gone = 3 },
+	}
+	local save = RunSave.sanitize(raw, Config)
+	assert(save, "sanitize returned nil for a repairable save")
+	local function items(id: string): number
+		for _, item in Config.items do
+			if item.id == id then
+				return #item.levels
+			end
+		end
+		error(`no item {id}`)
+	end
+	t.expectEq(save.team.levels.tool, #(Config.track("tool") :: any).levels)
+	t.expectEq(save.team.levels.pickup, #(Config.track("pickup") :: any).levels)
+	t.expectEq(save.team.levels.walk, 2, "a level in range stays")
+	t.expectEq(save.team.levels.gone, 7, "an unknown track is left alone")
+	t.expectEq(save.team.itemLevels.backpackTank, items("backpackTank"))
+	t.expectEq(save.team.itemLevels.helper, 1)
+	t.expectEq(save.team.itemLevels.gone, 4)
+	t.expectEq(save.buildings.pump, items("pump"))
+	t.expectEq(save.buildings.gone, 3)
+	local lobby = RunSave.sanitize(raw)
+	assert(lobby, "sanitize returned nil for a repairable save")
+	t.expectEq(lobby.team.levels.pickup, 99, "no Config: not fitted")
+end
+
+-- Loading a migrated save again changes nothing.
+function tests.sanitize_migration_is_idempotent(t)
+	local once = RunSave.sanitize({
+		version = 2,
+		mapId = "map1",
+		members = { 1 },
+		team = { levels = { tool = 13, pickup = 9 }, owned = { "bigTank" }, itemLevels = { bigTank = 9 } },
+		milestones = { 1, 2, 30 },
+	}, Config)
+	assert(once, "a version 2 save must load")
+	local twice = RunSave.sanitize(once, Config)
+	assert(twice, "a migrated save must load")
+	t.expectEq(twice.version, 3)
+	t.expectEq(once.team.levels.tool, 16)
+	t.expectEq(twice.team.levels.tool, 16, "not remapped again")
+	t.expectEq(twice.team.levels.pickup, once.team.levels.pickup)
+	t.expectEq(twice.team.itemLevels.bigTank, once.team.itemLevels.bigTank)
+	t.expectEq(table.concat(twice.milestones :: { number }, ","), "1,2")
 end
 
 -- Only the save's members' old fields reach the team: a stray player entry adds nothing.
@@ -387,7 +508,7 @@ end
 
 function tests.new_save_starts_empty(t)
 	local save = RunSave.new("ocean1", { 20, 10, 20 })
-	t.expectEq(save.version, 2)
+	t.expectEq(save.version, 3)
 	t.expectEq(save.mapId, "ocean1")
 	t.expectEq(#save.members, 2, "deduplicated")
 	t.expectEq(save.members[1], 10, "sorted")
@@ -396,7 +517,6 @@ function tests.new_save_starts_empty(t)
 	t.expectEq(count(save.players), 0)
 	t.expectEq(save.playSeconds, 0)
 	t.expectEq(save.introSeen, false)
-	t.expectEq(#save.boostsPlayed, 0)
 	t.expectEq(#save.gatesOpen, 0, "no gate open")
 	t.expectEq(count(save.buildings), 0, "no building")
 	t.expectEq(save.finished, false)
@@ -413,7 +533,6 @@ function tests.blank_keeps_map_and_team_and_is_newer(t)
 	old.buildings = { pump = 1 }
 	old.plots = { ["1"] = "pump" }
 	old.rocksBroken = { 1 }
-	old.boostsPlayed = { "tide" }
 	old.playSeconds = 3600
 	old.introSeen = true
 	old.finished = true
@@ -429,7 +548,6 @@ function tests.blank_keeps_map_and_team_and_is_newer(t)
 	t.expectEq(count(blank.buildings), 0)
 	t.expectEq(count(blank.plots), 0)
 	t.expectEq(#blank.rocksBroken, 0)
-	t.expectEq(#blank.boostsPlayed, 0)
 	t.expectEq(blank.playSeconds, 0)
 	t.expectEq(blank.finished, false)
 	t.expectEq(old.current, 500, "the old save is untouched")

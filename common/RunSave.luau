@@ -28,7 +28,6 @@ export type Save = {
 	players: { [string]: PlayerState },
 	playSeconds: number,
 	introSeen: boolean,
-	boostsPlayed: { string },
 	gatesOpen: { number }, -- area ids whose gate is bought (2-5), in the order they opened
 	buildings: { [string]: number }, -- the team's buildings (D2): upgrades bought per building id
 	plots: { [string]: string }, -- the building id on each built plot, by plot number ("1", "2", ...)
@@ -36,14 +35,45 @@ export type Save = {
 	-- Milestones reached (indices into gameplay's Config.milestones), each once; nil for a save from
 	-- before milestones (4c): the gameplay server marks those below its fill as reached on load.
 	milestones: { number }?,
+	-- Those the gameplay server marked reached for such a save: never granted, so never paid.
+	milestonesSkipped: { number },
 	finished: boolean,
 	updatedAt: number,
 }
 
 local RunSave = {}
 
--- 2: the team economy (one `team`); a version 1 save is migrated (mergePlayers) and written back as 2.
-RunSave.VERSION = 2
+-- 2: the team economy (one `team`); a version 1 save is migrated (mergePlayers) and written back.
+-- 3: Phase 4's ladders (new tool levels, other tracks' counts changed); older saves migrate in sanitize.
+RunSave.VERSION = 3
+
+-- The version 2 tool ladder's model by level (git 5d73b33, gameplay/src/shared/Config.luau; level 0
+-- is the Spoon). A version 2 (or 1) save's tool level becomes the first version 3 level with the same
+-- model, so the team keeps the tool they saw.
+RunSave.V2_TOOL_MODELS = {
+	"Cup", -- 1 Cup
+	"Cup", -- 2 Cup Lv2
+	"Bucket", -- 3 Bucket
+	"Bucket", -- 4 Bucket Lv2
+	"Bucket", -- 5 Bucket Lv3
+	"Bathtub", -- 6 Bathtub
+	"Bathtub", -- 7 Bathtub Lv2
+	"KiddiePool", -- 8 Kiddie Pool
+	"KiddiePool", -- 9 Kiddie Pool Lv2
+	"SwimmingPool", -- 10 Swimming Pool
+	"SwimmingPool", -- 11 Swimming Pool Lv2
+	"SwimmingPool", -- 12 Swimming Pool Lv3
+	"CargoShip", -- 13 Cargo Ship
+	"CargoShip", -- 14 Cargo Ship Lv2
+	"CargoShip", -- 15 Cargo Ship Lv3
+	"TheMoon", -- 16 The Moon
+	"TheMoon", -- 17 The Moon Lv2
+	"TheMoon", -- 18 The Moon Lv3
+	"TheMoon", -- 19 The Moon Lv4
+}
+
+-- No map has more milestones than this; sanitize drops higher indices even without the Config.
+RunSave.MAX_MILESTONES = 100
 
 local function isUserId(value: any): boolean
 	return type(value) == "number" and value % 1 == 0 and value > 0 and value < math.huge
@@ -199,12 +229,12 @@ function RunSave.new(mapId: string, members: { number }): Save
 		players = {},
 		playSeconds = 0,
 		introSeen = false,
-		boostsPlayed = {},
 		gatesOpen = {},
 		buildings = {},
 		plots = {},
 		rocksBroken = {},
 		milestones = {},
+		milestonesSkipped = {},
 		finished = false,
 		updatedAt = 0,
 	}
@@ -271,11 +301,47 @@ function RunSave.sameTeam(save: Save, userIds: { number }): boolean
 	return true
 end
 
+-- A version 2 (or 1) tool level as the first level of `config`'s tool track with the model it showed.
+local function remapTool(config, level: number): number
+	if level <= 0 then
+		return level
+	end
+	local model = RunSave.V2_TOOL_MODELS[math.min(level, #RunSave.V2_TOOL_MODELS)]
+	for i, toolLevel in (config.track("tool") :: any).levels do
+		if toolLevel.model == model then
+			return i
+		end
+	end
+	error(`the tool ladder has no {model} for an old save's tool level {level}`)
+end
+
+-- Clamps every known track, item and building level to its ladder in `config` (unknown ids stay).
+local function fitLevels(save: Save, config)
+	for id, level in save.team.levels do
+		local track = config.track(id)
+		if track then
+			save.team.levels[id] = math.min(level, #track.levels)
+		end
+	end
+	local itemLevels = {}
+	for _, item in config.items do
+		itemLevels[item.id] = #item.levels
+	end
+	for _, levels in { save.team.itemLevels, save.buildings } do
+		for id, level in levels do
+			if itemLevels[id] then
+				levels[id] = math.min(level, itemLevels[id])
+			end
+		end
+	end
+end
+
 -- Repairs a stored save: fixes types, clamps negatives to 0 and drops unknown fields. Returns nil
 -- when it is not a table or has no map or no team, since such a save can't be matched to anyone,
 -- and nil plus why for a save from newer code (a higher version): repairing it would wipe what this
--- code doesn't know.
-function RunSave.sanitize(raw: any): (Save?, string?)
+-- code doesn't know. With gameplay's `config` an older save also migrates (remapTool) and every level
+-- and milestone is fitted to it; the lobby passes none, as it never writes a loaded save back.
+function RunSave.sanitize(raw: any, config: any?): (Save?, string?)
 	if type(raw) == "table" and type(raw.version) == "number" and raw.version > RunSave.VERSION then
 		return nil, `save version {raw.version} is newer than this server's ({RunSave.VERSION})`
 	end
@@ -302,13 +368,6 @@ function RunSave.sanitize(raw: any): (Save?, string?)
 	end
 	save.playSeconds = amount(raw.playSeconds)
 	save.introSeen = raw.introSeen == true
-	if type(raw.boostsPlayed) == "table" then
-		for _, boostId in raw.boostsPlayed do
-			if type(boostId) == "string" then
-				table.insert(save.boostsPlayed, boostId)
-			end
-		end
-	end
 	save.gatesOpen = areaIds(raw.gatesOpen, 2, 5)
 	save.buildings = counts(raw.buildings)
 	-- plot numbers stay string keys (DataStores need them); saves from before 3e have none
@@ -321,9 +380,18 @@ function RunSave.sanitize(raw: any): (Save?, string?)
 	end
 	save.rocksBroken = areaIds(raw.rocksBroken, 1, 5) -- saves from before 3c have none
 	-- milestone indices are whole ids too; no field: a save from before milestones
-	save.milestones = if type(raw.milestones) == "table" then areaIds(raw.milestones, 1, math.huge) else nil
+	local lastMilestone = if config then #config.milestones else RunSave.MAX_MILESTONES
+	save.milestones = if type(raw.milestones) == "table" then areaIds(raw.milestones, 1, lastMilestone) else nil
+	save.milestonesSkipped = areaIds(raw.milestonesSkipped, 1, lastMilestone)
 	save.finished = raw.finished == true
 	save.updatedAt = amount(raw.updatedAt)
+	if config then
+		local tool = save.team.levels.tool
+		if tool and type(raw.version) == "number" and raw.version < 3 then
+			save.team.levels.tool = remapTool(config, tool)
+		end
+		fitLevels(save, config)
+	end
 	return save
 end
 

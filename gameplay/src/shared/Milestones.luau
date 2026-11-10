@@ -55,6 +55,19 @@ function Milestones.revived(config, reached: { number }): { number }
 	return list
 end
 
+-- The Raindrops the `reached` milestones pay (index -> Raindrops), leaving out `skipped` (those an old
+-- save was marked as having reached without granting them).
+function Milestones.raindrops(config, reached: { number }, skipped: { number }): { [number]: number }
+	local pay = {}
+	for _, i in reached do
+		local amount = Milestones.reward(config, i).raindrops
+		if amount and not table.find(skipped, i) then
+			pay[i] = amount
+		end
+	end
+	return pay
+end
+
 -- The team's toast: "5% — The old rowboat floats again! 2X COINS for 30 s". Nil for the ending.
 function Milestones.card(config, index: number): string?
 	local m = Milestones.reward(config, index)

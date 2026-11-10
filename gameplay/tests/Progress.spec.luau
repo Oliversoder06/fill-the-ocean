@@ -158,6 +158,19 @@ function tests.milestones_pay_each_run_once(t)
 	t.expectEq(Progress.payMilestones(after, "map1_1", { [3] = 2.7 }).raindrops, 47)
 end
 
+-- payMilestones' second result: whether it recorded anything new (PlayerData writes only then).
+function tests.milestones_say_when_nothing_is_new(t)
+	local paid, changed = Progress.payMilestones(nil, "map1_1", { [2] = 5 })
+	t.expectEq(changed, true)
+	local again, changedAgain = Progress.payMilestones(paid, "map1_1", { [2] = 5 })
+	t.expectEq(changedAgain, false, "all paid already")
+	t.expectEq(again.raindrops, 5)
+	local _, empty = Progress.payMilestones(paid, "map1_1", {})
+	t.expectEq(empty, false, "nothing to pay")
+	local _, other = Progress.payMilestones(paid, "map1_2", { [2] = 5 })
+	t.expectEq(other, true, "another run")
+end
+
 function tests.paid_milestones_survive_sanitize_and_forget(t)
 	local paid = Progress.payMilestones(nil, "map1_1", { [2] = 5 })
 	paid = Progress.payMilestones(paid, "map1_2", { [2] = 5 })
@@ -168,8 +181,9 @@ function tests.paid_milestones_survive_sanitize_and_forget(t)
 	t.expectEq(bad.paidMilestones[""], nil)
 	t.expectEq(bad.paidMilestones.map1_2, nil)
 	local forgot = Progress.forgetRun(paid, "map1_1")
-	t.expectEq(Progress.payMilestones(forgot, "map1_1", { [2] = 5 }).raindrops, 15, "an erased run pays again")
+	t.expectEq(Progress.payMilestones(forgot, "map1_1", { [2] = 5 }).raindrops, 10, "a New Game on the same run key can't earn them again")
 	t.expectEq(Progress.payMilestones(forgot, "map1_2", { [2] = 5 }).raindrops, 10, "other runs stay paid")
+	t.expectEq(next(Progress.default().paidMilestones), nil, "only a profile reset (Progress.default) clears them")
 end
 
 function tests.changes_return_new_tables(t)

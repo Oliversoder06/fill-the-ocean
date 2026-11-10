@@ -13,6 +13,7 @@ local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local MilestoneRules = require(ReplicatedStorage.Shared.Milestones)
 local Honeycomb = require(script.Parent.Honeycomb)
+local CameraFeel = require(script.Parent.CameraFeel)
 local Hud = require(script.Parent.Hud)
 local Music = require(script.Parent.Music)
 local Vehicles = require(script.Parent.Vehicles)
@@ -31,14 +32,17 @@ end
 
 local swoop: { start: CFrame, out: CFrame, at: number }? = nil
 
--- Back to the player's own view, exactly as it was.
-local function endSwoop()
+-- Back to the player's own view, exactly as it was (its untilted aim: CameraFeel adds the tilt). If
+-- something else took the camera mid-swoop, it is left to that.
+local function endSwoop(restore: boolean)
 	local s = swoop :: { start: CFrame, out: CFrame, at: number }
 	swoop = nil
 	RunService:UnbindFromRenderStep(SWOOP_STEP)
-	local camera = workspace.CurrentCamera
-	camera.CFrame = s.start
-	camera.CameraType = Enum.CameraType.Custom
+	if restore then
+		local camera = workspace.CurrentCamera
+		camera.CFrame = s.start
+		camera.CameraType = Enum.CameraType.Custom
+	end
 end
 
 -- From the player's view up and out toward the basin, and back (eased, still at both ends and at the
@@ -49,7 +53,7 @@ local function startSwoop(basin: BasePart)
 	if swoop or Vehicles.driving() or Honeycomb.isOpen() or camera.CameraType ~= Enum.CameraType.Custom then
 		return
 	end
-	local start = camera.CFrame
+	local start = CameraFeel.untilted() or camera.CFrame
 	local flat = (basin.Position - start.Position) * Vector3.new(1, 0, 1)
 	local dir = if flat.Magnitude > 1 then flat.Unit else SEA
 	local over = start.Position + dir * math.min(flat.Magnitude, cue.swoopOut)
@@ -61,8 +65,11 @@ local function startSwoop(basin: BasePart)
 			return
 		end
 		local t = (os.clock() - s.at) / cue.swoopSeconds
-		if t >= 1 or Vehicles.driving() or Honeycomb.isOpen() then
-			endSwoop()
+		if workspace.CurrentCamera.CameraType ~= Enum.CameraType.Scriptable then
+			endSwoop(false)
+			return
+		elseif t >= 1 or Vehicles.driving() or Honeycomb.isOpen() then
+			endSwoop(true)
 			return
 		end
 		workspace.CurrentCamera.CFrame = s.start:Lerp(s.out, (1 - math.cos(2 * math.pi * t)) / 2)

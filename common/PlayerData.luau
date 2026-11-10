@@ -37,14 +37,16 @@ function PlayerData.load(userId: number): (Progress.Data?, string?)
 	return Progress.sanitize(result), nil
 end
 
--- Applies one Progress change to the stored progress. Returns the new progress, or nil and an error.
-local function update(userId: number, label: string, change: (any) -> Progress.Data): (Progress.Data?, string?)
+-- Applies one Progress change to the stored progress; a change that returns nil (nothing new) writes
+-- nothing. Returns the new (or unchanged) progress, or nil and an error.
+local function update(userId: number, label: string, change: (any) -> Progress.Data?): (Progress.Data?, string?)
 	local saved: Progress.Data? = nil
 	local ok, result = Retry.run(`{label} {userId}`, function()
 		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
 		return getStore():UpdateAsync(key(userId), function(old)
-			saved = change(old)
-			return saved
+			local new = change(old)
+			saved = new or Progress.sanitize(old)
+			return new -- nil cancels the write
 		end)
 	end)
 	if not ok then
@@ -67,7 +69,8 @@ function PlayerData.removeRun(userId: number, runKey: string): (Progress.Data?, 
 	end)
 end
 
--- The run was erased (Progress.forgetRun): off the list, and its ending may pay again.
+-- The run was erased (Progress.forgetRun): off the list, and its ending may pay again (its milestones
+-- stay paid).
 function PlayerData.forgetRun(userId: number, runKey: string): (Progress.Data?, string?)
 	return update(userId, "forget run", function(old)
 		return Progress.forgetRun(old, runKey)
@@ -90,10 +93,11 @@ function PlayerData.clearMap(userId: number, mapId: string, raindrops: number, r
 end
 
 -- Run runKey reached milestones worth Raindrops (index -> Raindrops): pays those it hasn't paid this
--- player for yet (Progress.payMilestones).
+-- player for yet (Progress.payMilestones); writes nothing when all are paid already.
 function PlayerData.payMilestones(userId: number, runKey: string, raindrops: { [number]: number }): (Progress.Data?, string?)
 	return update(userId, "pay milestones", function(old)
-		return Progress.payMilestones(old, runKey, raindrops)
+		local data, changed = Progress.payMilestones(old, runKey, raindrops)
+		return if changed then data else nil
 	end)
 end
 

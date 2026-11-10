@@ -95,11 +95,12 @@ function Progress.removeRun(raw: any, key: string): Data
 end
 
 -- The run was erased (New Game, Delete): it leaves the list and its payment, so the fresh run on the
--- same key pays when it fills. Raindrops already paid and cleared maps stay. Returns a new table.
+-- same key pays when it fills. Raindrops already paid, cleared maps and the run's paid milestones stay
+-- (starting over can't earn milestone Raindrops again; only a profile reset clears them). Returns a
+-- new table.
 function Progress.forgetRun(raw: any, key: string): Data
 	local data = Progress.removeRun(raw, key)
 	data.paidRuns[key] = nil
-	data.paidMilestones[key] = nil
 	return data
 end
 
@@ -123,20 +124,23 @@ end
 
 -- Run runKey reached milestones worth `raindrops` (by index into gameplay's Config.milestones): add
 -- those this run hasn't paid this player for yet and remember them, so a milestone granted again (a
--- run reloaded from an older save) can't pay twice. Returns a new table.
-function Progress.payMilestones(raw: any, runKey: string, raindrops: { [number]: number }): Data
+-- run reloaded from an older save) can't pay twice. Returns a new table and whether it paid anything
+-- new (false: the stored progress needn't be written).
+function Progress.payMilestones(raw: any, runKey: string, raindrops: { [number]: number }): (Data, boolean)
 	local data = Progress.sanitize(raw)
 	local paid = data.paidMilestones[runKey] or {}
+	local changed = false
 	for index, amount in raindrops do
 		if not table.find(paid, index) then
 			data.raindrops += math.max(0, math.floor(amount))
 			table.insert(paid, index)
+			changed = true
 		end
 	end
 	if #paid > 0 then
 		data.paidMilestones[runKey] = paid
 	end
-	return data
+	return data, changed
 end
 
 return Progress

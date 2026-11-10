@@ -211,12 +211,13 @@ Shared (`src/shared/`, pure unless noted):
   (Buy's `bought`), `levelText`, `elsewhere` (bought at a stand or plot), the `LastBuy` attribute's
   `encodeBuy` / `decodeBuy`.
 - `Boosts.luau`: milestone boosts (`Config.boosts`): `apply(config, stats, id)` (stats with the
-  boost on; the server keeps bought stats separate); `crossed` only reads `Config.boosts.milestones`
-  (where each kind first plays), the run asks `Milestones`.
+  boost on; the server keeps bought stats separate); which milestone plays one is `Milestones`.
 - `Milestones.luau` (pure, tested): the one milestone system (`Config.milestones`): `crossed(config,
   before, after)` (every one passed, in order), `reach` (adds the new ones to a run's reached list and
   returns them: once per run), `reachedBy` (an old save's, never granted), `reward`, `revived` (the
-  `Revived` list), `card` (the team's toast), the `Milestone` attribute's `encode` / `decode`.
+  `Revived` list), `raindrops` (what reached ones pay, minus an old save's skipped ones; the run
+  re-pays on open, `Progress.payMilestones` keeps it once each), `card` (the team's toast), the
+  `Milestone` attribute's `encode` / `decode`.
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
@@ -247,9 +248,11 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `RunSave.luau` (pure): a team's saved run (its `team`: `wallet`, track `levels`, `owned` items,
   `itemLevels`, staff `assign` (staff id -> area id); its `buildings` levels and `plots`; per player
   only `litres`; `milestones` reached (indices, nil in a save from before them: the server marks
-  those below its fill without granting)), its key, the exact-team check (`sameTeam`), `blank` / `isBlank` (what erasing a run
+  those below its fill without granting, and lists them in `milestonesSkipped`, never paid)), its key, the exact-team check (`sameTeam`), `blank` / `isBlank` (what erasing a run
   leaves), and `sanitize`, which turns a save from before the team economy (money, levels and items
-  per player) into one team: money added up, the best levels, every item, the first member's posts.
+  per player) into one team: money added up, the best levels, every item, the first member's posts;
+  given gameplay's Config (`RunStore.load(key, Config)`) it also migrates a version 2 save's tool
+  level by model (`V2_TOOL_MODELS`) and clamps every level and milestone to the Config.
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB,
   all the team's: `price(config, cost, teamSize)` / `priceScale` (every price for the save's team
   size), `canBuy`, `affords` (the one money check with the fractional-coin epsilon), `nextLevel`, the
@@ -267,7 +270,8 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `erase` (the lobby's New Game / Delete / profile reset) writes a blank save only while holding the lock.
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps
-  (`forgetRun`: an erased run leaves the list and its payments; `reset`: an admin's profile reset;
+  (`forgetRun`: an erased run leaves the list and its ending's payment, its paid milestones stay;
+  `reset`: an admin's profile reset;
   `payMilestones`: a run's milestone Raindrops, each milestone once per run, `paidMilestones`).
 - `RunTicket.luau`: the lobby's ticket for a reserved server (`mapId`, run key, members).
 - `SessionRules.luau` (pure): lobby pad rules (create, join, load only with the same team, and

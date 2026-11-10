@@ -435,18 +435,15 @@ local function checkMilestones(before: number, after: number)
 	if #new == 0 then
 		return
 	end
-	local raindrops, paying, last = {}, false, nil
+	local raindrops = Milestones.raindrops(Config, new, {})
+	local last = nil
 	for _, index in new do
-		local m = Milestones.reward(Config, index)
-		if m.raindrops then
-			raindrops[index], paying = m.raindrops, true
-		end
-		if not m.ending then
+		if not Milestones.reward(Config, index).ending then
 			last = index
 		end
 	end
 	publishRevived()
-	if paying then
+	if next(raindrops) then
 		payRaindrops(raindrops)
 	end
 	if last and after < 1 then
@@ -508,12 +505,12 @@ local function snapshot(): RunSave.Save
 	local copy = table.clone(save)
 	copy.team = RunSave.copyTeam(save.team)
 	copy.players = table.clone(save.players)
-	copy.boostsPlayed = table.clone(save.boostsPlayed)
 	copy.gatesOpen = table.clone(save.gatesOpen)
 	copy.buildings = table.clone(save.buildings)
 	copy.plots = table.clone(save.plots)
 	copy.rocksBroken = table.clone(save.rocksBroken)
 	copy.milestones = table.clone(save.milestones :: { number })
+	copy.milestonesSkipped = table.clone(save.milestonesSkipped)
 	return copy
 end
 
@@ -647,7 +644,7 @@ local function openRun(key: string, mapId: string, members: { number }, replaceF
 		return nil, "This run is already open"
 	end
 	run.lockedAt = os.clock()
-	local save, loadErr = RunStore.load(key)
+	local save, loadErr = RunStore.load(key, Config)
 	local problem = nil
 	if loadErr then
 		warn(`[Run] couldn't load run {key}: {loadErr}`)
@@ -739,8 +736,14 @@ local function startRun()
 	setWater(math.min(save.current, run.target))
 	if not save.milestones then -- a save from before milestones: those below its fill count as reached, ungranted
 		save.milestones = Milestones.reachedBy(Config, fillOf(run.current))
+		save.milestonesSkipped = table.clone(save.milestones :: { number })
 	end
 	publishRevived()
+	-- A payment that failed last time is retried; members already paid for a milestone aren't written.
+	local owed = Milestones.raindrops(Config, save.milestones :: { number }, save.milestonesSkipped)
+	if next(owed) then
+		payRaindrops(owed)
+	end
 	for player in states do
 		applySaved(player)
 		moveToSpawn(player) -- those who spawned before the load go to the furthest open area

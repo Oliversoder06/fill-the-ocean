@@ -91,19 +91,6 @@ function tests.raindrops_are_small_whole_amounts(t)
 	end
 end
 
-function tests.boosts_list_follows_the_milestones(t)
-	for i, kind in Config.boosts.kinds do
-		local first = nil
-		for _, m in Config.milestones do
-			if m.boost == kind.id then
-				first = m.fill
-				break
-			end
-		end
-		t.expectEq(Config.boosts.milestones[i], first, `{kind.id} first plays at its first milestone`)
-	end
-end
-
 function tests.crossed_lists_every_milestone_passed(t)
 	local function crossed(before, after)
 		return table.concat(Milestones.crossed(small, before, after), ",")
@@ -149,6 +136,22 @@ function tests.revived_lists_the_decorations_back(t)
 	t.expectEq(table.concat(Milestones.revived(small, {}), ","), "")
 	t.expectEq(table.concat(Milestones.revived(small, { 1, 2, 3 }), ","), "2,1", "in the order reached")
 	t.expectEq(table.concat(Milestones.revived(small, { 2 }), ","), "", "no revive there")
+end
+
+-- The Raindrops reached milestones pay (index -> Raindrops), never those an old save skipped.
+function tests.raindrops_of_the_reached_milestones(t)
+	local function list(map: { [number]: number }): string
+		local parts = {}
+		for index, amount in map do
+			table.insert(parts, `{index}={amount}`)
+		end
+		table.sort(parts)
+		return table.concat(parts, ",")
+	end
+	t.expectEq(list(Milestones.raindrops(small, {}, {})), "")
+	t.expectEq(list(Milestones.raindrops(small, { 1, 2, 3, 4 }, {})), "2=5")
+	t.expectEq(list(Milestones.raindrops(small, { 1, 2, 3 }, { 2 })), "", "skipped: never paid")
+	t.expectEq(list(Milestones.raindrops(Config, { 1, 2, 7, 19 }, { 7 })), "19=25,2=5")
 end
 
 function tests.card_says_what_happened(t)
