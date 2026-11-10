@@ -458,6 +458,31 @@ offline progress. Every new thing ships with a placeholder model under its final
 - **Done when:** the simulator meets every target and a 2-hour owner playtest from a new save feels
   right.
 
+### Phase 4 tasks (owner: "do what you recommend", 2026-11-10)
+Defaults chosen: "idle" = present but not using their hands (staff and buildings still work, D4);
+team runs scale the ocean as well as prices so 2 and 4 players land within 10% of solo; milestone
+Raindrops go through the existing profile payment path.
+1. **4a Simulator (tools/simulate).** Drives the real pure modules (Config, Ladder, Items, Water,
+   Areas, Boosts, BuildingRules, StaffRules, VehicleRules): hand trips per area (walk, sweeps,
+   pour), backpacks, gadgets, gates, vehicles, buildings, staff, golden springs and milestone
+   boosts on average; strategy "buy the best value next"; profiles active and idle; team sizes
+   1, 2, 4. Prints the timeline and a TARGETS table (pass/fail): total time, gap between buys
+   (median 5-10 min, none over 20), each area 2.5-5 h, 1% ≈ 12 min (each 10% band within ±50%),
+   idle ≈ half of active, teams within 10%. `lune run tools/simulate targets` exits non-zero on a fail.
+2. **4b Tuning.** Config numbers (track and item prices and stats, gate fills and prices, the fill
+   curve, `Config.team`) changed until every target passes; the reasoning goes in Config comments
+   and the formulas in `C:\RobloxDev\library\balance\README.md`. Tests that pin a tuned number are
+   updated to the new number (owner-approved for this task); tests of rules stay.
+3. **4c Milestones every 5% (D9).** `Config.milestones` (20 entries: boost, revive, sighting,
+   raindrops); pure `Milestones.luau` (crossed, reward) with tests; server grants them once per run
+   (saved), toasts the team; client: a 2 s camera swoop over the ocean, cove decorations
+   (`workspace.Map.Revive.M<n>`) come back to life, a bacon-hair sighting on the horizon
+   (`ReplicatedStorage.Story.BaconHair`, placeholder). The existing boosts become milestone boosts.
+4. **4d First 10 minutes + views.** The simulator checks the first pour < 30 s and the first buy
+   < 60 s; a Studio check that the first gate sign is in view from the cove and each area's pour
+   spot looks out over the ocean (trim decor that blocks it).
+5. **4e Owner playtest:** 2 hours from a new save.
+
 ## Phase 5: story cutscenes (outline)
 - Intro (once per new save, when `introSeen` is false; anyone can skip, which skips for all) and
   ending (at 100%), as written in the design.
