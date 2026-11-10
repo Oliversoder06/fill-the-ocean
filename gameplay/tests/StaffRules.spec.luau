@@ -202,10 +202,10 @@ end
 -- Stands still never sell buildings, and staff are hired only at the tower.
 function tests.tower_hires_staff(t)
 	local state = { owned = {}, itemLevels = {} }
-	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, TOWER), nil, "no staff before Mountain Spring")
-	t.expectEq(Items.standPick(Config, state, 1, 5, 1e12, TOWER), Items.get(Config, "helper"), "the cheapest first")
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, TOWER, 1), nil, "no staff before Mountain Spring")
+	t.expectEq(Items.standPick(Config, state, 1, 5, 1e12, TOWER, 1), Items.get(Config, "helper"), "the cheapest first")
 	for area = 1, 5 do
-		local pick = Items.standPick(Config, state, area, 5, 1e12)
+		local pick = Items.standPick(Config, state, area, 5, 1e12, nil, 1)
 		t.expectEq(pick == nil or pick.kind ~= "staff", true, `area {area}'s stand hires no staff`)
 	end
 end

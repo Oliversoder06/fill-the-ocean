@@ -70,7 +70,7 @@ function tests.sanitize_repairs_bad_fields(t)
 		cheat = 99,
 	})
 	assert(save, "sanitize returned nil for a repairable save")
-	t.expectEq(save.version, 1)
+	t.expectEq(save.version, 2)
 	t.expectEq(save.mapId, "ocean1")
 	t.expectEq(#save.members, 2, "members kept")
 	t.expectEq(save.members[1], 10)
@@ -215,6 +215,72 @@ function tests.sanitize_migrates_per_player_saves(t)
 	t.expectEq((save.players["10"] :: any).owned, nil)
 end
 
+-- Version 2 is the team economy: a version 1 save migrates and is written back as 2; a save from
+-- newer code than this is refused (nil and why), never repaired into a wiped run.
+function tests.sanitize_versions(t)
+	t.expectEq(RunSave.VERSION, 2)
+	local old = RunSave.sanitize({ version = 1, mapId = "ocean1", members = { 1 }, players = { ["1"] = { money = 50, litres = 4 } } })
+	assert(old, "a version 1 save must load")
+	t.expectEq(old.version, 2, "written back as version 2")
+	t.expectEq(old.team.wallet, 50, "migrated as before")
+	local same = RunSave.sanitize({ version = 2, mapId = "ocean1", members = { 1 }, team = { wallet = 7 } })
+	assert(same, "a version 2 save must load")
+	t.expectEq(same.team.wallet, 7)
+	local newer, why = RunSave.sanitize({ version = 3, mapId = "ocean1", members = { 1 }, team = { wallet = 7 } })
+	t.expectEq(newer, nil, "a newer save is refused")
+	t.expectEq(type(why), "string", "with a reason")
+	t.expectEq((RunSave.sanitize({ version = math.huge, mapId = "ocean1", members = { 1 } })), nil, "infinitely new")
+end
+
+-- Only the save's members' old fields reach the team: a stray player entry adds nothing.
+function tests.migration_merges_only_members(t)
+	local save = RunSave.sanitize({
+		mapId = "ocean1",
+		members = { 10 },
+		players = {
+			["10"] = { money = 100, levels = { tool = 1 }, litres = 5 },
+			["30"] = { money = 9000, levels = { tool = 9 }, litres = 1, owned = { "bigTank" }, assign = { helper = 2 } },
+		},
+	})
+	assert(save, "an old save must load")
+	t.expectEq(save.team.wallet, 100, "a non-member's money stays out")
+	t.expectEq(save.team.levels.tool, 1)
+	t.expectEq(#save.team.owned, 0)
+	t.expectEq(count(save.team.assign), 0)
+end
+
+-- copyTeam: a deep copy of every team field, so a save in flight never shares tables with play.
+function tests.copy_team_is_deep(t)
+	local team = RunSave.newTeam()
+	team.wallet = 12.5
+	team.levels = { tool = 2 }
+	team.owned = { "bigTank" }
+	team.itemLevels = { bigTank = 1 }
+	team.assign = { helper = 3 }
+	local copy = RunSave.copyTeam(team)
+	for field, value in team :: any do
+		if type(value) == "table" then
+			t.expectEq((copy :: any)[field] ~= value, true, `{field} is a new table`)
+			for k, v in value do
+				t.expectEq((copy :: any)[field][k], v, `{field}.{k} copied`)
+			end
+		else
+			t.expectEq((copy :: any)[field], value, `{field} copied`)
+		end
+	end
+	t.expectEq(count(copy), count(team), "no field missing or added")
+	copy.wallet = 0
+	copy.levels.tool = 9
+	table.insert(copy.owned, "twinTanks")
+	copy.itemLevels.bigTank = 5
+	copy.assign.helper = 1
+	t.expectEq(team.wallet, 12.5, "the original is untouched")
+	t.expectEq(team.levels.tool, 2)
+	t.expectEq(#team.owned, 1)
+	t.expectEq(team.itemLevels.bigTank, 1)
+	t.expectEq(team.assign.helper, 3)
+end
+
 -- Once a save has a team section, left-over per-player fields don't add to it again.
 function tests.sanitize_team_section_wins(t)
 	local save = RunSave.sanitize({
@@ -300,7 +366,7 @@ end
 
 function tests.new_save_starts_empty(t)
 	local save = RunSave.new("ocean1", { 20, 10, 20 })
-	t.expectEq(save.version, 1)
+	t.expectEq(save.version, 2)
 	t.expectEq(save.mapId, "ocean1")
 	t.expectEq(#save.members, 2, "deduplicated")
 	t.expectEq(save.members[1], 10, "sorted")

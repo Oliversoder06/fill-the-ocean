@@ -39,7 +39,8 @@ export type Save = {
 
 local RunSave = {}
 
-RunSave.VERSION = 1
+-- 2: the team economy (one `team`); a version 1 save is migrated (mergePlayers) and written back as 2.
+RunSave.VERSION = 2
 
 local function isUserId(value: any): boolean
 	return type(value) == "number" and value % 1 == 0 and value > 0 and value < math.huge
@@ -125,6 +126,17 @@ function RunSave.newTeam(): Team
 	return { wallet = 0, levels = {}, owned = {}, itemLevels = {}, assign = {} }
 end
 
+-- A copy of every team field, its tables copied too (their values are plain numbers and strings).
+function RunSave.copyTeam(source: Team): Team
+	local copy: any = table.clone(source)
+	for field, value in copy do
+		if type(value) == "table" then
+			copy[field] = table.clone(value)
+		end
+	end
+	return copy
+end
+
 local function sanitizeTeam(raw: { [any]: any }): Team
 	return {
 		wallet = amount(raw.wallet),
@@ -137,18 +149,15 @@ end
 
 -- A save from before the team economy kept money, levels, items and staff posts per player: the
 -- team gets the money added up, the best level of each track and item, every item anyone had and each
--- staff's post from the first player (lowest user id) who set one.
-local function mergePlayers(players: { [any]: any }): Team
+-- staff's post from the first player (lowest user id) who set one. Only the save's `members` (sorted,
+-- see team) count.
+local function mergePlayers(players: { [any]: any }, members: { number }): Team
 	local keys = {}
-	for userId, state in players do
-		if type(userId) == "string" and type(state) == "table" then
-			table.insert(keys, userId)
+	for _, userId in members do
+		if type(players[tostring(userId)]) == "table" then
+			table.insert(keys, tostring(userId))
 		end
 	end
-	table.sort(keys, function(a, b)
-		local x, y = tonumber(a) or math.huge, tonumber(b) or math.huge
-		return if x ~= y then x < y else a < b
-	end)
 	local merged = RunSave.newTeam()
 	for _, key in keys do
 		local old = sanitizeTeam({
@@ -259,8 +268,13 @@ function RunSave.sameTeam(save: Save, userIds: { number }): boolean
 end
 
 -- Repairs a stored save: fixes types, clamps negatives to 0 and drops unknown fields. Returns nil
--- when it is not a table or has no map or no team, since such a save can't be matched to anyone.
-function RunSave.sanitize(raw: any): Save?
+-- when it is not a table or has no map or no team, since such a save can't be matched to anyone,
+-- and nil plus why for a save from newer code (a higher version): repairing it would wipe what this
+-- code doesn't know.
+function RunSave.sanitize(raw: any): (Save?, string?)
+	if type(raw) == "table" and type(raw.version) == "number" and raw.version > RunSave.VERSION then
+		return nil, `save version {raw.version} is newer than this server's ({RunSave.VERSION})`
+	end
 	if type(raw) ~= "table" or type(raw.mapId) ~= "string" or raw.mapId == "" or type(raw.members) ~= "table" then
 		return nil
 	end
@@ -280,7 +294,7 @@ function RunSave.sanitize(raw: any): Save?
 	if type(raw.team) == "table" then
 		save.team = sanitizeTeam(raw.team)
 	elseif type(raw.players) == "table" then
-		save.team = mergePlayers(raw.players)
+		save.team = mergePlayers(raw.players, members)
 	end
 	save.playSeconds = amount(raw.playSeconds)
 	save.introSeen = raw.introSeen == true

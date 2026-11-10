@@ -4,6 +4,11 @@ local Items = require("../../common/Items")
 
 local tests = {}
 
+-- A solo team's price: the listed one.
+local function solo(cost: number): number
+	return Items.price(Config, cost, 1)
+end
+
 -- 3e: Pump, Water Tower, Pipeline, Rain Machine, one per area from Mountain Spring on.
 function tests.four_buildings_by_area(t)
 	local want = {
@@ -73,7 +78,7 @@ function tests.build_checks_plot_area_and_money(t)
 	local pump = Items.get(Config, "pump")
 	local plots = { ["2"] = "pump" }
 	local function check(index, item, openAreas, money)
-		local ok, reason = BuildingRules.canBuild(plots, 6, index, item, openAreas, money)
+		local ok, reason = BuildingRules.canBuild(plots, 6, index, item, openAreas, money, solo)
 		return if ok then "ok" else reason
 	end
 	t.expectEq(check(1, pump, 2, pump.price), "ok")
@@ -102,7 +107,7 @@ end
 function tests.buildable_checks_area_and_money(t)
 	local pump = Items.get(Config, "pump")
 	local function check(openAreas, money)
-		local ok, reason = BuildingRules.buildable(pump, openAreas, money)
+		local ok, reason = BuildingRules.buildable(pump, openAreas, money, solo)
 		return if ok then "ok" else reason
 	end
 	t.expectEq(check(2, pump.price), "ok")
@@ -124,6 +129,13 @@ function tests.build_charges_the_team_price(t)
 	t.expectEq((BuildingRules.canBuild({}, 6, 1, pump, 2, duo(pump.price), duo)), true)
 	t.expectEq(select(2, BuildingRules.buildable(pump, 2, pump.price, duo)), "money")
 	t.expectEq((BuildingRules.buildable(pump, 2, duo(pump.price) - 1e-9, duo)), true, "pour rounding still builds it")
+end
+
+-- No silent listed price: a build check that reaches the price without the team's priceOf fails loudly.
+function tests.team_price_is_required(t)
+	local pump = Items.get(Config, "pump")
+	t.expectEq((pcall(BuildingRules.buildable, pump, 2, 1e12)), false, "buildable")
+	t.expectEq((pcall(BuildingRules.canBuild, {}, 6, 1, pump, 2, 1e12)), false, "canBuild")
 end
 
 -- The shop side is +X, the staff side -X (the plots sit at x +-62).

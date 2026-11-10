@@ -37,12 +37,12 @@ function BuildingRules.affords(money: number, price: number): boolean
 end
 
 -- Whether building `item` can be built now with `openAreas` areas open (Ladder.openAreas) and
--- `money`, plot aside. `priceOf` turns a listed price into the team's (common/Items.price); nil:
--- the listed price. The reason when not: "locked" (its area is closed) or "money".
-function BuildingRules.buildable(item, openAreas: number, money: number, priceOf: ((number) -> number)?): (boolean, string?)
+-- `money`, plot aside. `priceOf` turns a listed price into the team's (common/Items.price).
+-- The reason when not: "locked" (its area is closed) or "money".
+function BuildingRules.buildable(item, openAreas: number, money: number, priceOf: (number) -> number): (boolean, string?)
 	if item.area > openAreas then
 		return false, "locked"
-	elseif not BuildingRules.affords(money, if priceOf then priceOf(item.price) else item.price) then
+	elseif not BuildingRules.affords(money, priceOf(item.price)) then
 		return false, "money"
 	end
 	return true, nil
@@ -52,7 +52,7 @@ end
 -- save's plots (plot number as a string -> building id), `openAreas` areas open (Ladder.openAreas)
 -- and `money` (`priceOf` as buildable). The reason when not: "plot" (no such plot), "taken",
 -- "unknown" (not a building), or buildable's "locked" / "money".
-function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, index: any, item, openAreas: number, money: number, priceOf: ((number) -> number)?): (boolean, string?)
+function BuildingRules.canBuild(plots: { [string]: string }, plotCount: number, index: any, item, openAreas: number, money: number, priceOf: (number) -> number): (boolean, string?)
 	if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > plotCount then
 		return false, "plot"
 	elseif plots[tostring(index)] ~= nil then

@@ -3,6 +3,8 @@ local Config = require("../src/shared/Config")
 
 local tests = {}
 
+local SOLO = 1 -- team size: pays the listed price
+
 local function fresh()
 	return { owned = {}, itemLevels = {} }
 end
@@ -52,30 +54,30 @@ function tests.backpacks_grow(t)
 end
 
 function tests.buy_needs_area_open(t)
-	local ok, reason = Items.canBuy(Config, fresh(), "bigTank", 1, 1e12)
+	local ok, reason = Items.canBuy(Config, fresh(), "bigTank", 1, 1e12, SOLO)
 	t.expectEq(ok, false)
 	t.expectEq(reason, "locked")
-	t.expectEq((Items.canBuy(Config, fresh(), "bigTank", 2, 1e12)), true, "open once area 2 is")
-	t.expectEq((Items.canBuy(Config, fresh(), "backpackTank", 1, 1e12)), true, "the cove's is open from the start")
+	t.expectEq((Items.canBuy(Config, fresh(), "bigTank", 2, 1e12, SOLO)), true, "open once area 2 is")
+	t.expectEq((Items.canBuy(Config, fresh(), "backpackTank", 1, 1e12, SOLO)), true, "the cove's is open from the start")
 end
 
 function tests.buy_needs_money(t)
 	local price = Items.get(Config, "backpackTank").price
-	local ok, reason = Items.canBuy(Config, fresh(), "backpackTank", 1, price - 1)
+	local ok, reason = Items.canBuy(Config, fresh(), "backpackTank", 1, price - 1, SOLO)
 	t.expectEq(ok, false)
 	t.expectEq(reason, "money")
-	t.expectEq((Items.canBuy(Config, fresh(), "backpackTank", 1, price)), true, "exactly the price buys it")
-	t.expectEq((Items.canBuy(Config, fresh(), "backpackTank", 1, price - 1e-9)), true, "pour rounding still buys it")
+	t.expectEq((Items.canBuy(Config, fresh(), "backpackTank", 1, price, SOLO)), true, "exactly the price buys it")
+	t.expectEq((Items.canBuy(Config, fresh(), "backpackTank", 1, price - 1e-9, SOLO)), true, "pour rounding still buys it")
 end
 
 function tests.cannot_buy_twice(t)
 	local state = fresh()
 	own(state, "backpackTank")
 	t.expectEq(Items.owned(state, "backpackTank"), true)
-	local ok, reason = Items.canBuy(Config, state, "backpackTank", 5, 1e12)
+	local ok, reason = Items.canBuy(Config, state, "backpackTank", 5, 1e12, SOLO)
 	t.expectEq(ok, false)
 	t.expectEq(reason, "owned")
-	local unknown, why = Items.canBuy(Config, state, "nope", 5, 1e12)
+	local unknown, why = Items.canBuy(Config, state, "nope", 5, 1e12, SOLO)
 	t.expectEq(unknown, false)
 	t.expectEq(why, "unknown")
 end
@@ -84,10 +86,10 @@ end
 function tests.backpack_replaces_smaller(t)
 	local state = fresh()
 	own(state, "bigTank")
-	local ok, reason = Items.canBuy(Config, state, "backpackTank", 5, 1e12)
+	local ok, reason = Items.canBuy(Config, state, "backpackTank", 5, 1e12, SOLO)
 	t.expectEq(ok, false, "no going back to a smaller pack")
 	t.expectEq(reason, "replaced")
-	t.expectEq((Items.canBuy(Config, state, "twinTanks", 3, 1e12)), true, "a bigger one still sells")
+	t.expectEq((Items.canBuy(Config, state, "twinTanks", 3, 1e12, SOLO)), true, "a bigger one still sells")
 	own(state, "backpackTank")
 	own(state, "twinTanks")
 	t.expectEq(Items.backpack(Config, state).id, "twinTanks", "the newest pack is worn")
@@ -157,11 +159,11 @@ end
 function tests.stand_picks_cheapest_affordable(t)
 	local state = fresh()
 	local item = Items.get(Config, "backpackTank")
-	t.expectEq(Items.standPick(Config, state, 1, 1, item.price - 1), nil, "nothing affordable")
-	t.expectEq(Items.standPick(Config, state, 1, 1, item.price), item)
-	t.expectEq(Items.standPick(Config, state, 2, 1, 1e12), nil, "a closed area's stand sells nothing")
+	t.expectEq(Items.standPick(Config, state, 1, 1, item.price - 1, nil, SOLO), nil, "nothing affordable")
+	t.expectEq(Items.standPick(Config, state, 1, 1, item.price, nil, SOLO), item)
+	t.expectEq(Items.standPick(Config, state, 2, 1, 1e12, nil, SOLO), nil, "a closed area's stand sells nothing")
 	own(state, item.id)
-	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12), nil, "nothing left at the cove")
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, nil, SOLO), nil, "nothing left at the cove")
 end
 
 function tests.team_owned_buildings(t)
@@ -174,7 +176,7 @@ function tests.stands_never_sell_buildings(t)
 	for area = 1, 5 do
 		local state = fresh()
 		repeat
-			local pick = Items.standPick(Config, state, area, 5, 1e12)
+			local pick = Items.standPick(Config, state, area, 5, 1e12, nil, SOLO)
 			if pick then
 				t.expectEq(pick.kind ~= "building", true, `area {area}'s stand sold {pick.id}`)
 				own(state, pick.id)
@@ -308,11 +310,11 @@ end
 -- The cove's Tool Shack sells the Water Gun; the cove's stand keeps selling only its backpack.
 function tests.tool_shack_sells_water_gun(t)
 	local state = fresh()
-	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, "ToolShack"), Items.get(Config, "waterGun"))
-	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12), Items.get(Config, "backpackTank"))
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, "ToolShack", SOLO), Items.get(Config, "waterGun"))
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, nil, SOLO), Items.get(Config, "backpackTank"))
 	own(state, "waterGun")
-	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, "ToolShack"), nil)
-	t.expectEq(Items.standPick(Config, state, 2, 2, 1e12, "ToolShack"), nil, "the shack sells only cove items")
+	t.expectEq(Items.standPick(Config, state, 1, 1, 1e12, "ToolShack", SOLO), nil)
+	t.expectEq(Items.standPick(Config, state, 2, 2, 1e12, "ToolShack", SOLO), nil, "the shack sells only cove items")
 	t.expectEq(Config.stands.ToolShack, "Tool Shack", "its name for the shop")
 end
 
@@ -352,32 +354,39 @@ function tests.stand_charges_the_team_price(t)
 	t.expectEq(Items.standPick(Config, fresh(), 1, 2, Items.price(Config, Items.get(Config, "fireTruck").price, 3), "FireStation", 3), Items.get(Config, "fireTruck"))
 end
 
+-- No silent solo price: a check that reaches a price without the team's size fails loudly.
+function tests.team_size_is_required(t)
+	t.expectEq((pcall(Items.canBuy, Config, fresh(), "backpackTank", 1, 1e12)), false, "canBuy")
+	t.expectEq((pcall(Items.standPick, Config, fresh(), 1, 1, 1e12)), false, "standPick")
+	t.expectEq((pcall(Items.standOffer, Config, fresh(), 1, 1, 1e12)), false, "standOffer")
+end
+
 -- What a stand shows: the item a press buys, else the cheapest one short of money, else the
 -- cheapest locked one, else that everything there is owned.
 function tests.stand_offer_says_why(t)
 	local pack = Items.get(Config, "backpackTank")
-	local item, status = Items.standOffer(Config, fresh(), 1, 1, pack.price)
+	local item, status = Items.standOffer(Config, fresh(), 1, 1, pack.price, nil, SOLO)
 	t.expectEq(item, pack)
 	t.expectEq(status, "buy")
-	item, status = Items.standOffer(Config, fresh(), 1, 1, 30)
+	item, status = Items.standOffer(Config, fresh(), 1, 1, 30, nil, SOLO)
 	t.expectEq(item, pack, "short of money")
 	t.expectEq(status, "money")
 	local state = fresh()
 	own(state, pack.id)
-	item, status = Items.standOffer(Config, state, 1, 1, 1e12)
+	item, status = Items.standOffer(Config, state, 1, 1, 1e12, nil, SOLO)
 	t.expectEq(item, nil)
 	t.expectEq(status, "owned")
 	local big = fresh()
 	own(big, "bigTank")
-	t.expectEq(select(2, Items.standOffer(Config, big, 1, 2, 1e12)), "owned", "a replaced pack counts as done")
+	t.expectEq(select(2, Items.standOffer(Config, big, 1, 2, 1e12, nil, SOLO)), "owned", "a replaced pack counts as done")
 end
 
 function tests.stand_offer_prefers_open_items_over_locked_ones(t)
 	local truck = Items.get(Config, "fireTruck")
-	local item, status = Items.standOffer(Config, fresh(), 1, 1, 1e12, "FireStation")
+	local item, status = Items.standOffer(Config, fresh(), 1, 1, 1e12, "FireStation", SOLO)
 	t.expectEq(item, truck, "the cheapest locked vehicle")
 	t.expectEq(status, "locked")
-	item, status = Items.standOffer(Config, fresh(), 1, 2, 10, "FireStation")
+	item, status = Items.standOffer(Config, fresh(), 1, 2, 10, "FireStation", SOLO)
 	t.expectEq(item, truck)
 	t.expectEq(status, "money", "open but short of money beats the locked Tanker")
 end

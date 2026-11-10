@@ -34,6 +34,7 @@ local MAX_STAFF_PER_SECOND = 5 -- Assign presses
 export type Hooks = {
 	states: { [Player]: any }, -- server/Run's player states (workArea, workedAt, nearLifeguard, rate limits)
 	team: () -> any, -- the team's owned, itemLevels and assign (RunSave.Team)
+	loaded: () -> boolean, -- the save is applied (before it, the team is a blank stand-in)
 	playing: () -> boolean,
 	openIds: () -> { number }, -- the open area ids (Areas.openIds)
 	rootOf: (Player) -> BasePart?,
@@ -105,6 +106,9 @@ end
 -- One output tick of `dt` seconds: the team's staff pour and are owed their pay, while a member is
 -- present (D4).
 local function tick(dt: number)
+	if not hooks.loaded() then
+		return -- nothing goes out before the save: clients would show no staff as the team's
+	end
 	local list = roster()
 	publish(list)
 	if not hooks.playing() or next(hooks.states) == nil then

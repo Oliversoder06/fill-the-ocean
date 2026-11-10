@@ -50,9 +50,9 @@ function RunStore.load(key: string): (RunSave.Save?, string?)
 	if result == nil then
 		return nil, nil
 	end
-	local save = RunSave.sanitize(result)
+	local save, why = RunSave.sanitize(result)
 	if not save then
-		return nil, `run {key} is stored but unreadable`
+		return nil, `run {key} is stored but unreadable{if why then `: {why}` else ""}`
 	end
 	return save, nil
 end
@@ -131,17 +131,17 @@ function RunStore.erase(key: string): (boolean, string?, boolean)
 	if not locked then
 		return false, lockErr, open
 	end
-	local unreadable = false
+	local unreadable: string? = nil
 	local ok, result = Retry.run(`erase run {key}`, function()
-		unreadable = false
+		unreadable = nil
 		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
 		return getStore():UpdateAsync(key, function(old)
 			if old == nil then
 				return nil -- nothing stored: nothing to erase
 			end
-			local save = RunSave.sanitize(old)
+			local save, why = RunSave.sanitize(old)
 			if not save then
-				unreadable = true
+				unreadable = why or "no map or team"
 				return nil
 			end
 			local blank = RunSave.blank(save, os.time())
@@ -156,7 +156,7 @@ function RunStore.erase(key: string): (boolean, string?, boolean)
 		return false, tostring(result), false
 	end
 	if unreadable then
-		return false, `run {key} is stored but unreadable; not erased`, false
+		return false, `run {key} is stored but unreadable ({unreadable}); not erased`, false
 	end
 	return true, nil, false
 end

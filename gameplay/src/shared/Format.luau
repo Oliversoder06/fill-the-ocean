@@ -91,13 +91,13 @@ function Format.standName(config, stand: string?, area): string
 end
 
 -- A stand prompt's action for Items.standOffer's `item` and `status` (`area`: the item's area).
--- `money` nil leaves out what you have (the prompt, which would otherwise change on every pour).
+-- `money` (the team's wallet) nil leaves it out (the prompt, which would otherwise change on every pour).
 function Format.standAction(item, status: string, money: number?, area, priceOf: PriceOf): string
 	if status == "buy" then
 		return `Buy {item.name} ({Format.money(priced(item.price, priceOf))})`
 	elseif status == "money" then
 		local need = `Need {Format.money(priced(item.price, priceOf))} for the {item.name}`
-		return if money then `{need} (you have {Format.money(money)})` else need
+		return if money then `{need} (the team has {Format.money(money)})` else need
 	elseif status == "locked" then
 		return `{item.name} opens with {area.name}`
 	end

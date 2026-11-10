@@ -133,6 +133,9 @@ local run = {
 local states: { [Player]: any } = {}
 -- The team's wallet, levels and items (the save's `team`; a blank one until the save is applied).
 local team: RunSave.Team = RunSave.newTeam()
+-- The last stand buy per stand (keyed by area id or cove shop): a teammate's press there within
+-- STAND_RACE was for the same thing, so it buys nothing (onStand).
+local standBuys: { [any]: { at: number, by: Player, name: string } } = {}
 
 local function setGlobal(name: string, value: any)
 	ReplicatedStorage:SetAttribute(name, value)
@@ -465,13 +468,7 @@ local function snapshot(): RunSave.Save
 	-- always newer than what this run loaded or last wrote, even if this server's clock is behind
 	save.updatedAt = math.max(os.time(), save.updatedAt + 1)
 	local copy = table.clone(save)
-	copy.team = {
-		wallet = save.team.wallet,
-		levels = table.clone(save.team.levels),
-		owned = table.clone(save.team.owned),
-		itemLevels = table.clone(save.team.itemLevels),
-		assign = table.clone(save.team.assign),
-	}
+	copy.team = RunSave.copyTeam(save.team)
 	copy.players = table.clone(save.players)
 	copy.boostsPlayed = table.clone(save.boostsPlayed)
 	copy.gatesOpen = table.clone(save.gatesOpen)
@@ -936,6 +933,7 @@ local function resetRun()
 	local save = RunSave.blank(run.save :: RunSave.Save, os.time())
 	run.save = save
 	team = save.team
+	table.clear(standBuys)
 	for _, area in Config.areas do
 		if area.model then
 			Map.closeGate(ocean, area)
@@ -1191,10 +1189,6 @@ local function onGate(player: Player, area)
 	task.spawn(saveRun, `gate {area.id} opened`)
 end
 
--- The last stand buy per stand (keyed by area id or cove shop): a teammate's press there within
--- STAND_RACE was for the same thing, so it buys nothing.
-local standBuys: { [any]: { at: number, by: Player, name: string } } = {}
-
 -- The stand prompt of `area`: buys the cheapest item sold there that the team can buy now
 -- (Items.standPick; one prompt per stand), or says why it can't (Items.standOffer). `stand`: a cove
 -- shop (Config.stands) selling its own items instead. The area must be open, the item not owned and
@@ -1383,6 +1377,9 @@ function Run.start(oceanModel: Model)
 		end,
 		playing = function()
 			return run.phase == "playing"
+		end,
+		loaded = function()
+			return run.save ~= nil
 		end,
 		openIds = function()
 			return Areas.openIds(gatesOpen())

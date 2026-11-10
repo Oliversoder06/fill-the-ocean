@@ -97,15 +97,15 @@ end
 -- The Fire Station sells the cheapest vehicle whose area is open; the other stands keep their own.
 function tests.fire_station_sells_open_vehicles(t)
 	local truck = Items.get(Config, "fireTruck")
-	t.expectEq(Items.standPick(Config, fresh(), 1, 1, 1e12, "FireStation"), nil, "nothing before Mountain Spring opens")
-	t.expectEq(Items.standPick(Config, fresh(), 1, 2, 1e12, "FireStation"), truck)
-	t.expectEq(Items.standPick(Config, fresh(), 1, 2, truck.price - 1, "FireStation"), nil, "not affordable")
+	t.expectEq(Items.standPick(Config, fresh(), 1, 1, 1e12, "FireStation", 1), nil, "nothing before Mountain Spring opens")
+	t.expectEq(Items.standPick(Config, fresh(), 1, 2, 1e12, "FireStation", 1), truck)
+	t.expectEq(Items.standPick(Config, fresh(), 1, 2, truck.price - 1, "FireStation", 1), nil, "not affordable")
 	local state = fresh()
 	own(state, "fireTruck")
-	t.expectEq(Items.standPick(Config, state, 1, 2, 1e12, "FireStation"), nil, "nothing more until Hot Springs")
-	t.expectEq(Items.standPick(Config, state, 1, 3, 1e12, "FireStation"), Items.get(Config, "tanker"))
-	t.expectEq(Items.standPick(Config, fresh(), 1, 5, 1e12), Items.get(Config, "backpackTank"), "the cove's stand sells no vehicles")
-	t.expectEq(Items.standPick(Config, fresh(), 1, 5, 1e12, "ToolShack"), Items.get(Config, "waterGun"), "nor the Tool Shack")
+	t.expectEq(Items.standPick(Config, state, 1, 2, 1e12, "FireStation", 1), nil, "nothing more until Hot Springs")
+	t.expectEq(Items.standPick(Config, state, 1, 3, 1e12, "FireStation", 1), Items.get(Config, "tanker"))
+	t.expectEq(Items.standPick(Config, fresh(), 1, 5, 1e12, nil, 1), Items.get(Config, "backpackTank"), "the cove's stand sells no vehicles")
+	t.expectEq(Items.standPick(Config, fresh(), 1, 5, 1e12, "ToolShack", 1), Items.get(Config, "waterGun"), "nor the Tool Shack")
 end
 
 -- A call brings the owned vehicle of the furthest area.

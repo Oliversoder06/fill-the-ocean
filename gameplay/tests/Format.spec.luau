@@ -78,7 +78,7 @@ end
 function tests.stand_action_texts(t)
 	local pack = item("backpackTank")
 	t.expectEq(Format.standAction(pack, "buy", 2000, area(1)), "Buy Backpack Tank (1,200)")
-	t.expectEq(Format.standAction(pack, "money", 30, area(1)), "Need 1,200 for the Backpack Tank (you have 30)")
+	t.expectEq(Format.standAction(pack, "money", 30, area(1)), "Need 1,200 for the Backpack Tank (the team has 30)")
 	t.expectEq(Format.standAction(item("fireTruck"), "locked", 30, area(2)), "Fire Truck opens with Mountain Spring")
 	t.expectEq(Format.standAction(nil, "owned", 30, nil), "You own everything here")
 end
@@ -86,7 +86,7 @@ end
 -- The card after a press that bought nothing adds how a locked item's area opens.
 function tests.stand_card_texts(t)
 	t.expectEq(Format.standCard(item("fireTruck"), "locked", 30, area(2), 0.01), "Fire Truck opens with Mountain Spring (fill the ocean to 7%)")
-	t.expectEq(Format.standCard(item("backpackTank"), "money", 30, area(1), 0.01), "Need 1,200 for the Backpack Tank (you have 30)")
+	t.expectEq(Format.standCard(item("backpackTank"), "money", 30, area(1), 0.01), "Need 1,200 for the Backpack Tank (the team has 30)")
 	t.expectEq(Format.standCard(nil, "owned", 30, nil, 0.01), "You own everything here")
 end
 
@@ -97,7 +97,7 @@ function tests.stand_texts_show_the_team_price(t)
 	end
 	local pack = item("backpackTank")
 	t.expectEq(Format.standAction(pack, "buy", 5000, area(1), double), "Buy Backpack Tank (2,400)")
-	t.expectEq(Format.standCard(pack, "money", 30, area(1), 0.01, double), "Need 2,400 for the Backpack Tank (you have 30)")
+	t.expectEq(Format.standCard(pack, "money", 30, area(1), 0.01, double), "Need 2,400 for the Backpack Tank (the team has 30)")
 	t.expectEq(select(2, Format.standSign(pack, "buy", area(1), "Cove Well Stand", double)), "2,400")
 	t.expectEq(Format.gateHint(area(2), 0.08, double), "open its gate for 32,000")
 end
