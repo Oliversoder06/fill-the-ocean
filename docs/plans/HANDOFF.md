@@ -12,11 +12,16 @@ Read this first in every new session. Then read CLAUDE.md, AGENTS.md and
   tutorial at the top with ground chevrons and a click hand, third-person driving, lobby Create Party +
   Saved Runs side by side (New Game replaces the team's save), admin Reset run / Reset my profile,
   pads removed (owner: no teleporting at all), pour basins + channel waves to the ocean, prices and
-  real reasons at every stand, a Next goal line (G), clearer shop. **Next: Phase 4** (write its
-  step-by-step tasks into the plan first), then 5-9.
+  real reasons at every stand, a Next goal line (G), clearer shop.
 - Team economy + honeycomb (2026-11-10): one team wallet, everything bought is the team's, prices x
-  (1 + 0.6 per extra player), save version 2 (old saves migrate); the TAB shop is now the honeycomb
-  (`client/Honeycomb*.luau`, pure `shared/Honeycomb.luau`, layout in the library's `shop.md`).
+  (1 + 0.25 per extra player) and a bigger ocean (x 1 + 0.3 per extra player); the TAB shop is the
+  honeycomb (`client/Honeycomb*.luau`, pure `shared/Honeycomb.luau`, layout in the library's
+  `shop.md`): one hex per upgrade, symmetric rings, a Back hex, Areas (gates) buyable there.
+- Phase 4 (2026-11-10): `lune run tools/simulate targets` plays the whole map and checks the 20-hour
+  targets (all pass: solo 19.1 h, teams of 2/4 within 3%); Config tuned (24 tool levels, gates at
+  15/33/56/77%, fill curve per stretch); milestones every 5% (`shared/Milestones`, boosts, revived
+  cove decor `Map.Revive.M1..M8`, bacon-hair sightings, Raindrops); save version 3 migrates old
+  saves. Left: 4e, the owner's 2-hour playtest from a new save. **Next: Phase 5** (cutscenes).
 - Restarting `rojo serve` drops Studio's Rojo connection; only the owner can click Connect again.
 - Phase 2 leftovers (do with 3b or later): per-area ambience/music, guide hint toward the next gate, a
   gate-burst VFX.
@@ -211,3 +216,9 @@ hex names/badge counts were fixed after the last play test without a visual re-c
 image (open gates reuse the lock tinted blue); boost hexes have no icons; prices shown at phones'
 smallest scale are about 8 px; `Ladder.offer` repeats `Items.tabOffer`'s track rule; publish only
 after every old server is shut down (an old server would drop the team section of a v2 save).
+Phase 4: the area pour spots don't look out over the ocean and the first gate sign isn't in view
+from the spawn (terrain ridges block both; needs terrain work in Phase 6); the simulator uses one
+80-stud trip for every area and doesn't model jetpack fuel; milestone boosts barely change the
+total; buildings can't be taken down (early plots stay Pumps); milestone swoop, revives and the
+sighting are not play tested; a save migrated before 1a09cf4 has no skipped list, so its old
+milestones pay once.
