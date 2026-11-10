@@ -158,29 +158,12 @@ function Hud.snapshot(): Snapshot
 end
 
 -- What TAB offers next and whether `money` buys it now at the team's price (Hud.price), with the
--- areas the open gates open (as the
--- server counts them). A track (`levels`): Ladder.offer's level and "buy" / "locked" / "max", or
--- "useless" while the level would change nothing (Ladder.helps; the server doesn't sell it). An
--- item: Items.nextLevel's upgrade and "buy" / "max" / "replaced", or, while unowned, nil and
--- "stand" (buy it at its area's stand) or "locked" (its area is closed). A building: the team's
--- Items.buildingOffer ("buy" / "max" / "unbuilt" / "locked"). `snap`: Hud.snapshot (nil reads it now).
+-- areas the open gates open (as the server counts them): Items.tabOffer's level and status (a track:
+-- "buy" / "locked" / "max" / "useless"; an item: "buy" / "max" / "replaced" / "stand" / "locked";
+-- a building: "buy" / "max" / "unbuilt" / "locked"). `snap`: Hud.snapshot (nil reads it now).
 function Hud.offer(levels: { [string]: number }, id: string, money: number, snap: Snapshot?): (any, string?, boolean)
 	local s = snap or Hud.snapshot()
-	local level, status
-	local item = Items.get(Config, id)
-	if Config.track(id) then
-		level, status = Ladder.offer(Config, levels, id, s.openAreas)
-		if status == "buy" and not Ladder.helps(Config, levels, id) then
-			status = "useless"
-		end
-	elseif item and item.kind == "building" then
-		level, status = Items.buildingOffer(Config, s.buildings, id, s.openAreas)
-	else
-		level, status = Items.nextLevel(Config, s.items, id)
-		if status == "unowned" then
-			status = if (item :: Config.Item).area <= s.openAreas then "stand" else "locked"
-		end
-	end
+	local level, status = Items.tabOffer(Config, levels, s.items, s.buildings, id, s.openAreas, Ladder.helps(Config, levels, id))
 	return level, status, status == "buy" and Items.affords(money, Items.price(Config, level.cost, s.teamSize))
 end
 

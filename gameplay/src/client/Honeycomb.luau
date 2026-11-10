@@ -3,16 +3,16 @@
 -- Upgrades button opens and closes it during a run (client/Window pops it in). The main view: the
 -- current tool at the centre and a ring of category hexes, each with a red badge counting what can be
 -- bought inside and water showing how much of it is owned; a click glides into the category: its hex,
--- a spine and every upgrade as a chain of hexes (copies of Hud.Templates.Hex) joined by bridges
--- (Templates.Bridge), long chains windowed around the next link. Selecting a hex fills the Detail
--- strip, whose Buy button sends Buy(id, bought) (`bought`: what this client saw bought, so a
--- teammate's buy of the same level wins). Everything is the team's, from its wallet at the team's
--- price (Hud.price); the server checks every buy. Items are first bought at their stand (buildings
--- on a plot), so their first hex says where. Detail.AssignButton moves a hired staff to its next
--- post (Staff("assign", itemId, areaId), StaffRules.nextPost). A buy landing fills its hex, then the
--- bridge, and wakes the next hex (numbers in Cues.honeycomb); your own buy also gets coins, a sting
--- and, for a first, a NEW! stamp (client/Purchase). Back (the button, Esc, gamepad B) glides out,
--- then closes.
+-- a spine and every upgrade as a chain of hexes joined by bridges (client/HoneycombHex), long chains
+-- windowed around the next link. Selecting a hex fills the Detail strip (words: client/HoneycombText),
+-- whose Buy button sends Buy(id, bought) (`bought`: what this client saw bought, so a teammate's buy
+-- of the same level wins). Everything is the team's, from its wallet at the team's price (Hud.price);
+-- the server checks every buy and sets the buyer's LastBuy. Items are first bought at their stand
+-- (buildings on a plot), so their first hex says where. Detail.AssignButton moves a hired staff to
+-- its next post (Staff("assign", itemId, areaId), StaffRules.nextPost). A landing fills its hex,
+-- then the bridge, and wakes the next hex (a windowed chain then slides along); your own buy (your
+-- LastBuy) also gets coins, a sting and, for a first, a NEW! stamp (client/Purchase). Back (the
+-- button, Backspace, gamepad B) glides out, then closes; Roblox's menu closes it.
 local ContextActionService = game:GetService("ContextActionService")
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
@@ -24,45 +24,34 @@ local UserInputService = game:GetService("UserInputService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
-local Ease = require(ReplicatedStorage.Shared.Ease)
-local Format = require(ReplicatedStorage.Shared.Format)
 local Comb = require(ReplicatedStorage.Shared.Honeycomb)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
-local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 local Hud = require(script.Parent.Hud)
+local Hex = require(script.Parent.HoneycombHex)
+local Text = require(script.Parent.HoneycombText)
 local Purchase = require(script.Parent.Purchase)
 local Window = require(script.Parent.Window)
 
 local player = Players.LocalPlayer
 local colors, images, motion = Theme.colors, Theme.images, Theme.motion
-local short, set, pressable = Hud.short, Hud.set, Hud.pressable
+local set, pressable = Hud.set, Hud.pressable
 local CUE = Cues.honeycomb
 
-local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local FADE = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local QUICK = TweenInfo.new(CUE.quickSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 -- Upgrades button: squish down while held, spring back past full size on release.
-local HOLD_SCALE = 0.82
-local HOLD_DOWN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local HOLD_UP = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local HOLD_DOWN = TweenInfo.new(CUE.holdDownSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local HOLD_UP = TweenInfo.new(CUE.holdUpSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local BUY_GUARD = 0.4 -- seconds Buy ignores clicks after a buy is sent or lands, so a double click buys once
-local PENDING_SECONDS = 2 -- a sent buy that hasn't landed by then was refused; Buy works again
+local PENDING_SECONDS = 2 -- a sent buy without its LastBuy by then was refused (or a teammate's won)
 local REFRESH_OPEN = 0.1 -- seconds between state refreshes (after an attribute change) while open
 local REFRESH_CLOSED = 0.25 -- only the badges while closed
-local DIM = 0.4 -- transparency of a hex that isn't next yet: still readable, clearly not for sale
-local SMALL_PRICE = 0.8 -- a future level's price text, of the template's size
 local SPACING = 1.14 -- hex centres sit this much further apart than touching, so the bridges show
-local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
 local PRESS_RATE = 25 -- per second: hover and press scales catch up in about 0.08 s
-local RIM_SHADE = 0.4 -- a hex's rim: its colour this far toward the outline navy
-
--- Category display names, in the ring's order (shared/Honeycomb layout.order).
-local CATEGORY_NAMES = { tools = "Tools", boosts = "Boosts", gear = "Gear", vehicles = "Vehicles", buildings = "Buildings", staff = "Staff" }
--- Art for each track but the tool (which shows its 3D model) until real upgrade icons are drawn.
-local ICONS = { pickup = "pipFull", hold = "unknown", quick = "unknown", walk = "unknown", tip = "coin" }
+local DRAG_SLOP = 8 -- pixels a press on the board may move and still click its hex
 
 local Honeycomb = {}
 
@@ -99,128 +88,6 @@ for _, catId in layout.order do
 	end
 end
 
-local function scoops(n: number): string
-	return if n == 1 then "1 scoop" else `{n} scoops`
-end
-
-local function percent(bonus: number): string
-	return `+{math.floor((bonus - 1) * 100 + 0.5)}%`
-end
-
--- What a track's level changes, from the stats before and after it. Litres per trip include the
--- worn backpack; scoop counts stay the tool's.
-local function effectText(id: string, now: Ladder.Stats, after: Ladder.Stats): string
-	if id == "tool" then
-		local gear = Hud.items()
-		local tripNow, tripAfter = Items.withGear(Config, gear, now).capacity, Items.withGear(Config, gear, after).capacity
-		return `{short(tripAfter)} L per trip, {scoops(after.sweeps)} to fill (now {short(tripNow)} L)`
-	elseif id == "pickup" then
-		return `Fill your tool in {scoops(after.sweeps)} (now {scoops(now.sweeps)})`
-	elseif id == "hold" then
-		return "Hold the button to keep scooping"
-	elseif id == "quick" then
-		return `{after.actSeconds}s per scoop (now {now.actSeconds}s)`
-	elseif id == "walk" then
-		return `Walk speed {after.walkSpeed} (now {now.walkSpeed})`
-	end
-	return `{percent(after.coinBonus)} coins per litre (now {percent(now.coinBonus)})`
-end
-
-local function fillNow(): number
-	local fill = ReplicatedStorage:GetAttribute("Fill")
-	return if type(fill) == "number" then fill else 0
-end
-
--- A stat in the effect texts: whole numbers under 1000 as they are (6), the rest short (1.6, 3.0K).
-local function amount(n: number): string
-	return if n == math.floor(n) and n < 1000 then tostring(n) else short(n)
-end
-
--- Effect texts read stats as `stat(name, unit, format)`: the value and its unit ("6 L/s per plot"),
--- and " (now 3)" when the text shows the next level (`was` reads the current one) and it changes.
-type Stat = (name: string, unit: string?, format: ((number) -> string)?) -> string
-local function statText(read: (string) -> number, was: ((string) -> number)?): Stat
-	return function(name, unit, format)
-		local show = format or amount
-		local value = read(name)
-		local before = if was then was(name) else value
-		local text = `{show(value)}{unit or ""}`
-		return if before ~= value then `{text} (now {show(before)})` else text
-	end
-end
-
--- What each gadget does at some level (Config.ItemLevel stats).
-local GADGET_EFFECTS = {
-	waterGun = function(stat: Stat)
-		return `Pours from {stat("range", " studs away")}`
-	end,
-	gardenHose = function(stat: Stat)
-		return `{stat("rate", " L/s")}, reach {stat("reach", " studs")}`
-	end,
-	heatGloves = function(stat: Stat)
-		return `Hot pools {stat("hotFill", "x faster")}`
-	end,
-	icePick = function(stat: Stat)
-		return stat("hits", " hits per block")
-	end,
-	jetpackTank = function(stat: Stat)
-		return `{stat("flightSeconds", "s flight")}, holds {stat("capacity", " L")}`
-	end,
-	cloudNet = function(stat: Stat)
-		return `Catches clouds from {stat("range", " studs")}`
-	end,
-}
-
--- What a vehicle does at some level (as GADGET_EFFECTS).
-local function vehicleEffect(stat: Stat): string
-	return `{stat("tank", " L tank")}, {stat("fillRate", " L/s fill")}`
-end
-
--- What a building does at some level (every building: its litres a second).
-local function buildingEffect(stat: Stat): string
-	return stat("rate", " L/s per plot")
-end
-
--- What a staff does at some level, by its job (Config.items `job`); how many are hired only once
--- one is.
-local function staffEffect(stat: Stat, item, owned: boolean): string
-	local who = if owned then `{stat("hires", " hired")}, ` else ""
-	if item.job == "area" then
-		return `{who}{stat("carry", " L")} every {stat("tripSeconds", "s")} per {item.name}`
-	elseif item.job == "truck" then
-		return `{who}a tank every {stat("tripSeconds", "s")} per {item.name}`
-	end
-	return `{who}no clogs, {stat("boost", " output", percent)}`
-end
-
-local KIND_EFFECTS = { vehicle = vehicleEffect, building = buildingEffect, staff = staffEffect }
-
--- What an item does now and after an upgrade `level` (nil: what it does now, or when bought): a
--- backpack's litres, a gadget's, vehicle's, building's or staff's stats.
-local function itemEffect(item, level, owned: boolean): string
-	local function nowStat(name: string): number
-		if not owned then
-			return item[name]
-		end
-		return if item.kind == "building" then Items.buildingStat(Hud.buildings(), item, name) else Items.stat(Hud.items(), item, name)
-	end
-	if item.kind == "gadget" or KIND_EFFECTS[item.kind] then
-		local effect = KIND_EFFECTS[item.kind] or GADGET_EFFECTS[item.id]
-		assert(effect, `Honeycomb has no effect text for {item.id}`)
-		if level then
-			return effect(statText(function(name: string): number
-				return level[name]
-			end, nowStat), item, owned)
-		end
-		return effect(statText(nowStat), item, owned)
-	end
-	local now = nowStat("capacity")
-	if level then
-		return `Holds {short(level.capacity)} L on your back (now {short(now)} L)`
-	end
-	return `Holds {short(now)} L on your back`
-end
-
 -- Where one of the team's staff works (the server's Staff attribute: an area id, 0 for nowhere), or
 -- nil until the server has published it.
 local function postOf(id: string): number?
@@ -238,22 +105,8 @@ local function postsOf(item): { number }
 	return StaffRules.targets(Config, item, items.owned, Items.reachable(Config, items, Areas.openIds(Hud.gatesOpen())))
 end
 
--- The Assign button's text for staff `item` working at `post`.
-local function assignText(item, post: number?): string
-	if item.job == "plots" then
-		return "FIXES THE TEAM'S BUILDINGS"
-	elseif not post or post == 0 then
-		return if item.job == "truck" then "BUY A VEHICLE FIRST" else "..."
-	elseif item.job == "truck" then
-		local truck = StaffRules.truck(Config, post)
-		if truck then
-			return `DRIVES THE {truck.name:upper()}`
-		end
-	end
-	return `WORKS AT {Areas.byId(Config, post).name:upper()}`
-end
-
--- The team's state as shared/Honeycomb reads it.
+-- The team's state as shared/Honeycomb reads it. Only what TAB sells has a price (Items.tabOffer):
+-- an item's first link is bought at its stand or built on a plot.
 local function readView(): Comb.View
 	local snap = Hud.snapshot()
 	local levels = Hud.levels(0) :: { [string]: number }
@@ -267,19 +120,13 @@ local function readView(): Comb.View
 		items = items,
 		openAreas = Areas.open(Hud.gatesOpen()),
 		wallet = Hud.wallet(),
-		-- Only what TAB sells has a price: a track level that changes something (Ladder.helps), an
-		-- owned item's upgrade. An item's first link is bought at its stand or built on a plot.
 		price = function(link: Comb.Link): number?
-			if link.kind == "track" then
-				local track = Config.track(link.id :: string) :: Config.Track
-				if not Ladder.helps(Config, levels, track.id) then
-					return nil
-				end
-				return Items.price(Config, track.levels[link.level :: number].cost, snap.teamSize)
+			local id = link.id
+			if not id then
+				return nil -- a gate
 			end
-			local item = Items.get(Config, link.id)
-			local level = if (link.level :: number) > 1 then item.levels[(link.level :: number) - 1] else nil
-			return if level then Items.price(Config, level.cost, snap.teamSize) else nil
+			local level, status = Items.tabOffer(Config, levels, snap.items, snap.buildings, id, snap.openAreas, Ladder.helps(Config, levels, id))
+			return if status == "buy" then Items.price(Config, level.cost, snap.teamSize) else nil
 		end,
 		reachable = function(id: string): boolean
 			return Items.reachable(Config, snap.items, { Items.get(Config, id).area })[1] ~= nil
@@ -287,366 +134,9 @@ local function readView(): Comb.View
 	}
 end
 
--- A link's listed price (Config), before the team's scale.
-local function listedCost(link: Comb.Link): number
-	if link.kind == "track" then
-		return (Config.track(link.id :: string) :: Config.Track).levels[link.level :: number].cost
-	end
-	local item = Items.get(Config, link.id)
-	return if link.level == 1 then item.price else item.levels[(link.level :: number) - 1].cost
-end
-
--- An item's first link the team can get now, just not here: at its stand or on a plot.
-local function elsewhere(link: Comb.Link, st: Comb.HexState, view: Comb.View): boolean
-	return st.state == "locked" and link.kind == "item" and link.level == 1 and view.openAreas[link.areaId] == true and view.reachable(link.id :: string)
-end
-
 -- Whether water flows past a hex in `state` into the next one.
 local function lit(state: Comb.StateName): boolean
 	return state == "owned" or state == "max" or state == "gateOpen"
-end
-
--- The template (a Model or a backpack's Accessory) and image a link shows; nil, nil for none.
-local function artOf(link: Comb.Link): (Instance?, string?)
-	if link.kind == "gate" then
-		return nil, nil
-	elseif link.kind == "track" and link.id ~= "tool" then
-		return nil, images[ICONS[link.id :: string]]
-	end
-	local template = if link.kind == "track"
-		then ToolModels.find((Config.track("tool") :: Config.Track).levels[link.level :: number].model :: string)
-		else ToolModels.itemModel(Items.get(Config, link.id))
-	return template, if template then nil else images.unknown -- nil until replicated
-end
-
--- A category hex's art: the current tool, the boosts' pip, else its first item's model.
-local function categoryArt(catId: string, stats: Ladder.Stats): (Instance?, string?)
-	if catId == "tools" then
-		local template = ToolModels.find(stats.toolModel)
-		return template, if template then nil else images.unknown
-	elseif catId == "boosts" then
-		return nil, images.pipFull
-	end
-	for _, link in layout.categories[catId].chains[1].links do
-		if link.kind ~= "gate" then
-			return artOf(link)
-		end
-	end
-	return nil, images.unknown
-end
-
--- A hex's (or the detail's) art slot: `template` in its ViewportFrame (copied once per template),
--- else `image` in its Icon, else nothing.
-local function showArt(record: { art: Instance? }, view: ViewportFrame, icon: ImageLabel, template: Instance?, image: string?)
-	if template and record.art ~= template then
-		ToolModels.showIn(view, template :: any)
-		record.art = template
-	end
-	set(view, "Visible", template ~= nil)
-	set(icon, "Visible", template == nil and image ~= nil)
-	if image then
-		set(icon, "Image", image)
-	end
-end
-
--- Category hexes take the category's colour (Tool orange, Boosts teal, items deep water).
-local function categoryColor(catId: string): Color3
-	return if catId == "tools" then colors.toolTag elseif catId == "boosts" then colors.speedTag else colors.deepWater
-end
-
-local function scaled(size: UDim2, k: number): UDim2
-	return UDim2.new(size.X.Scale * k, size.X.Offset * k, size.Y.Scale * k, size.Y.Offset * k)
-end
-
-type Hex = {
-	button: ImageButton,
-	press: UIScale,
-	bottom: ImageLabel,
-	water: Frame,
-	fill: ImageLabel,
-	outline: ImageLabel,
-	select: GuiObject,
-	view: ViewportFrame,
-	icon: ImageLabel,
-	name: TextLabel,
-	priceRow: GuiObject,
-	coin: ImageLabel,
-	price: TextLabel,
-	lock: GuiObject,
-	check: GuiObject,
-	badge: GuiObject,
-	count: TextLabel,
-	waterWidth: UDim,
-	checkSize: UDim2,
-	badgeSize: UDim2,
-	priceSize: number,
-	q: number,
-	r: number,
-	x: number, -- offset from the canvas centre, before zoom
-	y: number,
-	catId: string?,
-	slots: { Hex }?, -- a chain's slot hexes, this one among them
-	slot: number?,
-	key: string?, -- the link shown now
-	art: Instance?,
-	hover: boolean,
-	down: boolean,
-	ease: number, -- hover / press / breathing scale, catching up
-	base: number, -- the state's own scale (a small open gate)
-	breathe: boolean,
-	animKind: string?, -- "enter", "pop" or "wake"
-	animAt: number,
-	holdUntil: number, -- an animation owns the hex's look until then
-	fade: boolean, -- the next paint fades its colours in
-	badgeCount: number,
-	share: number, -- a category hex's owned share as last painted (-1: never)
-}
-
-type Bridge = { frame: Frame, fill: Frame, fillHeight: UDim }
-
-type ViewData = {
-	id: string,
-	hexes: { Hex },
-	bridges: { Bridge },
-	byKey: { [string]: Hex },
-	into: { [Hex]: Bridge }, -- the bridge leading into each chain slot
-	slots: { { Hex } }, -- per chain
-	centre: Hex?, -- main: the tool
-	ring: { [string]: Hex }, -- main: the category hexes
-	catHex: Hex?, -- a category view's own hex
-	w: number,
-	h: number,
-	zoom: number,
-	pans: boolean,
-}
-
--- The hex parts a copy of Templates.Hex has (Hud.find: the template must keep these names).
-local function hexParts(button: ImageButton)
-	return {
-		press = Hud.find(button, "Press"),
-		bottom = Hud.find(button, "Bottom"),
-		water = Hud.find(button, "Water"),
-		fill = Hud.find(button, "Water.Fill"),
-		outline = Hud.find(button, "Outline"),
-		select = Hud.find(button, "Select"),
-		view = Hud.find(button, "View"),
-		icon = Hud.find(button, "Icon"),
-		name = Hud.find(button, "Name"), -- not button.Name: the child's name clashes with the property
-		priceRow = Hud.find(button, "PriceRow"),
-		coin = Hud.find(button, "PriceRow.Coin"),
-		price = Hud.find(button, "PriceRow.Price"),
-		lock = Hud.find(button, "Lock"),
-		check = Hud.find(button, "Check"),
-		badge = Hud.find(button, "Badge"),
-		count = Hud.find(button, "Badge.Count"),
-	}
-end
-
-local function setWater(hex: Hex, level: number)
-	set(hex.water, "Size", UDim2.new(hex.waterWidth, UDim.new(level, 0)))
-	set(hex.water, "Visible", level > 0)
-end
-
-local function setBridge(bridge: Bridge, level: number)
-	set(bridge.fill, "Size", UDim2.new(UDim.new(level, 0), bridge.fillHeight))
-	set(bridge.fill, "Visible", level > 0)
-end
-
--- A hex's body: colour (its rim a darker shade), transparency and outline; `fade` tweens the colours.
-local function paintBody(hex: Hex, base: Color3, dim: number, outline: Color3, fade: boolean)
-	local rim = base:Lerp(colors.outline, RIM_SHADE)
-	if fade then
-		TweenService:Create(hex.button, FADE, { ImageColor3 = base, ImageTransparency = dim }):Play()
-		TweenService:Create(hex.bottom, FADE, { ImageColor3 = rim, ImageTransparency = dim }):Play()
-	else
-		set(hex.button, "ImageColor3", base)
-		set(hex.button, "ImageTransparency", dim)
-		set(hex.bottom, "ImageColor3", rim)
-		set(hex.bottom, "ImageTransparency", dim)
-	end
-	set(hex.outline, "ImageColor3", outline)
-	set(hex.outline, "ImageTransparency", dim)
-	set(hex.view, "ImageTransparency", dim)
-	set(hex.icon, "ImageTransparency", dim)
-end
-
-local function paintName(hex: Hex, text: string?, dim: number)
-	set(hex.name, "Visible", text ~= nil)
-	if text then
-		set(hex.name, "Text", text)
-		set(hex.name, "TextTransparency", dim)
-	end
-end
-
--- The price row: `text` (nil hides it), the coin, its colour, small for a later level.
-local function paintPrice(hex: Hex, text: string?, coin: boolean, color: Color3, small: boolean, dim: number)
-	set(hex.priceRow, "Visible", text ~= nil)
-	if not text then
-		return
-	end
-	set(hex.price, "Text", text)
-	set(hex.price, "TextColor3", color)
-	set(hex.price, "TextTransparency", dim)
-	set(hex.price, "TextSize", if small then math.round(hex.priceSize * SMALL_PRICE) else hex.priceSize)
-	set(hex.coin, "Visible", coin)
-	set(hex.coin, "ImageTransparency", dim)
-end
-
--- How closed `area`'s gate opens, for its hex: the fill it needs, or its price once on sale.
-local function gateText(area): (string, boolean)
-	if fillNow() < area.gate.fill then
-		return `fill {Format.percent(area.gate.fill)}`, false
-	end
-	return Hud.money(Hud.price(area.gate.price)), true
-end
-
--- A link hex in its state (shared/Honeycomb.states).
-local function paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, catId: string, view: Comb.View, fade: boolean)
-	local state = st.state
-	local base, dim, outline = categoryColor(catId), 0, colors.outline
-	local water, waterColor, check, lock, art = 0, colors.shallowWater, false, false, true
-	local name, priceText, coin, priceColor, small = nil, nil, false, colors.foam, false
-	hex.base = 1
-	if state == "owned" then
-		water, check = 1, true
-	elseif state == "max" then
-		water, name, outline = 1, "MAX", colors.toolTag
-	elseif state == "buy" then
-		priceText, coin = Hud.money(st.price :: number), true
-	elseif state == "short" then
-		base, water, waterColor = colors.locked, st.progress :: number, colors.shallowWater:Lerp(colors.locked, 0.5)
-		priceText, coin, priceColor = Hud.money(st.price :: number), true, colors.buyCoral
-	elseif state == "future" or elsewhere(link, st, view) then
-		dim, small = DIM, true
-		priceText, coin = Hud.money(Hud.price(listedCost(link))), true
-	elseif link.kind == "gate" then
-		local area = Areas.byId(Config, link.areaId)
-		base, art, name = colors.locked, false, area.name
-		if state == "gateOpen" then
-			dim, hex.base = DIM, CUE.gateScale
-		else
-			lock = true
-			priceText, coin = gateText(area)
-		end
-	else
-		base, art, lock = colors.locked, false, true
-	end
-	paintBody(hex, base, dim, outline, fade)
-	set(hex.fill, "ImageColor3", waterColor)
-	setWater(hex, water)
-	set(hex.check, "Visible", check)
-	set(hex.lock, "Visible", lock)
-	paintName(hex, name, dim)
-	paintPrice(hex, priceText, coin, priceColor, small, dim)
-	local template, image = nil, nil
-	if art then
-		template, image = artOf(link)
-	end
-	showArt(hex, hex.view, hex.icon, template, image)
-	hex.breathe = state == "buy"
-end
-
--- The red ball: pops in when something becomes buyable, shrinks away at 0.
-local function paintBadge(hex: Hex, count: number)
-	local was = hex.badgeCount
-	hex.badgeCount = count
-	set(hex.count, "Text", tostring(count))
-	local info = TweenInfo.new(CUE.badgeSeconds, Enum.EasingStyle.Back, if count > 0 then Enum.EasingDirection.Out else Enum.EasingDirection.In)
-	if was < 0 then
-		set(hex.badge, "Visible", count > 0)
-	elseif count > 0 and was == 0 then
-		hex.badge.Size = UDim2.new()
-		hex.badge.Visible = true
-		TweenService:Create(hex.badge, info, { Size = hex.badgeSize }):Play()
-	elseif count == 0 and was > 0 then
-		local shrink = TweenService:Create(hex.badge, info, { Size = UDim2.new() })
-		shrink.Completed:Once(function()
-			if hex.badgeCount == 0 then
-				hex.badge.Visible = false
-			end
-			hex.badge.Size = hex.badgeSize
-		end)
-		shrink:Play()
-	end
-end
-
--- A category hex: its name, art, badge, and how much of it is owned (water and "3/12").
-local function paintCategory(hex: Hex, catId: string, view: Comb.View, count: number, stats: Ladder.Stats)
-	local owned, total = Comb.ownedShare(layout, catId, view)
-	local share = if total > 0 then owned / total else 0
-	paintBody(hex, categoryColor(catId), 0, colors.outline, false)
-	set(hex.fill, "ImageColor3", colors.shallowWater)
-	if hex.share >= 0 and share > hex.share then -- a buy: the water rises
-		hex.water.Visible = true
-		TweenService:Create(hex.water, TweenInfo.new(CUE.waterSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(hex.waterWidth, UDim.new(share, 0)) }):Play()
-	elseif share ~= hex.share then
-		setWater(hex, share)
-	end
-	hex.share = share
-	set(hex.check, "Visible", false)
-	set(hex.lock, "Visible", false)
-	paintName(hex, CATEGORY_NAMES[catId]:upper(), 0)
-	paintPrice(hex, `{owned}/{total}`, false, colors.foam, true, 0)
-	showArt(hex, hex.view, hex.icon, categoryArt(catId, stats))
-	paintBadge(hex, count)
-	hex.breathe = false
-end
-
--- The main view's centre: the tool in hand.
-local function paintCentre(hex: Hex, stats: Ladder.Stats)
-	paintBody(hex, colors.toolTag, 0, colors.outline, false)
-	setWater(hex, 0)
-	set(hex.check, "Visible", false)
-	set(hex.lock, "Visible", false)
-	paintName(hex, stats.toolName, 0)
-	paintPrice(hex, nil, false, colors.foam, false, 0)
-	local template = ToolModels.find(stats.toolModel)
-	showArt(hex, hex.view, hex.icon, template, if template then nil else images.unknown)
-end
-
--- A spine hex: a quiet connector between the category and its chains.
-local function paintSpine(hex: Hex)
-	paintBody(hex, colors.deepSea, 0, colors.outline, false)
-	setWater(hex, 0)
-	for _, part in { hex.check, hex.lock, hex.name, hex.priceRow, hex.view, hex.icon, hex.badge } do
-		set(part, "Visible", false)
-	end
-	hex.button.Active = false
-	hex.button.Selectable = false
-end
-
--- The scale an animation adds at `now` (1 when none plays).
-local function animScale(hex: Hex, now: number): number
-	local kind = hex.animKind
-	if not kind then
-		return 1
-	end
-	if kind == "enter" then
-		local t = (now - hex.animAt) / CUE.enterSeconds
-		if t >= 1 then
-			hex.animKind = nil
-			return 1
-		end
-		return CUE.enterFrom + (1 - CUE.enterFrom) * Ease.backOut(t, BACK_OVERSHOOT)
-	elseif kind == "pop" then
-		local t = (now - hex.animAt) / CUE.popSeconds
-		if t >= 1 then
-			hex.animKind = nil
-			return 1
-		end
-		return CUE.popFrom + (1 - CUE.popFrom) * Ease.backOut(t, BACK_OVERSHOOT)
-	end
-	-- wake: up past full size, then settle
-	local t = (now - hex.animAt) / CUE.wakeSeconds
-	if t >= 1 then
-		hex.animKind = nil
-		return 1
-	elseif t < 0.6 then
-		local u = t / 0.6
-		return CUE.wakeFrom + (CUE.wakeOvershoot - CUE.wakeFrom) * (1 - (1 - u) * (1 - u))
-	end
-	local u = (t - 0.6) / 0.4
-	return CUE.wakeOvershoot + (1 - CUE.wakeOvershoot) * (1 - (1 - u) * (1 - u))
 end
 
 -- The next link after `key` in its chain that isn't a gate, or nil.
@@ -683,6 +173,55 @@ local function firstBuy(link: Comb.Link): boolean
 	return link.id == "tool" and levels[link.level :: number].model ~= levels[(link.level :: number) - 1].model
 end
 
+local function sameWindow(a: { number }, b: { number }): boolean
+	if #a ~= #b then
+		return false
+	end
+	for i, index in a do
+		if b[i] ~= index then
+			return false
+		end
+	end
+	return true
+end
+
+-- Attributes a hex's state reads, besides Wallet (shared/Honeycomb.states through readView).
+local function readsState(name: string): boolean
+	return name == "TeamSize"
+		or name == "Owned"
+		or name == "GatesOpen"
+		or name:sub(1, 6) == "Level_"
+		or name:sub(1, 10) == "ItemLevel_"
+		or name:sub(1, 14) == "BuildingLevel_"
+end
+
+local function noop() end
+
+local function never(): boolean
+	return false
+end
+
+type ViewData = {
+	id: string,
+	hexes: { Hex.Hex },
+	bridges: { Hex.Bridge },
+	byKey: { [string]: Hex.Hex },
+	into: { [Hex.Hex]: Hex.Bridge }, -- the bridge leading into each chain slot
+	slots: { { Hex.Hex } }, -- per chain
+	windows: { [number]: { number } }, -- per chain: the link indices its slots show (Comb.window)
+	landing: { [{ Hex.Hex }]: boolean }, -- chains (by their slots) whose landing plays: their window holds
+	centre: Hex.Hex?, -- main: the tool
+	ring: { [string]: Hex.Hex }, -- main: the category hexes
+	catHex: Hex.Hex?, -- a category view's own hex
+	w: number,
+	h: number,
+	zoom: number,
+	pans: boolean,
+}
+
+-- A buy sent (by link key) until its LastBuy lands or PENDING_SECONDS pass.
+type Pending = { key: string, id: string, have: number, at: number, cost: number }
+
 function Honeycomb.start()
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local buyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Buy") :: RemoteEvent
@@ -718,7 +257,7 @@ function Honeycomb.start()
 	local upgradesKey = Hud.find(upgrades, "Key")
 	local upgradesKeyText = Hud.find(upgradesKey, "Text")
 	local hexTemplate = Hud.find(gui, "Templates.Hex") :: ImageButton
-	hexParts(hexTemplate) -- fail at start, not on the first open
+	Hex.parts(hexTemplate) -- fail at start, not on the first open
 	local bridgeTemplate = Hud.find(gui, "Templates.Bridge") :: Frame
 	Hud.find(bridgeTemplate, "Fill")
 
@@ -754,15 +293,43 @@ function Honeycomb.start()
 	local nextRefresh = 0
 	local panX, panY = 0, 0
 	local guardUntil = 0
-	local pending: { key: string, id: string, have: number, at: number, cost: number }? = nil
+	local pending: { [string]: Pending } = {}
+	local landed: { [string]: Pending } = {} -- your buys the server confirmed (LastBuy), until their hex lands
+	local badgeLow, badgeHigh = -math.huge, math.huge -- wallets that keep the badges (Comb.badges)
+	local gamepad = false
 
 	local function inRun(): boolean
 		return ReplicatedStorage:GetAttribute("Phase") == "playing"
 	end
 
-	ReplicatedStorage.AttributeChanged:Connect(function()
-		dirty = true
+	-- Only what can change a hex marks a refresh. Fill and Staff only change words, so they count
+	-- while open; closed, a wallet change counts only when it crosses a badge's price.
+	ReplicatedStorage.AttributeChanged:Connect(function(name: string)
+		if readsState(name) or (open and (name == "Fill" or name == "Staff")) then
+			dirty = true
+		elseif name == "Wallet" then
+			local wallet = Hud.wallet()
+			dirty = dirty or open or wallet < badgeLow or wallet >= badgeHigh
+		end
 	end)
+
+	-- Sent buys without their LastBuy after PENDING_SECONDS were refused: their link may land as a
+	-- teammate's now.
+	local function expirePending(now: number)
+		for key, sent in pending do
+			if now - sent.at >= PENDING_SECONDS then
+				pending[key] = nil
+				dirty = true
+			end
+		end
+	end
+
+	-- Your buy landed: the sting, coins into `target` (nil: none) and a NEW! stamp for a first.
+	local function playOwn(sent: Pending, view: Comb.View, target: GuiObject?, arrive: () -> (), still: () -> boolean)
+		local info = infos[sent.key]
+		local pitch = Cues.stingPitch(Comb.ownedCount(info.chain, view))
+		Purchase.landed(target, sent.cost, pitch, firstBuy(info.link), arrive, still)
+	end
 
 	local function applyPan()
 		set(canvas, "Position", UDim2.new(canvasBase.X.Scale, canvasBase.X.Offset + panX, canvasBase.Y.Scale, canvasBase.Y.Offset + panY))
@@ -780,7 +347,7 @@ function Honeycomb.start()
 	end
 
 	-- A panning view keeps `hex` on the board.
-	local function panTo(v: ViewData, hex: Hex?)
+	local function panTo(v: ViewData, hex: Hex.Hex?)
 		if hex and v.pans then
 			panX, panY = -hex.x * v.zoom, -hex.y * v.zoom
 			clampPan(v)
@@ -802,41 +369,17 @@ function Honeycomb.start()
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
 	refit()
 
-	local function newHex(v: ViewData, q: number, r: number, cx: number, cy: number): Hex
-		local button = hexTemplate:Clone()
-		local hex = hexParts(button) :: any
-		hex.button = button
-		hex.waterWidth = hex.water.Size.X
-		hex.checkSize = hex.check.Size
-		hex.badgeSize = hex.badge.Size
-		hex.priceSize = hex.price.TextSize
+	local function newHex(v: ViewData, q: number, r: number, cx: number, cy: number): Hex.Hex
 		local x, y = Comb.toPixel(q, r, spaced)
-		hex.q, hex.r, hex.x, hex.y = q, r, x - cx, y - cy
-		hex.hover, hex.down, hex.breathe, hex.fade = false, false, false, false
-		hex.ease, hex.base, hex.animAt, hex.holdUntil, hex.badgeCount, hex.share = 1, 1, 0, 0, -1, -1
-		hex.select.Visible = false
-		hex.badge.Visible = false
-		button.AutoButtonColor = false -- hover and press scale it instead
-		button.Position = UDim2.fromOffset(hex.x, hex.y)
-		button.Visible = false
-		button.Parent = canvas
+		local hex = Hex.new(hexTemplate, q, r, x - cx, y - cy, canvas)
 		table.insert(v.hexes, hex)
 		return hex
 	end
 
-	local function newBridge(v: ViewData, a: Comb.Pos, b: Comb.Pos, cx: number, cy: number): Bridge
-		local frame = bridgeTemplate:Clone()
+	local function newBridge(v: ViewData, a: Comb.Pos, b: Comb.Pos, cx: number, cy: number): Hex.Bridge
 		local ax, ay = Comb.toPixel(a.q, a.r, spaced)
 		local bx, by = Comb.toPixel(b.q, b.r, spaced)
-		frame.Position = UDim2.fromOffset((ax + bx) / 2 - cx, (ay + by) / 2 - cy)
-		frame.Rotation = math.deg(math.atan2(by - ay, bx - ax)) -- its Fill grows from a toward b
-		frame.ZIndex = hexTemplate.ZIndex - 1 -- under the hexes it joins
-		frame.BackgroundColor3 = colors.outline
-		frame.Visible = false
-		frame.Parent = canvas
-		local fill = Hud.find(frame, "Fill") :: Frame
-		fill.BackgroundColor3 = colors.shallowWater
-		local bridge = { frame = frame, fill = fill, fillHeight = fill.Size.Y }
+		local bridge = Hex.newBridge(bridgeTemplate, ax - cx, ay - cy, bx - cx, by - cy, hexTemplate.ZIndex, canvas)
 		table.insert(v.bridges, bridge)
 		return bridge
 	end
@@ -844,9 +387,11 @@ function Honeycomb.start()
 	local selectKey: (string?) -> ()
 	local showView: (string, string?) -> ()
 	local setOpen: (boolean, string?) -> ()
+	local dragMoved = false -- the last press on the board dragged: its release clicks nothing
 
-	-- Hover (mouse or gamepad selection) grows a hex and shows its ring; press shrinks it.
-	local function hook(hex: Hex, onClick: () -> ())
+	-- Hover (mouse or gamepad selection) grows a hex and shows its ring; press shrinks it. Clicks
+	-- count only while open and not at the end of a drag.
+	local function hook(hex: Hex.Hex, onClick: () -> ())
 		local button = hex.button
 		button.MouseEnter:Connect(function()
 			hex.hover = true
@@ -867,15 +412,23 @@ function Honeycomb.start()
 			hex.down = false
 		end)
 		button.Activated:Connect(function(input: InputObject)
-			if input.UserInputType == Enum.UserInputType.Touch then
+			local kind = input.UserInputType
+			local pointer = kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch
+			if kind == Enum.UserInputType.Touch then
 				hex.hover = false -- a finger leaves no hover behind
 			end
-			onClick()
+			if open and not (pointer and dragMoved) then
+				onClick()
+			end
 		end)
 	end
 
+	local function emptyView(id: string): ViewData
+		return { id = id, hexes = {}, bridges = {}, byKey = {}, into = {}, slots = {}, windows = {}, landing = {}, ring = {}, w = 0, h = 0, zoom = 1, pans = false }
+	end
+
 	local function buildMain(): ViewData
-		local v: ViewData = { id = "main", hexes = {}, bridges = {}, byKey = {}, into = {}, slots = {}, ring = {}, w = 0, h = 0, zoom = 1, pans = false }
+		local v = emptyView("main")
 		local positions: { Comb.Pos } = { { q = 0, r = 0 } }
 		for _, hex in layout.main.ring do
 			table.insert(positions, { q = hex.q, r = hex.r })
@@ -900,7 +453,7 @@ function Honeycomb.start()
 
 	local function buildCategory(catId: string): ViewData
 		local cat = layout.categories[catId]
-		local v: ViewData = { id = catId, hexes = {}, bridges = {}, byKey = {}, into = {}, slots = {}, ring = {}, w = 0, h = 0, zoom = 1, pans = false }
+		local v = emptyView(catId)
 		local positions: { Comb.Pos } = { cat.hex }
 		table.move(cat.spine, 1, #cat.spine, 2, positions)
 		for _, chain in cat.chains do
@@ -909,13 +462,16 @@ function Honeycomb.start()
 		local cx, cy, w, h = Comb.bounds(positions, spaced)
 		v.w, v.h = w, h
 		for _, bridge in cat.bridges do
-			setBridge(newBridge(v, bridge[1], bridge[2], cx, cy), 1) -- the spine is always full
+			Hex.setBridge(newBridge(v, bridge[1], bridge[2], cx, cy), 1) -- the spine is always full
 		end
 		local catHex = newHex(v, cat.hex.q, cat.hex.r, cx, cy)
 		catHex.catId = catId
+		hook(catHex, function()
+			showView("main")
+		end)
 		v.catHex = catHex
 		for _, pos in cat.spine do
-			paintSpine(newHex(v, pos.q, pos.r, cx, cy))
+			Hex.paintSpine(newHex(v, pos.q, pos.r, cx, cy))
 		end
 		for ci, chain in cat.chains do
 			local slots = {}
@@ -943,150 +499,29 @@ function Honeycomb.start()
 		end
 	end
 
-	-- The landing's hex animation (shop.md: the hex fills, the bridge fills, the next hex wakes up):
-	-- holds the hex and the next one, and returns what starts it (Purchase.landed runs it as the
-	-- coins arrive). `own`: the next hex becomes selected.
-	local function celebrate(v: ViewData, hex: Hex, own: boolean): () -> ()
+	-- A landing on `hex` (Hex.celebrate): its chain's window holds until it ends, and the selection
+	-- moves on to the next link if it still sits on the bought one.
+	local function celebrate(v: ViewData, hex: Hex.Hex): () -> ()
 		local token, key = animToken, hex.key :: string
-		local slots = hex.slots :: { Hex }
+		local slots = hex.slots :: { Hex.Hex }
 		local nextHex = slots[(hex.slot :: number) + 1]
-		local bridge = nextHex and v.into[nextHex]
-		local final = states[key].state
-		hex.holdUntil = math.huge
-		setWater(hex, 0)
-		set(hex.check, "Visible", false)
+		v.landing[slots] = true
 		local function alive(): boolean
 			return token == animToken and hex.key == key
 		end
-		local function release()
-			hex.holdUntil = 0
-			if nextHex then
-				nextHex.holdUntil = 0
-			end
+		return Hex.celebrate(hex, states[key].state, nextHex, nextHex and v.into[nextHex], alive, function(step: Hex.Step)
 			dirty = true
-		end
-		return function()
-			if not alive() then
-				release()
-				return
+			if step == "filled" and nextHex then
+				return -- the bridge and the next hex follow
 			end
-			hex.water.Visible = true
-			local full = UDim2.new(hex.waterWidth, UDim.new(1, 0))
-			TweenService:Create(hex.water, TweenInfo.new(CUE.waterSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = full }):Play()
-			task.delay(CUE.waterSeconds, function()
-				if not alive() then
-					release()
-					return
+			v.landing[slots] = nil
+			if step == "woke" then
+				nextRefresh = 0
+				if selectedKey == key then
+					selectKey(nextLinkKey(key))
 				end
-				hex.animKind, hex.animAt = "pop", os.clock()
-				hex.holdUntil = 0 -- full now: the next paint matches; the check's stamp is Size only
-				dirty = true
-				if final == "owned" then
-					local check = hex.check
-					check.Size = UDim2.new()
-					check.Visible = true
-					local up = TweenService:Create(check, TweenInfo.new(CUE.checkSeconds * 0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = scaled(hex.checkSize, CUE.checkOvershoot) })
-					up.Completed:Once(function()
-						TweenService:Create(check, TweenInfo.new(CUE.checkSeconds * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Size = hex.checkSize }):Play()
-					end)
-					up:Play()
-				end
-				if not (nextHex and bridge) then
-					return
-				end
-				setBridge(bridge, 0)
-				bridge.fill.Visible = true
-				TweenService:Create(bridge.fill, TweenInfo.new(CUE.bridgeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(UDim.new(1, 0), bridge.fillHeight) }):Play()
-				task.delay(CUE.bridgeSeconds, function()
-					if token ~= animToken then
-						release()
-						return
-					end
-					nextHex.fade = true
-					nextHex.animKind, nextHex.animAt = "wake", os.clock()
-					nextHex.holdUntil = 0
-					dirty, nextRefresh = true, 0
-					if own or selectedKey == key then
-						selectKey(nextLinkKey(key))
-					end
-				end)
-			end)
-		end
-	end
-
-	-- A button springs when what it sent lands: down, past full size, back.
-	local function bounce(scale: UIScale)
-		scale.Scale = CUE.bounceLow
-		local up = TweenService:Create(scale, TweenInfo.new(CUE.bounceSeconds * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = CUE.bounceHigh })
-		up.Completed:Once(function(playback)
-			if playback == Enum.PlaybackState.Completed then
-				TweenService:Create(scale, TweenInfo.new(CUE.bounceSeconds * 0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Scale = 1 }):Play()
 			end
 		end)
-		up:Play()
-	end
-
-	-- The detail's words for the selected link: why it can't be bought here (nil when it can).
-	local function reasonOf(link: Comb.Link, st: Comb.HexState, view: Comb.View): string?
-		local state = st.state
-		local area = Areas.byId(Config, link.areaId)
-		if state == "short" then
-			return `Need {Hud.money(math.ceil((st.price :: number) - view.wallet))} more`
-		elseif elsewhere(link, st, view) then
-			local item = Items.get(Config, link.id)
-			if item.kind == "building" then
-				return "Build one on a town plot"
-			end
-			return `{if item.kind == "staff" then "Hire" else "Buy"} it at the {Format.standName(Config, item.stand, area)}`
-		elseif state == "gateClosed" or (state == "locked" and not view.openAreas[link.areaId]) then
-			return `Opens with {area.name}: {Format.gateHint(area, fillNow(), Hud.price)}`
-		elseif state == "locked" and link.kind == "item" and not view.reachable(link.id :: string) then
-			return `Needs the {Items.get(Config, area.needs).name}`
-		elseif state == "locked" and link.id == "pickup" then
-			return "Your tool already fills in one scoop"
-		elseif state == "future" then
-			return "Buy the level before it first"
-		end
-		return nil
-	end
-
-	-- The Buy button's word when it can't buy.
-	local function wordOf(link: Comb.Link, st: Comb.HexState, view: Comb.View): string
-		local state = st.state
-		if state == "owned" then
-			return "OWNED"
-		elseif state == "max" then
-			return "MAX"
-		elseif state == "gateOpen" then
-			return "OPEN"
-		elseif elsewhere(link, st, view) then
-			return if Items.get(Config, link.id).kind == "building" then "ON A PLOT" else "AT STAND"
-		end
-		return "LOCKED"
-	end
-
-	local function nameOf(link: Comb.Link): string
-		if link.kind == "gate" then
-			return `{Areas.byId(Config, link.areaId).name} gate`
-		elseif link.kind == "track" then
-			local track = Config.track(link.id :: string) :: Config.Track
-			return Format.levelName(track, link.level :: number, track.levels[link.level :: number])
-		end
-		return Items.get(Config, link.id).name
-	end
-
-	-- One line: what the link's level does (a track: against the level before it).
-	local function effectOf(link: Comb.Link, view: Comb.View): string
-		if link.kind == "gate" then
-			return `Opens {Areas.byId(Config, link.areaId).name} and its upgrades`
-		elseif link.kind == "track" then
-			local before, after = table.clone(view.levels), table.clone(view.levels)
-			before[link.id :: string], after[link.id :: string] = (link.level :: number) - 1, link.level :: number
-			return effectText(link.id :: string, Ladder.stats(Config, before), Ladder.stats(Config, after))
-		end
-		local item = Items.get(Config, link.id)
-		local level = if (link.level :: number) > 1 then item.levels[(link.level :: number) - 1] else nil
-		return itemEffect(item, level, (view.items[item.id] or 0) > 0)
 	end
 
 	local function paintDetail(view: Comb.View)
@@ -1100,19 +535,19 @@ function Honeycomb.start()
 		local state = st.state
 		local template, image = nil, images.lock
 		if link.kind ~= "gate" then
-			template, image = artOf(link)
+			template, image = Hex.artOf(link, true)
 		end
-		showArt(detailArt, detailView, detailIcon, template, image)
-		set(itemName, "Text", nameOf(link))
+		Hex.showArt(detailArt, detailView, detailIcon, template, image)
+		set(itemName, "Text", Text.name(link))
 		set(levelText, "Text", if link.kind == "gate" then "Gate" else Comb.levelText(link, state))
-		set(effect, "Text", effectOf(link, view))
-		local need = reasonOf(link, st, view)
+		set(effect, "Text", Text.effect(link, view))
+		local need = Text.reason(link, st, view)
 		set(needText, "Visible", need ~= nil)
 		if need then
 			set(needText, "Text", need)
 		end
 		local priced = state == "buy" or state == "short"
-		set(buyLabel, "Text", if priced then "BUY" else wordOf(link, st, view))
+		set(buyLabel, "Text", if priced then "BUY" else Text.word(link, st, view))
 		set(buyPriceRow, "Visible", priced)
 		if priced then
 			set(buyPrice, "Text", Hud.money(st.price :: number))
@@ -1123,40 +558,24 @@ function Honeycomb.start()
 		local hired = item ~= nil and item.kind == "staff" and (view.items[item.id] or 0) > 0
 		set(assignButton, "Visible", hired)
 		if hired then
-			set(assignLabel, "Text", assignText(item, postOf(item.id)))
+			set(assignLabel, "Text", Text.assign(item, postOf(item.id)))
 		end
 	end
 
 	-- Re-reads the team's state: badges always; while open the shown view, the landings since the
-	-- last refresh and the detail.
+	-- last refresh (yours from LastBuy, teammates' silent) and the detail.
 	local function refresh()
 		local now = os.clock()
+		expirePending(now)
 		dirty = false
 		local view = readView()
-		local badges = Comb.badges(layout, view)
+		local badges, low, high = Comb.badges(layout, view)
+		badgeLow, badgeHigh = low, high
 		set(upgradesBadge, "Visible", badges.total > 0)
 		if upgradesCount and upgradesCount:IsA("TextLabel") then
 			set(upgradesCount, "Text", tostring(badges.total))
 		end
-
-		-- Your own buy landed (its bought count went up)?
-		local own = nil
-		if pending then
-			local info = infos[pending.key]
-			if Comb.bought(info.link, view) > pending.have then
-				own = pending
-				pending = nil
-				guardUntil = now + BUY_GUARD
-			elseif now - pending.at >= PENDING_SECONDS then
-				pending = nil
-			end
-		end
-		local ownInfo = if own then infos[own.key] else nil
-		local ownPitch = if ownInfo then Cues.stingPitch(Comb.ownedCount(ownInfo.chain, view)) else 1
 		if not open then
-			if own and ownInfo then -- closed before it landed: the sound only
-				Purchase.landed(nil, own.cost, ownPitch, firstBuy(ownInfo.link), function() end)
-			end
 			return
 		end
 
@@ -1170,85 +589,163 @@ function Honeycomb.start()
 		end
 
 		if viewId == "main" then
-			paintCentre(v.centre :: Hex, stats)
+			Hex.paintCentre(v.centre :: Hex.Hex, stats)
 			for id, hex in v.ring do
-				paintCategory(hex, id, view, badges[id], stats)
+				Hex.paintCategory(hex, layout, id, view, badges[id], stats)
 			end
-			if own and ownInfo then
-				local centre = v.centre :: Hex
-				bounce(buyPress)
+			local centre = v.centre :: Hex.Hex
+			for key, sent in landed do
+				landed[key] = nil
+				Hex.bounce(buyPress)
 				centre.animKind, centre.animAt = "pop", now
-				Purchase.landed(centre.button, own.cost, ownPitch, firstBuy(ownInfo.link), function() end)
+				local token = animToken
+				playOwn(sent, view, centre.button, noop, function()
+					return open and token == animToken
+				end)
 			end
 			paintDetail(view)
 			return
 		end
 
-		paintCategory(v.catHex :: Hex, catId, view, badges[catId], stats)
-		-- Links owned now that weren't at the last refresh: one per chain plays its landing.
+		local cat = layout.categories[catId]
+		Hex.paintCategory(v.catHex :: Hex.Hex, layout, catId, view, badges[catId], stats)
+		-- Links owned now that weren't at the last refresh: one per chain plays its landing. A link
+		-- you sent a buy for waits (unpainted) for its LastBuy or the pending's end, so it plays as yours.
 		local fresh: { [Comb.Chain]: string | false } = {}
+		local waiting: { [string]: boolean } = {}
+		local held: { [Comb.Chain]: boolean } = {}
 		if lastOwned then
 			for key, st in states do
 				if lit(st.state) and st.state ~= "gateOpen" and not lastOwned[key] then
 					local chain = infos[key].chain
-					fresh[chain] = if fresh[chain] == nil then key else false
+					if pending[key] then
+						waiting[key], held[chain] = true, true
+					else
+						fresh[chain] = if fresh[chain] == nil then key else false
+					end
 				end
 			end
 		end
 		lastOwned = lastOwned or {}
 		for key, st in states do
-			(lastOwned :: any)[key] = lit(st.state) and st.state ~= "gateOpen"
+			(lastOwned :: any)[key] = lit(st.state) and st.state ~= "gateOpen" and not waiting[key]
 		end
 
+		-- Windows: a chain whose landing plays (or waits) keeps the links it shows, so the hex you
+		-- bought fills where it is; then it slides to its new window.
 		table.clear(v.byKey)
-		for ci, chain in layout.categories[catId].chains do
-			local shown = Comb.window(chain, Comb.ownedCount(chain, view))
-			for i, hex in v.slots[ci] do
+		for ci, chain in cat.chains do
+			local slots = v.slots[ci]
+			local want = Comb.window(chain, Comb.ownedCount(chain, view))
+			local shown = v.windows[ci]
+			local busy = v.landing[slots] == true or held[chain] == true or type(fresh[chain]) == "string"
+			local moves = nil
+			if not shown then
+				shown = want
+			elseif not busy and not sameWindow(shown, want) then
+				moves = Comb.moves(shown, want)
+				shown = want
+			end
+			v.windows[ci] = shown
+			for i, hex in slots do
 				hex.key = chain.links[shown[i]].key
 				v.byKey[hex.key :: string] = hex
+				local from = if moves then moves[i] else i
+				if from ~= i then
+					hex.holdUntil, hex.fade = 0, false -- it shows another link now: paint it at once
+				end
+				if not from then
+					hex.animKind, hex.animAt = "enter", now
+				elseif from ~= i then
+					Hex.slide(hex, slots[from].x, slots[from].y)
+				end
 			end
 		end
-		local landings: { Hex } = {}
+
+		local landings: { Hex.Hex } = {}
 		for _, key in fresh do
 			local hex = if key then v.byKey[key] else nil
 			if hex then
 				table.insert(landings, hex)
-				local nextHex = (hex.slots :: { Hex })[(hex.slot :: number) + 1]
+				local nextHex = (hex.slots :: { Hex.Hex })[(hex.slot :: number) + 1]
 				if nextHex then
 					nextHex.holdUntil = math.huge -- keeps its old look until it wakes
 				end
 			end
 		end
-		for ci in layout.categories[catId].chains do
+		-- A hex an animation holds is painted when the hold ends (a fade's end: refresh again then).
+		local retryAt = math.huge
+		for ci, chain in cat.chains do
+			local models = Comb.modelKeys(chain, states)
 			for i, hex in v.slots[ci] do
-				if now >= hex.holdUntil then
-					local key = hex.key :: string
-					paintLink(hex, infos[key].link, states[key], catId, view, hex.fade)
-					if hex.fade then
-						hex.fade = false
-						hex.holdUntil = now + FADE.Time
-					end
-					local before = v.slots[ci][i - 1]
-					setBridge(v.into[hex], if not before or lit(states[before.key :: string].state) then 1 else 0)
+				local key = hex.key :: string
+				if waiting[key] then
+					continue
+				elseif now < hex.holdUntil then
+					retryAt = math.min(retryAt, hex.holdUntil)
+					continue
 				end
+				Hex.paintLink(hex, infos[key].link, states[key], catId, view, hex.fade, models[key] == true)
+				if hex.fade then
+					hex.fade = false
+					hex.holdUntil = now + CUE.fadeSeconds
+				end
+				local before = v.slots[ci][i - 1]
+				Hex.setBridge(v.into[hex], if not before or lit(states[before.key :: string].state) then 1 else 0)
 			end
 		end
 		for _, hex in landings do
-			local start = celebrate(v, hex, own ~= nil and own.key == hex.key)
-			if own and ownInfo and own.key == hex.key then
-				bounce(buyPress)
-				Purchase.landed(hex.button, own.cost, ownPitch, firstBuy(ownInfo.link), start)
-				own = nil
+			local key = hex.key :: string
+			local mine = landed[key]
+			landed[key] = nil
+			local start = celebrate(v, hex)
+			if mine then
+				Hex.bounce(buyPress)
+				local token = animToken
+				playOwn(mine, view, hex.button, start, function()
+					return open and token == animToken and hex.key == key
+				end)
 			else
 				start()
 			end
 		end
-		if own and ownInfo then -- landed, but its hex isn't shown
-			bounce(buyPress)
-			Purchase.landed(nil, own.cost, ownPitch, firstBuy(ownInfo.link), function() end)
+		-- Your buys that won't land on a hex here (another view, two at once, already shown owned):
+		-- the sound only. One still waiting for its level stays.
+		for key, sent in landed do
+			local st = states[key]
+			if not st or lit(st.state) then
+				landed[key] = nil
+				Hex.bounce(buyPress)
+				playOwn(sent, view, nil, noop, never)
+			end
 		end
 		paintDetail(view)
+		if retryAt < math.huge then
+			dirty, nextRefresh = true, retryAt
+		end
 	end
+
+	-- The server credited one of your buys (Run's onBuy): it lands as yours.
+	player:GetAttributeChangedSignal("LastBuy"):Connect(function()
+		local buy = Comb.decodeBuy(player:GetAttribute("LastBuy"))
+		local now = os.clock()
+		expirePending(now)
+		if not buy then
+			return
+		end
+		for key, sent in pending do
+			if sent.id == buy.id and sent.have + 1 == buy.level then
+				pending[key] = nil
+				guardUntil = now + BUY_GUARD
+				if open then
+					landed[key] = sent
+					dirty, nextRefresh = true, 0
+				else -- closed before it landed: the sound only
+					playOwn(sent, readView(), nil, noop, never)
+				end
+			end
+		end
+	end)
 
 	selectKey = function(key: string?)
 		if not key then
@@ -1277,6 +774,8 @@ function Honeycomb.start()
 		setVisible(v, true)
 		viewId = id
 		selectedKey, pickId, lastOwned = nil, pick, nil
+		table.clear(v.windows)
+		table.clear(v.landing)
 		panX, panY = 0, 0
 		fitView(v)
 		zoomScale.Scale = v.zoom * CUE.glideZoomFrom
@@ -1285,13 +784,14 @@ function Honeycomb.start()
 		for _, hex in v.hexes do
 			hex.animKind, hex.animAt = "enter", now + Comb.enterDelay(hex.q, hex.r, CUE.enterStagger, CUE.enterCap)
 			hex.holdUntil, hex.hover, hex.down, hex.fade = 0, false, false, false
+			hex.button.Position = UDim2.fromOffset(hex.x, hex.y) -- a slide cut short
 		end
 		set(backButton, "Visible", id ~= "main")
-		set(breadcrumb, "Text", if id == "main" then "UPGRADES" else `UPGRADES › {CATEGORY_NAMES[id]:upper()}`)
+		set(breadcrumb, "Text", if id == "main" then "UPGRADES" else `UPGRADES › {Text.category(id):upper()}`)
 		refresh()
 		local selected = if selectedKey then v.byKey[selectedKey] else nil
 		panTo(v, selected)
-		if UserInputService:GetLastInputType().Name:sub(1, 7) == "Gamepad" then
+		if gamepad then
 			GuiService.SelectedObject = if selected then selected.button elseif v.centre then v.centre.button else nil
 		end
 	end
@@ -1310,12 +810,13 @@ function Honeycomb.start()
 			open, isOpen = true, true
 			if not was then
 				window.open(fitScale)
+				-- Esc belongs to Roblox's menu (which closes the window, below), so Back is Backspace / B.
 				ContextActionService:BindActionAtPriority("HoneycombBack", function(_, inputState)
 					if inputState == Enum.UserInputState.Begin then
 						back()
 					end
 					return Enum.ContextActionResult.Sink
-				end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Escape, Enum.KeyCode.ButtonB)
+				end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Backspace, Enum.KeyCode.ButtonB)
 			end
 			if pick or not was then
 				showView(if pick then Comb.find(layout, pick) or "main" else "main", pick)
@@ -1331,6 +832,9 @@ function Honeycomb.start()
 			window.close(fitScale)
 		end
 	end
+	GuiService.MenuOpened:Connect(function()
+		setOpen(false)
+	end)
 
 	showId = function(id: string)
 		if inRun() then
@@ -1365,7 +869,7 @@ function Honeycomb.start()
 	local hovered = false
 	local function hold()
 		held = true
-		TweenService:Create(upgradesPress, HOLD_DOWN, { Scale = HOLD_SCALE }):Play()
+		TweenService:Create(upgradesPress, HOLD_DOWN, { Scale = CUE.holdScale }):Play()
 	end
 	local function release(toggle: boolean)
 		if not held then
@@ -1405,6 +909,14 @@ function Honeycomb.start()
 		release(true)
 	end)
 
+	local function onInputType(kind: Enum.UserInputType)
+		gamepad = kind.Name:sub(1, 7) == "Gamepad"
+		set(upgradesKey, "Visible", kind ~= Enum.UserInputType.Touch)
+		set(upgradesKeyText, "Text", if gamepad then "Y" else "TAB")
+	end
+	UserInputService.LastInputTypeChanged:Connect(onInputType)
+	onInputType(UserInputService:GetLastInputType())
+
 	-- Buttons hold a HitPad (a transparent button built in Studio) that keeps the touch target at
 	-- least 44 px when the window is scaled down on phones. The pad takes mouse and touch; the button
 	-- itself still takes gamepad selection, so both run fn.
@@ -1427,23 +939,23 @@ function Honeycomb.start()
 			Purchase.deny(buyButton)
 			return
 		end
-		local view = readView()
-		local have = Comb.bought(info.link, view)
-		local waiting = pending and pending.id == info.link.id and pending.have == have and now - pending.at < PENDING_SECONDS
-		if now < guardUntil or waiting then
+		expirePending(now)
+		if now < guardUntil or pending[info.link.key] then
 			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
 		end
+		local view = readView()
+		local have = Comb.bought(info.link, view)
 		local st = Comb.states(layout, info.catId, view)[info.link.key]
 		if st.state ~= "buy" then
 			Purchase.deny(buyButton)
 			if st.state == "short" then
-				needText.Size = scaled(needSize, CUE.needPulse)
+				needText.Size = Hex.scaled(needSize, CUE.needPulse)
 				TweenService:Create(needText, TweenInfo.new(CUE.needSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = needSize }):Play()
 			end
 			return
 		end
 		buyRemote:FireServer(info.link.id, have) -- what we saw bought: a teammate's buy first wins
-		pending = { key = info.link.key, id = info.link.id :: string, have = have, at = now, cost = st.price :: number }
+		pending[info.link.key] = { key = info.link.key, id = info.link.id :: string, have = have, at = now, cost = st.price :: number }
 		guardUntil = now + BUY_GUARD
 	end)
 
@@ -1458,31 +970,39 @@ function Honeycomb.start()
 		local now = postOf(item.id)
 		local post = StaffRules.nextPost(postsOf(item), now)
 		if post and post ~= now then
-			bounce(Hud.find(assignButton, "Press"))
+			Hex.bounce(Hud.find(assignButton, "Press"))
 			staffRemote:FireServer("assign", item.id, post)
 		else
 			Purchase.deny(assignButton)
 		end
 	end)
 
-	-- Drag to pan a view bigger than the board (phones).
+	-- Drag to pan a view bigger than the board (phones), from anywhere on it, hexes included; a
+	-- press that moves more than DRAG_SLOP pixels drags instead of clicking.
 	local drag: InputObject? = nil
 	local dragFrom, panFrom = Vector3.zero, Vector2.zero
-	board.InputBegan:Connect(function(input)
-		local v = views[viewId]
+	local function onBoard(position: Vector3): boolean
+		local at, size = board.AbsolutePosition, board.AbsoluteSize
+		return position.X >= at.X and position.Y >= at.Y and position.X <= at.X + size.X and position.Y <= at.Y + size.Y
+	end
+	UserInputService.InputBegan:Connect(function(input)
 		local kind = input.UserInputType
-		if v and v.pans and (kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch) then
-			drag, dragFrom, panFrom = input, input.Position, Vector2.new(panX, panY)
+		if open and (kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch) and onBoard(input.Position) then
+			drag, dragFrom, panFrom, dragMoved = input, input.Position, Vector2.new(panX, panY), false
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(input)
+		if not drag or not (input.UserInputType == Enum.UserInputType.MouseMovement or input == drag) then
+			return
+		end
+		local delta = input.Position - dragFrom
+		dragMoved = dragMoved or delta.Magnitude > DRAG_SLOP
 		local v = views[viewId]
-		if not (drag and v) or not (input.UserInputType == Enum.UserInputType.MouseMovement or input == drag) then
+		if not (dragMoved and v and v.pans) then
 			return
 		end
 		local perPixel = boardSize.X / math.max(board.AbsoluteSize.X, 1)
-		local moved = (input.Position - dragFrom) * perPixel
-		panX, panY = panFrom.X + moved.X, panFrom.Y + moved.Y
+		panX, panY = panFrom.X + delta.X * perPixel, panFrom.Y + delta.Y * perPixel
 		clampPan(v)
 	end)
 	UserInputService.InputEnded:Connect(function(input)
@@ -1491,15 +1011,16 @@ function Honeycomb.start()
 		end
 	end)
 
+	local shownWallet = -1
 	RunService.RenderStepped:Connect(function(dt: number)
 		local now = os.clock()
 		if open and not inRun() then
 			setOpen(false)
 		end
 		set(upgrades, "Visible", inRun() and not root.Visible)
-		local input = UserInputService:GetLastInputType()
-		set(upgradesKey, "Visible", input ~= Enum.UserInputType.Touch)
-		set(upgradesKeyText, "Text", if input.Name:sub(1, 7) == "Gamepad" then "Y" else "TAB")
+		if next(pending) then
+			expirePending(now)
+		end
 		if dirty and now >= nextRefresh then
 			nextRefresh = now + if open then REFRESH_OPEN else REFRESH_CLOSED
 			refresh()
@@ -1508,14 +1029,18 @@ function Honeycomb.start()
 		if not (root.Visible and v) then
 			return
 		end
-		set(walletAmount, "Text", Hud.money(math.max(0, Hud.wallet() - Hud.walletHold)))
+		local wallet = math.max(0, Hud.wallet() - Hud.walletHold)
+		if wallet ~= shownWallet then
+			shownWallet = wallet
+			walletAmount.Text = Hud.money(wallet)
+		end
 		-- Hex scales: hover / press / breathing (all "buy" hexes in step) times any animation.
 		local breathe = 1 + (CUE.breatheScale - 1) * (0.5 - 0.5 * math.cos(now * 2 * math.pi / CUE.breatheSeconds))
 		local rate = math.min(1, dt * PRESS_RATE)
 		for _, hex in v.hexes do
 			local target = if hex.down then motion.pressScale elseif hex.hover then motion.hoverScale elseif hex.breathe then breathe else 1
 			hex.ease += (target - hex.ease) * rate
-			set(hex.press, "Scale", math.round(hex.base * hex.ease * animScale(hex, now) * 1000) / 1000)
+			set(hex.press, "Scale", math.round(hex.base * hex.ease * Hex.animScale(hex, now) * 1000) / 1000)
 			set(hex.select, "Visible", hex.hover or (hex.key ~= nil and hex.key == selectedKey))
 		end
 	end)

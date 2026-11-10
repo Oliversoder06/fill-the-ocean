@@ -72,7 +72,7 @@ Client (`src/client/`, all started from `init.client.luau`):
   change), `Hud.short` (1.2K) and `Hud.money` (12,480; both `shared/Format`), the team's economy
   `Hud.wallet()`, `Hud.levels`, `Hud.items`, `Hud.buildings`, `Hud.teamSize()` and `Hud.price(cost)`
   (what a listed price costs the team; every price shown goes through it), `Hud.offer` (what
-  TAB offers next; `"useless"` for a level that changes nothing, `Ladder.helps`), `Hud.ocean`,
+  TAB offers next: `Items.tabOffer`; `"useless"` for a level that changes nothing, `Ladder.helps`), `Hud.ocean`,
   `Hud.pulseFill(litres)` (the fill bar's pulse when poured water reaches the ocean) and
   `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it).
 - `Action.luau`: scoop and pour input (aim at the water + hold E / LMB / RT / touch button), one
@@ -94,11 +94,17 @@ Client (`src/client/`, all started from `init.client.luau`):
   hexes would drop under 64 px). Opens through `Window`. The `UpgradesButton` (right edge)
   squishes while Tab / gamepad Y / mouse / touch is held; Tab / Y open or close it as they go down,
   the mouse / touch on release; its `Badge` shows while anything can be bought. Back (BackButton,
-  Esc, gamepad B) leaves a category, then closes. Selecting a hex fills `Detail` (Buy sends
-  `Buy(id, bought)`; it ignores clicks until the last buy has landed; `AssignButton` posts staff).
-  A landing fills the hex, its bridge and wakes the next hex (`Cues.honeycomb`); your own buy
-  also gets `Purchase.landed`. `Honeycomb.show(id)` opens on an id's next link (Goal);
-  `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide).
+  Backspace, gamepad B) leaves a category, then closes; Roblox's menu (Esc) closes it. Selecting a
+  hex fills `Detail` (Buy sends `Buy(id, bought)`; it ignores clicks until the last buy has landed;
+  `AssignButton` posts staff). A landing fills the hex, its bridge and wakes the next hex
+  (`Cues.honeycomb`), then a windowed chain slides along; only your own buy (your `LastBuy`) also
+  gets `Purchase.landed`. Only attributes a hex reads refresh it (closed: the badges, and a wallet
+  change only when it crosses a badge's price). `Honeycomb.show(id)` opens on an id's next link
+  (Goal); `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide).
+- `HoneycombHex.luau`: the honeycomb's hexes and bridges: copies of the templates, painting each
+  state (3D models only on `shared/Honeycomb.modelKeys` links), the landing (`celebrate`), the
+  window `slide`, enter / pop / wake scales. `HoneycombText.luau`: its words (names, effects,
+  reasons, the Buy button's word, gate texts, staff posts).
 - `Stands.luau`: every stand's prompt texts ("Buy Backpack Tank (1,200)", the reason when a press
   buys nothing) and its price sign (copies of `Hud.Templates.StandSign`, from `Items.standOffer`
   and `shared/Format`, at the team's price); hides the Fire Station's `CallPrompt` until the team owns a vehicle.
@@ -175,8 +181,10 @@ Shared (`src/shared/`, pure unless noted):
 - `Honeycomb.luau` (pure, tested): the upgrades honeycomb: flat-top hex maths (`toPixel`,
   `bounds`, `zoom`, `clampPan`, `enterDelay`), `layout(config)` (main ring, each category's chains
   of track / item / gate links with slots and bridges), `window`, `ownedCount`, `ownedShare`,
-  `states(layout, catId, view)`, `badges`, `find` (an id's category and chain), `pick` (the link to
-  select), `bought` (Buy's `bought`), `levelText`.
+  `states(layout, catId, view)`, `badges` (and the wallets that keep them), `find` (an id's
+  category and chain), `pick` (the link to select), `bought` (Buy's `bought`), `levelText`,
+  `elsewhere` (bought at a stand or plot), `modelKeys` (which hexes show a 3D model), `moves` (a
+  window's slide), the `LastBuy` attribute's `encodeBuy` / `decodeBuy`.
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
@@ -218,7 +226,8 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   a cove shop in `Config.stands`; never a building) and `standOffer` (what it shows: the pick, or
   the item and `"money"` / `"locked"`, or `"owned"`), `gadgetStat`,
   `slots` (hotbar gadgets), `reachable` (Cloud Catcher needs the Jetpack Tank), `teamOwned`,
-  `buildingOffer` / `buildingStat` (the team's building levels), `nextOwned` (the vehicle a Fire
+  `buildingOffer` / `buildingStat` (the team's building levels), `tabOffer` (what TAB sells next:
+  the one rule for server/Run's `onBuy`, `Hud.offer` and the honeycomb), `nextOwned` (the vehicle a Fire
   Station call brings next).
 - `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore);
   `erase` (the lobby's New Game / Delete / profile reset) writes a blank save only while holding the lock.
@@ -256,6 +265,9 @@ The server publishes state as attributes; the client only reads them.
   `Spraying`, `Flying` and `Fuel` (jetpack seconds left, only once owned), `IceHits` (hits on the
   current Glacier ice block); `ActKind` + `ActAt`
   (server time) when an action is accepted, and `Look` (pitch in whole degrees) for other clients.
+  `LastBuy` (`"<id>@<bought>@<serverTime>"`, `shared/Honeycomb.encodeBuy`): set on the buyer only
+  by every `Buy` the server credits (`bought`: the id's new count, as `Honeycomb.bought` reads it);
+  client/Honeycomb plays its buy moment only for its own `LastBuy`.
   Vehicles (server/Vehicles): `Vehicle` (item id out or `""`), `Tank`, `TankMax` (whole litres),
   `Filling`, `VehicleSpraying`; the vehicle model carries `Owner` (UserId of who called it), `ItemId`, `Speed`, `Flies`.
 - Remotes (`ReplicatedStorage.Remotes`, declared in `default.project.json`): `Buy` (id, bought: a
@@ -344,7 +356,7 @@ needs a Studio play test).
 - Rojo owns code only. The map, terrain and scenery live in the Studio place; the owner saves and
   publishes it in Studio.
 - `gameplay/src/shared/` and `common/` modules that tests cover (Config, Ladder, Water, ToolView,
-  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal) must stay
+  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal, Honeycomb, Cues, Items) must stay
   **pure**: no `require` of other modules, no `game`, no Roblox types, so Lune can run them.
   Lune tests live in `gameplay/tests/*.spec.luau` and are listed in `gameplay/tests/run.luau`.
 - Server-authoritative: the server owns money, water, purchases. Validate every remote argument

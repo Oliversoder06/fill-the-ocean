@@ -117,7 +117,16 @@ Cues.purchase = {
 -- from enterFrom, enterStagger later per ring out (at most enterCap). A hex you can buy breathes up
 -- to breatheScale and back every breatheSeconds; a gate hex sits at gateScale. Hexes are never
 -- shown under minHexPixels tall (the board pans instead), and a view grows to at most maxZoom.
+-- A windowed chain slides one slot per link over slideSeconds after a landing. Colours fade in over
+-- fadeSeconds; hovers ease over quickSeconds. The Upgrades button squishes to holdScale while held
+-- (holdDownSeconds) and springs back (holdUpSeconds).
 Cues.honeycomb = {
+	quickSeconds = 0.08,
+	fadeSeconds = 0.25,
+	slideSeconds = 0.25,
+	holdScale = 0.82,
+	holdDownSeconds = 0.12,
+	holdUpSeconds = 0.4,
 	bounceLow = 0.95,
 	bounceHigh = 1.05,
 	bounceSeconds = 0.2,

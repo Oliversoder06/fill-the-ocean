@@ -206,16 +206,16 @@ end
 -- TAB's Buy(id) for building `id` (server/Run checks it is one and that nobody bought this level
 -- first): the team's wallet pays the next level of that building for the whole team
 -- (Items.buildingOffer). A level needs one standing on a plot: a saved one the place lost
--- (Buildings.load) makes nothing.
-function Buildings.buy(player: Player, id: string)
+-- (Buildings.load) makes nothing. True when it bought the level.
+function Buildings.buy(player: Player, id: string): boolean
 	local item = Items.get(Config, id)
 	if not save or not item then
-		return
+		return false
 	end
 	local level, status = Items.buildingOffer(Config, save.buildings, id, hooks.openAreas())
 	local cost = if status == "buy" then hooks.price(level.cost) else 0
 	if status ~= "buy" or not Items.affords(save.team.wallet, cost) then
-		return
+		return false
 	end
 	local standing = false
 	for _, building in placed do
@@ -223,13 +223,14 @@ function Buildings.buy(player: Player, id: string)
 	end
 	if not standing then
 		hooks.tell(player, `Build a {item.name} on a plot first`)
-		return
+		return false
 	end
 	hooks.spend(cost)
 	save.buildings[id] += 1
 	publishLevels()
 	hooks.card(`{player.DisplayName} levelled up the team's {item.name}: Lv {save.buildings[id] + 1}!`)
 	hooks.save(`{player.Name} levelled {id}`)
+	return true
 end
 
 -- An aqueduct's water shows while a plot on its side has a building and the run plays.

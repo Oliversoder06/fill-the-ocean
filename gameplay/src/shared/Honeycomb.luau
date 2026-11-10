@@ -288,6 +288,16 @@ function Honeycomb.window(chain: Chain, ownedCount: number, maxVisible: number?)
 	return shown
 end
 
+-- For a window change (Honeycomb.window lists, old then new): the old slot each new slot's link sat
+-- in, nil for a link new to the window, so its hexes can slide over.
+function Honeycomb.moves(old: { number }, new: { number }): { [number]: number? }
+	local moves = {}
+	for i, index in new do
+		moves[i] = table.find(old, index)
+	end
+	return moves
+end
+
 local function chainStates(chain: Chain, view: View, out: { [string]: HexState })
 	local ownedTo = furthest(chain, view)
 	local blocked, nextSeen = false, false
@@ -406,20 +416,81 @@ function Honeycomb.levelText(link: Link, state: StateName): string
 	return `Lv {level - 1} → Lv {level}`
 end
 
--- The red balls: "buy" hexes per category id, and `total`.
-function Honeycomb.badges(layout: Layout, view: View): { [string]: number }
+-- The red balls: "buy" hexes per category id, and `total`; then the wallets that keep them: they
+-- stay while low <= wallet < high (the dearest buy and the cheapest short, -huge / huge for none).
+function Honeycomb.badges(layout: Layout, view: View): ({ [string]: number }, number, number)
 	local counts = { total = 0 }
+	local low, high = -math.huge, math.huge
 	for _, catId in layout.order do
 		local n = 0
 		for _, state in Honeycomb.states(layout, catId, view) do
 			if state.state == "buy" then
 				n += 1
+				low = math.max(low, (state.price :: number) - MONEY_EPSILON)
+			elseif state.state == "short" then
+				high = math.min(high, (state.price :: number) - MONEY_EPSILON)
 			end
 		end
 		counts[catId] = n
 		counts.total += n
 	end
-	return counts
+	return counts, low, high
+end
+
+-- An item's first link the team can get now, just not here: at its stand or on a plot.
+function Honeycomb.elsewhere(link: Link, st: HexState, view: View): boolean
+	return st.state == "locked" and link.kind == "item" and link.level == 1 and view.openAreas[link.areaId] == true and view.reachable(link.id :: string)
+end
+
+-- The links of `chain` whose hex shows its 3D model, so few ViewportFrames run: an item's own chain
+-- (one model) its next link, else its last; other chains (the tool's models, the backpacks) the
+-- last owned, the next and the max end.
+function Honeycomb.modelKeys(chain: Chain, states: { [string]: HexState }): { [string]: boolean }
+	local lastOwned, nextKey = nil, nil
+	local single = true
+	for _, link in chain.links do
+		if link.kind ~= "gate" then
+			single = single and link.kind == "item" and link.id == chain.id
+			local state = states[link.key].state
+			if state == "owned" or state == "max" then
+				lastOwned = link.key
+			elseif not nextKey then
+				nextKey = link.key
+			end
+		end
+	end
+	local last = chain.links[#chain.links].key
+	if single then
+		return { [nextKey or last] = true }
+	end
+	local keys = { [last] = true }
+	if lastOwned then
+		keys[lastOwned] = true
+	end
+	if nextKey then
+		keys[nextKey] = true
+	end
+	return keys
+end
+
+-- The buyer's LastBuy attribute (server/Run): "<id>@<bought>@<serverTime>", `bought` as
+-- Honeycomb.bought reads it after the buy.
+export type Buy = { id: string, level: number, at: number }
+
+function Honeycomb.encodeBuy(id: string, level: number, serverTime: number): string
+	return `{id}@{level}@{serverTime}`
+end
+
+function Honeycomb.decodeBuy(text: unknown): Buy?
+	if type(text) ~= "string" then
+		return nil
+	end
+	local id, level, serverTime = text:match("^([^@]+)@([^@]+)@([^@]+)$")
+	local n, time = tonumber(level), tonumber(serverTime)
+	if not (id and n and time) then
+		return nil
+	end
+	return { id = id, level = n, at = time }
 end
 
 return Honeycomb

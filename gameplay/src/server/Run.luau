@@ -59,6 +59,7 @@ local Format = require(ReplicatedStorage.Shared.Format)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
+local Honeycomb = require(ReplicatedStorage.Shared.Honeycomb)
 local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Water = require(ReplicatedStorage.Shared.Water)
@@ -826,6 +827,8 @@ end
 -- wallet at the team's price. `bought` is how many levels of `id` the buyer's client saw bought (-1:
 -- an item not owned, a building not built): when a teammate bought that level first, the buyer is
 -- told instead of buying the one after it. Items themselves are bought at their stand (onStand).
+-- What TAB sells is Items.tabOffer. A buy sets the buyer's LastBuy (shared/Honeycomb.encodeBuy), so
+-- only their client plays it as theirs.
 local function onBuy(player: Player, id: unknown, bought: unknown)
 	local state = states[player]
 	local save = run.save
@@ -837,24 +840,21 @@ local function onBuy(player: Player, id: unknown, bought: unknown)
 	local isBuilding = item ~= nil and item.kind == "building"
 	local counts = if isTrack then team.levels elseif isBuilding then save.buildings else team.itemLevels
 	local have = counts[id] or (if isTrack then 0 else -1)
+	local function publishBuy()
+		player:SetAttribute("LastBuy", Honeycomb.encodeBuy(id, have + 1, workspace:GetServerTimeNow()))
+	end
 	if bought < have then
 		remotes.Card:FireClient(player, "A teammate just bought that", CARD_SECONDS)
 		return
 	elseif bought ~= have then
 		return
 	elseif isBuilding then
-		Buildings.buy(player, id)
+		if Buildings.buy(player, id) then
+			publishBuy()
+		end
 		return
 	end
-	local level, status
-	if isTrack then
-		level, status = Ladder.offer(Config, team.levels, id, openAreas())
-		if not Ladder.helps(Config, team.levels, id) then
-			return
-		end
-	else
-		level, status = Items.nextLevel(Config, team, id)
-	end
+	local level, status = Items.tabOffer(Config, team.levels, team, save.buildings, id, openAreas(), Ladder.helps(Config, team.levels, id))
 	local cost = if status == "buy" then price(level.cost) else 0
 	if status ~= "buy" or not Items.affords(team.wallet, cost) then
 		return
@@ -862,6 +862,7 @@ local function onBuy(player: Player, id: unknown, bought: unknown)
 	spend(cost)
 	counts[id] = have + 1
 	teamChanged()
+	publishBuy()
 	local track = Config.track(id)
 	announce(player, if track then Format.levelName(track, have + 1, level) else `the {(item :: Config.Item).name} Lv {have + 2}`)
 end

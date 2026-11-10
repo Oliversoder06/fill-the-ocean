@@ -253,6 +253,34 @@ function Items.buildingOffer(config, buildings: { [string]: number }, id: any, o
 	return level, if level then "buy" else "max"
 end
 
+-- What TAB (the honeycomb) sells next of `id` and its status, as server/Run's onBuy sells it. A
+-- track (`levels`): its next level, "buy" / "locked" (its area is closed) / "max", or "useless"
+-- when `helps` is false (Ladder.helps: it would change nothing). A building: buildingOffer. An item
+-- (`state`): nextLevel's upgrade, or while unowned nil and "stand" (bought at its stand) or "locked"
+-- (its area is closed). Unknown id (a gate): nil, nil.
+function Items.tabOffer(config, levels: { [string]: number }, state: State, buildings: { [string]: number }, id: any, openAreas: number, helps: boolean)
+	local track = if type(id) == "string" then config.track(id) else nil
+	local item = Items.get(config, id)
+	if track then
+		local level = track.levels[(levels[id] or 0) + 1]
+		if not level then
+			return nil, "max"
+		elseif level.area > openAreas then
+			return level, "locked"
+		end
+		return level, if helps then "buy" else "useless"
+	elseif not item then
+		return nil, nil
+	elseif item.kind == "building" then
+		return Items.buildingOffer(config, buildings, id, openAreas)
+	end
+	local level, status = Items.nextLevel(config, state, id)
+	if status == "unowned" then
+		return nil, if item.area <= openAreas then "stand" else "locked"
+	end
+	return level, status
+end
+
 -- A built building's stat ("rate") at the team's level for it.
 function Items.buildingStat(buildings: { [string]: number }, item, name: string): number
 	return Items.stat({ owned = {}, itemLevels = buildings }, item, name)

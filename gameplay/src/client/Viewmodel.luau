@@ -135,11 +135,16 @@ local function placeArm(arm: Arm, grip: CFrame, restGrip: CFrame, shoulder: Vect
 	arm.lower.CFrame = CFrame.fromMatrix(wrist + along * (ARM_LENGTH / 2 - 0.05), right.Unit, along)
 end
 
+-- Hud.Honeycomb, found once (Honeycomb.isOpen would be a require cycle: Honeycomb -> Purchase -> here).
+local honeycomb: GuiObject? = nil
 local function honeycombOpen(): boolean
-	local playerGui = player:FindFirstChildOfClass("PlayerGui")
-	local hud = playerGui and playerGui:FindFirstChild("Hud")
-	local honeycomb = hud and hud:FindFirstChild("Honeycomb")
-	return honeycomb ~= nil and honeycomb:IsA("GuiObject") and honeycomb.Visible
+	if not honeycomb then
+		local playerGui = player:FindFirstChildOfClass("PlayerGui")
+		local hud = playerGui and playerGui:FindFirstChild("Hud")
+		local found = hud and hud:FindFirstChild("Honeycomb")
+		honeycomb = if found and found:IsA("GuiObject") then found else nil
+	end
+	return honeycomb ~= nil and honeycomb.Visible
 end
 
 -- What is in hand: its model name, its ToolModels subfolder ("Gadgets" or nil) and its tier (a

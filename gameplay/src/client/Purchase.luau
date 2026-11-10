@@ -40,7 +40,7 @@ local denyButton: GuiObject? = nil
 local denyRest = 0
 local denyAt = -math.huge
 local playDeny: (() -> ())? = nil
-local playLanded: ((GuiObject?, number, number, boolean, () -> ()) -> ())? = nil
+local playLanded: ((GuiObject?, number, number, boolean, () -> (), () -> boolean) -> ())? = nil
 
 -- Shakes the Buy button: you can't buy this (not enough money, locked or maxed).
 function Purchase.deny(button: GuiObject)
@@ -58,9 +58,10 @@ end
 
 -- Your buy landed: the sting at `pitch` (Cues.stingPitch), coins worth `cost` fly into `target`
 -- (nil: none; the window closed) and `arrive` runs as the first lands (at once without coins). A
--- `first` buy (an upgrade's first level, a new tool) also chimes and stamps "NEW!" on the target.
-function Purchase.landed(target: GuiObject?, cost: number, pitch: number, first: boolean, arrive: () -> ())
-	assert(playLanded, "Purchase.landed before Purchase.start")(target, cost, pitch, first, arrive)
+-- `first` buy (an upgrade's first level, a new tool) also chimes and stamps "NEW!" on the target
+-- while `still()` says it shows the same thing.
+function Purchase.landed(target: GuiObject?, cost: number, pitch: number, first: boolean, arrive: () -> (), still: () -> boolean)
+	assert(playLanded, "Purchase.landed before Purchase.start")(target, cost, pitch, first, arrive, still)
 end
 
 local function asset(folder: Instance, name: string, class: string): any
@@ -130,8 +131,8 @@ function Purchase.start()
 	end
 
 	-- Coins leave the honeycomb's money and land in the hex: `arrive` runs as the first lands, and a
-	-- first buy's stamp slams when the last one does.
-	local function payInto(button: GuiObject, cost: number, first: boolean, arrive: () -> ())
+	-- first buy's stamp slams when the last one does (while `still()`).
+	local function payInto(button: GuiObject, cost: number, first: boolean, arrive: () -> (), still: () -> boolean)
 		local from, to = centre(moneyCoin), centre(button)
 		local n = math.min(MAX_FLY_COINS, CoinBurst.count(cost))
 		if n == 0 then
@@ -153,7 +154,7 @@ function Purchase.start()
 				if i == 1 then
 					arrive()
 				end
-				if i == n and first and button.Parent then
+				if i == n and first and still() then
 					stamp(button)
 				end
 			end)
@@ -179,14 +180,14 @@ function Purchase.start()
 		out:Play()
 	end
 
-	playLanded = function(target: GuiObject?, cost: number, pitch: number, first: boolean, arrive: () -> ())
+	playLanded = function(target: GuiObject?, cost: number, pitch: number, first: boolean, arrive: () -> (), still: () -> boolean)
 		play(cue.sting, cue.stingVolume, pitch)
 		if first then
 			play(cue.unlock, cue.unlockVolume, 1)
 		end
 		Music.duck(Cues.music.duckSeconds)
 		if target then
-			payInto(target, cost, first, arrive)
+			payInto(target, cost, first, arrive, still)
 		else
 			arrive()
 		end

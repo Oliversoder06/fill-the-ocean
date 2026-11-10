@@ -206,6 +206,50 @@ function tests.building_offer_follows_the_team(t)
 	t.expectEq(Items.buildingStat({ pump = 2 }, pump, "rate"), pump.levels[2].rate)
 end
 
+-- What TAB (the honeycomb) sells, as server/Run's onBuy sells it: a track's next level in an open
+-- area that changes something, an owned item's upgrade, a built building's level; never an item's
+-- first buy (its stand) or a gate.
+function tests.tab_offer_follows_the_servers_buy_rules(t)
+	local tool = Config.track("tool")
+	local level, status = Items.tabOffer(Config, {}, fresh(), {}, "tool", 1, true)
+	t.expectEq(level, tool.levels[1])
+	t.expectEq(status, "buy")
+	level, status = Items.tabOffer(Config, { tool = #tool.levels }, fresh(), {}, "tool", 5, true)
+	t.expectEq(level, nil)
+	t.expectEq(status, "max")
+	local closed = 0
+	while tool.levels[closed + 1].area <= 1 do
+		closed += 1
+	end
+	t.expectEq(select(2, Items.tabOffer(Config, { tool = closed }, fresh(), {}, "tool", 1, true)), "locked", "its area is closed")
+	t.expectEq(select(2, Items.tabOffer(Config, {}, fresh(), {}, "pickup", 1, false)), "useless", "changes nothing (Ladder.helps)")
+
+	local gun = Items.get(Config, "waterGun")
+	level, status = Items.tabOffer(Config, {}, fresh(), {}, "waterGun", 1, true)
+	t.expectEq(level, nil)
+	t.expectEq(status, "stand", "bought at its stand first")
+	t.expectEq(select(2, Items.tabOffer(Config, {}, fresh(), {}, "gardenHose", 1, true)), "locked", "its area is closed")
+	local state = fresh()
+	own(state, "waterGun")
+	level, status = Items.tabOffer(Config, {}, state, {}, "waterGun", 1, true)
+	t.expectEq(level, gun.levels[1])
+	t.expectEq(status, "buy")
+	own(state, "backpackTank")
+	own(state, "bigTank")
+	t.expectEq(select(2, Items.tabOffer(Config, {}, state, {}, "backpackTank", 2, true)), "replaced")
+
+	local pump = Items.get(Config, "pump")
+	t.expectEq(select(2, Items.tabOffer(Config, {}, fresh(), {}, "pump", 2, true)), "unbuilt", "built on a plot first")
+	level, status = Items.tabOffer(Config, {}, fresh(), { pump = 0 }, "pump", 2, true)
+	t.expectEq(level, pump.levels[1])
+	t.expectEq(status, "buy")
+
+	level, status = Items.tabOffer(Config, {}, fresh(), {}, "nope", 5, true)
+	t.expectEq(level, nil)
+	t.expectEq(status, nil, "unknown id (a gate has none)")
+	t.expectEq(select(2, Items.tabOffer(Config, {}, fresh(), {}, nil, 5, true)), nil)
+end
+
 -- 3b: one gadget per area, each with one mechanic (Phase 3 outline).
 function tests.six_gadgets_by_area(t)
 	local want = {

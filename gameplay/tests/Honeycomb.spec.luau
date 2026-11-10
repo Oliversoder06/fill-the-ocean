@@ -250,6 +250,17 @@ function tests.window_keeps_last_owned_next_and_max(t)
 	end
 end
 
+function tests.moves_say_which_old_slot_each_shown_link_came_from(t)
+	local moves = Honeycomb.moves({ 1, 2, 3, 4, 5, 6, 21 }, { 2, 3, 4, 5, 6, 7, 21 })
+	t.expectEq(moves[1], 2)
+	t.expectEq(moves[5], 6)
+	t.expectEq(moves[6], nil, "a link new to the window")
+	t.expectEq(moves[7], 7, "the max end stays")
+	moves = Honeycomb.moves({ 4, 5, 6, 7, 8, 9, 21 }, { 6, 7, 8, 9, 10, 11, 21 })
+	t.expectEq(moves[1], 3, "a gate passed: two slots")
+	t.expectEq(moves[5], nil)
+end
+
 function tests.owned_count_counts_links_up_to_the_furthest_owned(t)
 	local layout = Honeycomb.layout(Config)
 	t.expectEq(Honeycomb.ownedCount(chain(layout, "tools", "tool"), view({ levels = { tool = 7 } })), 7)
@@ -376,6 +387,86 @@ function tests.badges_count_buy_hexes(t)
 	t.expectEq(start.boosts, 3, "Hold (40), Quick (35), Sneakers (69), not Pickup (192) or Tip (300)")
 	t.expectEq(start.gear, 0)
 	t.expectEq(start.total, 4)
+end
+
+function tests.badges_say_which_wallets_keep_them(t)
+	local layout = Honeycomb.layout(Config)
+	local start, low, high = Honeycomb.badges(layout, view({ wallet = 100 }))
+	t.expectEq(low <= 100 and 100 < high, true, "the wallet itself is in range")
+	t.expectNear(low, 69, 1e-5, "Sneakers (69): the dearest buy")
+	t.expectNear(high, 192, 1e-5, "Pickup (192): the cheapest short")
+	for _, wallet in { low, 150, high - 0.01 } do
+		t.expectEq(Honeycomb.badges(layout, view({ wallet = wallet })).total, start.total, `same badges at {wallet}`)
+	end
+	t.expectEq(Honeycomb.badges(layout, view({ wallet = low - 0.01 })).total < start.total, true, "under the dearest buy")
+	t.expectEq(Honeycomb.badges(layout, view({ wallet = high })).total > start.total, true, "at the cheapest short")
+	local _, noneLow, noneHigh = Honeycomb.badges(layout, view({ openAreas = allOpen(), wallet = 1e300 }))
+	t.expectEq(noneHigh, math.huge, "nothing short: no ceiling")
+	t.expectEq(noneLow < 1e300, true)
+	local _, poorLow = Honeycomb.badges(layout, view({ wallet = 0 }))
+	t.expectEq(poorLow, -math.huge, "nothing buys: no floor")
+end
+
+function tests.elsewhere_is_an_open_items_first_link_bought_at_its_stand(t)
+	local layout = Honeycomb.layout(Config)
+	local gun = chain(layout, "gear", "waterGun")
+	local locked = { state = "locked" }
+	t.expectEq(Honeycomb.elsewhere(gun.links[1], locked, view({})), true)
+	t.expectEq(Honeycomb.elsewhere(gun.links[2], locked, view({})), false, "an upgrade is bought here")
+	t.expectEq(Honeycomb.elsewhere(gun.links[1], { state = "future" }, view({})), false)
+	local unreachable = view({ reachable = function()
+		return false
+	end })
+	t.expectEq(Honeycomb.elsewhere(gun.links[1], locked, unreachable), false)
+	local hose = chain(layout, "gear", "gardenHose")
+	t.expectEq(hose.links[2].level, 1, "after its area's gate")
+	t.expectEq(Honeycomb.elsewhere(hose.links[2], locked, view({})), false, "closed area")
+	t.expectEq(Honeycomb.elsewhere(hose.links[2], locked, view({ openAreas = allOpen() })), true)
+	t.expectEq(Honeycomb.elsewhere(chain(layout, "tools", "tool").links[1], locked, view({})), false, "a track")
+end
+
+function tests.model_keys_keep_few_models_per_chain(t)
+	local layout = Honeycomb.layout(Config)
+	local function keys(catId, id, v)
+		local list = {}
+		for key in Honeycomb.modelKeys(chain(layout, catId, id), Honeycomb.states(layout, catId, v)) do
+			table.insert(list, key)
+		end
+		table.sort(list)
+		return table.concat(list, ",")
+	end
+	local tool = chain(layout, "tools", "tool")
+	local maxKey = tool.links[#tool.links].key
+	t.expectEq(keys("tools", "tool", view({ levels = { tool = 4 } })), `{maxKey},track:tool:4,track:tool:5`, "last owned, next, max")
+	t.expectEq(keys("tools", "tool", view({})), `track:tool:1,{maxKey}`, "none owned: next and max")
+	t.expectEq(keys("gear", "waterGun", view({})), "item:waterGun:1", "one model per item: its next link")
+	t.expectEq(keys("gear", "waterGun", view({ items = { waterGun = 1 } })), "item:waterGun:2")
+	local gun = chain(layout, "gear", "waterGun")
+	t.expectEq(keys("gear", "waterGun", view({ items = { waterGun = #gun.links } })), gun.links[#gun.links].key, "maxed: its last link")
+	t.expectEq(keys("gear", "backpacks", view({ items = { backpackTank = 2 } })) ~= "", true)
+	for _, catId in CATEGORIES do
+		local v = view({ levels = { tool = 4 }, items = { backpackTank = 2 } })
+		local s = Honeycomb.states(layout, catId, v)
+		local n = 1 -- the category hex
+		for _, c in layout.categories[catId].chains do
+			for _ in Honeycomb.modelKeys(c, s) do
+				n += 1
+			end
+		end
+		t.expectEq(n <= 12, true, `{catId}: {n} models at most 12`)
+	end
+end
+
+function tests.last_buy_round_trips(t)
+	local text = Honeycomb.encodeBuy("waterGun", 3, 1234.5)
+	t.expectEq(text, "waterGun@3@1234.5")
+	local buy = Honeycomb.decodeBuy(text) :: any
+	t.expectEq(buy.id, "waterGun")
+	t.expectEq(buy.level, 3)
+	t.expectEq(buy.at, 1234.5)
+	t.expectEq(Honeycomb.decodeBuy(nil), nil)
+	t.expectEq(Honeycomb.decodeBuy(""), nil)
+	t.expectEq(Honeycomb.decodeBuy("tool@x@1"), nil)
 end
 
 function tests.every_category_fits_11_columns_by_7_rows(t)
