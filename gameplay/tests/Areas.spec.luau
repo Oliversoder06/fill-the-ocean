@@ -49,6 +49,30 @@ function tests.gate_on_sale_at_its_fill(t)
 	t.expectEq(onSale, false)
 end
 
+-- One rule for the gate prompt, its sign and the honeycomb's Areas hexes.
+function tests.gate_offer_says_what_a_gate_is_now(t)
+	t.expectEq(Areas.gateOffer(Config, {}, 0, 2), "fill", "waits for 7%")
+	t.expectEq(Areas.gateOffer(Config, {}, 0.07, 2), "buy", "the next gate, on sale at its fill")
+	t.expectEq(Areas.gateOffer(Config, { 2 }, 0.5, 2), "open")
+	t.expectEq(Areas.gateOffer(Config, {}, 0.1, 3), "fill", "gate 3 waits for 22%")
+	t.expectEq(Areas.gateOffer(Config, {}, 0.3, 3), "order", "past its fill, but Mountain Spring is still closed")
+	t.expectEq(Areas.gateOffer(Config, { 2 }, 0.3, 3), "buy")
+	t.expectEq(Areas.gateOffer(Config, { 2, 3, 4, 5 }, 1, 5), "open")
+end
+
+-- The honeycomb buys a gate as Buy("gate:<areaId>", 0); ids come from a remote, so anything else is nil.
+function tests.gate_ids_round_trip(t)
+	t.expectEq(Areas.gateId(3), "gate:3")
+	t.expectEq(Areas.fromGateId(Config, "gate:3").name, "Hot Springs")
+	t.expectEq(Areas.fromGateId(Config, Areas.gateId(5)).id, 5)
+	t.expectEq(Areas.fromGateId(Config, "gate:1"), nil, "the cove has no gate")
+	t.expectEq(Areas.fromGateId(Config, "gate:9"), nil)
+	t.expectEq(Areas.fromGateId(Config, "gate:2x"), nil)
+	t.expectEq(Areas.fromGateId(Config, "pickup"), nil)
+	t.expectEq(Areas.fromGateId(Config, 2), nil)
+	t.expectEq(Areas.fromGateId(Config, nil), nil)
+end
+
 function tests.by_id(t)
 	t.expectEq(Areas.byId(Config, 1).name, "Cove Well")
 	t.expectEq(Areas.byId(Config, 4).name, "Glacier")

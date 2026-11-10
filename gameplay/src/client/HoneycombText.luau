@@ -1,6 +1,6 @@
--- The honeycomb's words (client/Honeycomb): category and link names, what a level does, why a link
--- can't be bought here, a gate's price or fill, a staff's post. Prices go through Hud.price,
--- numbers through shared/Format and Hud.short.
+-- The honeycomb's words (client/Honeycomb): category and upgrade names, what a level does, why a
+-- level can't be bought here, what a closed gate waits for, a staff's post. Prices go through
+-- Hud.price, numbers through shared/Format and Hud.short.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -11,11 +11,12 @@ local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
 local Hud = require(script.Parent.Hud)
+local Data = require(script.Parent.HoneycombData)
 
 local short = Hud.short
 
 -- Category display names, in the ring's order (shared/Honeycomb layout.order).
-local CATEGORY_NAMES = { tools = "Tools", boosts = "Boosts", gear = "Gear", vehicles = "Vehicles", buildings = "Buildings", staff = "Staff" }
+local CATEGORY_NAMES = { boosts = "Boosts", gear = "Gear", vehicles = "Vehicles", buildings = "Buildings", staff = "Staff", areas = "Areas" }
 
 local HoneycombText = {}
 
@@ -48,11 +49,6 @@ local function effectText(id: string, now: Ladder.Stats, after: Ladder.Stats): s
 		return `Walk speed {after.walkSpeed} (now {now.walkSpeed})`
 	end
 	return `{percent(after.coinBonus)} coins per litre (now {percent(now.coinBonus)})`
-end
-
-local function fillNow(): number
-	local fill = ReplicatedStorage:GetAttribute("Fill")
-	return if type(fill) == "number" then fill else 0
 end
 
 -- A stat in the effect texts: whole numbers under 1000 as they are (6), the rest short (1.6, 3.0K).
@@ -160,13 +156,10 @@ function HoneycombText.assign(item, post: number?): string
 	return `WORKS AT {Areas.byId(Config, post).name:upper()}`
 end
 
--- How closed `area`'s gate opens, for its hex: the fill it needs, or its price once on sale (true:
--- a price, with the coin).
-function HoneycombText.gate(area): (string, boolean)
-	if fillNow() < area.gate.fill then
-		return `fill {Format.percent(area.gate.fill)}`, false
-	end
-	return Hud.money(Hud.price(area.gate.price)), true
+-- A gate's hex while it can't be bought: the fill it waits for (nil once past it: an earlier gate
+-- is still closed).
+function HoneycombText.gateWait(area): string?
+	return if Data.fill() < area.gate.fill then `Fill to {Format.percent(area.gate.fill)}` else nil
 end
 
 -- The card's level line for an item's first link got elsewhere (Comb.elsewhere): where.
@@ -181,41 +174,47 @@ function HoneycombText.reason(link: Comb.Link, st: Comb.HexState, view: Comb.Vie
 	local area = Areas.byId(Config, link.areaId)
 	if state == "short" then
 		return `Need {Hud.money(math.ceil((st.price :: number) - view.wallet))} more`
+	elseif state ~= "locked" then
+		return nil
 	elseif Comb.elsewhere(link, st, view) then
 		local item = Items.get(Config, link.id)
 		if item.kind == "building" then
 			return "Build one on a town plot"
 		end
 		return `{if item.kind == "staff" then "Hire" else "Buy"} it at the {Format.standName(Config, item.stand, area)}`
-	elseif state == "gateClosed" or (state == "locked" and not view.openAreas[link.areaId]) then
-		return `Opens with {area.name}: {Format.gateHint(area, fillNow(), Hud.price)}`
-	elseif state == "locked" and link.kind == "item" and not view.reachable(link.id :: string) then
+	elseif link.kind == "gate" then
+		if Data.fill() < area.gate.fill then
+			return `Fill the ocean to {Format.percent(area.gate.fill)} first`
+		end
+		local nextId = Areas.nextGate(Config, Hud.gatesOpen(), Data.fill())
+		return `Open {Areas.byId(Config, nextId).name} first`
+	elseif not view.openAreas[link.areaId] then
+		return `Opens with {area.name}: {Format.gateHint(area, Data.fill(), Hud.price)}`
+	elseif link.kind == "item" and not view.reachable(link.id) then
 		return `Needs the {Items.get(Config, area.needs).name}`
-	elseif state == "locked" and link.id == "pickup" then
+	elseif link.id == "pickup" then
 		return "Your tool already fills in one scoop"
-	elseif state == "future" then
-		return "Buy the level before it first"
 	end
 	return nil
 end
 
+-- The card's name for a level: a gate's area, a track level's name ("Sneakers 3"), an item.
 function HoneycombText.name(link: Comb.Link): string
 	if link.kind == "gate" then
-		return `{Areas.byId(Config, link.areaId).name} gate`
+		return Areas.byId(Config, link.areaId).name
 	elseif link.kind == "track" then
-		local track = Config.track(link.id :: string) :: Config.Track
-		local name = Format.levelName(track, link.level :: number, track.levels[link.level :: number])
+		local track = Config.track(link.id) :: Config.Track
+		local name = Format.levelName(track, link.level, track.levels[link.level])
 		return if track.id == "tool" then Format.toolName(name) else name -- the level line counts tools
 	end
 	return Items.get(Config, link.id).name
 end
 
--- A hex's name on top: a gate's area, a track level's name, an item ("Water Gun", then "Water Gun 2").
+-- A hex's name on top: a gate's area, a track's name ("Sneakers"), the item its level belongs to
+-- (the backpacks: the worn pack, then the next).
 function HoneycombText.short(link: Comb.Link): string
-	if link.kind == "gate" then
-		return Areas.byId(Config, link.areaId).name
-	elseif link.kind == "item" and (link.level :: number) > 1 then
-		return `{Items.get(Config, link.id).name} {link.level}`
+	if link.kind == "track" then
+		return (Config.track(link.id) :: Config.Track).name
 	end
 	return HoneycombText.name(link)
 end

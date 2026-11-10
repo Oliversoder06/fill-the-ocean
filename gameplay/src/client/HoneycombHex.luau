@@ -1,8 +1,9 @@
--- The honeycomb's hexes (client/Honeycomb): copies of Hud.Templates.Hex, painted in their state
--- (shared/Honeycomb.states) with a short name on top, art in the middle and a price or state word
--- at the bottom, and their animations: popping in, a landing (the hex fills, then the touching next
--- hex wakes), sliding along a chain's window. Numbers in Cues.honeycomb, colours and images from the
--- sunbaked-sea theme.
+-- The honeycomb's hexes (client/Honeycomb): copies of Hud.Templates.Hex, coloured by what they are
+-- (PAINT) with a thick white outline, painted in their upgrade's state (shared/Honeycomb.state): a
+-- short name on top, art in the middle, Level ("2/6", "MAX") and the next level's price at the
+-- bottom. Their animations: popping in, and a landing on the bought hex (its water rises, it pops as
+-- a check flashes and its Level ticks up, then it wakes into its next level). Numbers in
+-- Cues.honeycomb, colours and images from the sunbaked-sea theme.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
@@ -23,12 +24,23 @@ local colors, images = Theme.colors, Theme.images
 local set = Hud.set
 local CUE = Cues.honeycomb
 
-local FADE = TweenInfo.new(CUE.fadeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local SLIDE = TweenInfo.new(CUE.slideSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local FUTURE_SHADE = 0.5 -- a hex that isn't next yet: its colour this far toward the outline navy
-local SMALL_PRICE = 0.8 -- an item's price at its stand, of the template's size
+-- Every hex colour, from the theme.
+local PAINT = {
+	category = colors.toolTag, -- a group you open: sunny orange
+	item = colors.shallowWater, -- what a click buys: shallow water blue
+	stand = colors.shallowWater:Lerp(colors.outline, 0.35), -- bought at its stand first: a darker blue
+	back = colors.speedTag, -- the Back hex: teal, apart from both
+	locked = colors.locked, -- behind a closed gate or out of reach: slate
+	outline = colors.foam, -- the thick ring on every hex
+	rim = colors.outline, -- the bottom rim: the hex's colour RIM_SHADE toward navy
+	water = colors.shallowWater:Lerp(colors.foam, 0.45), -- a short hex's progress, a landing's water
+	price = colors.foam,
+	short = colors.buyCoral,
+}
+local RIM_SHADE = 0.4
 local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
-local RIM_SHADE = 0.4 -- a hex's rim: its colour this far toward the outline navy
+-- On-screen text sizes in pixels at the fitted zoom (never hidden).
+local TEXT = { name = { 14, 18 }, level = { 12, 14 }, price = { 14, 16 } }
 
 -- Art for the tracks that have an icon (the tool shows its 3D model; the rest none until drawn).
 local ICONS = { pickup = "pipFull", tip = "coin" }
@@ -47,6 +59,7 @@ export type Hex = {
 	view: ViewportFrame,
 	icon: ImageLabel,
 	name: TextLabel,
+	level: TextLabel,
 	priceRow: GuiObject,
 	coin: ImageLabel,
 	price: TextLabel,
@@ -54,35 +67,28 @@ export type Hex = {
 	check: GuiObject,
 	badge: GuiObject,
 	count: TextLabel,
+	backArrow: GuiObject,
+	areaIcon: GuiObject,
 	waterWidth: UDim,
 	checkSize: UDim2,
 	badgeSize: UDim2,
-	priceSize: number,
+	designs: { [TextLabel]: number }, -- text sizes at zoom 1
 	q: number,
 	r: number,
 	x: number, -- offset from the canvas centre, before zoom
 	y: number,
-	catId: string?,
-	slots: { Hex }?, -- a chain's slot hexes, this one among them
-	slot: number?,
-	key: string?, -- the link shown now ("centre", "cat:<id>" or "home" for the views' fixed hexes)
+	key: string?, -- the upgrade id, "cat:<id>" or "back"
 	art: Instance?,
 	hover: boolean,
 	down: boolean,
 	ease: number, -- hover / press / breathing scale, catching up
-	base: number, -- the state's own scale (a small open gate)
 	breathe: boolean,
 	animKind: string?, -- "enter", "pop" or "wake"
 	animAt: number,
-	holdUntil: number, -- an animation owns the hex's look until then
-	fade: boolean, -- the next paint fades its colours in
+	holdUntil: number, -- a landing owns the hex's look until then
+	landing: number, -- bumped by each landing: an older one stops
 	badgeCount: number,
-	share: number, -- a category hex's owned share as last painted (-1: never)
 }
-
--- A landing's progress for its caller: the hex is full, the next hex woke, or it stopped (the view
--- changed or the hex shows another link).
-export type Step = "filled" | "woke" | "stopped"
 
 local HoneycombHex = {}
 
@@ -98,6 +104,7 @@ function HoneycombHex.parts(button: ImageButton)
 		view = Hud.find(button, "View"),
 		icon = Hud.find(button, "Icon"),
 		name = Hud.find(button, "Name"), -- not button.Name: the child's name clashes with the property
+		level = Hud.find(button, "Level"),
 		priceRow = Hud.find(button, "PriceRow"),
 		coin = Hud.find(button, "PriceRow.Coin"),
 		price = Hud.find(button, "PriceRow.Price"),
@@ -105,6 +112,8 @@ function HoneycombHex.parts(button: ImageButton)
 		check = Hud.find(button, "Check"),
 		badge = Hud.find(button, "Badge"),
 		count = Hud.find(button, "Badge.Count"),
+		backArrow = Hud.find(button, "BackArrow"),
+		areaIcon = Hud.find(button, "AreaIcon"),
 	}
 end
 
@@ -125,12 +134,16 @@ function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number
 	hex.waterWidth = hex.water.Size.X
 	hex.checkSize = hex.check.Size
 	hex.badgeSize = hex.badge.Size
-	hex.priceSize = designSize(hex.price)
+	hex.designs = {}
+	for _, label in { hex.name, hex.level, hex.price } do
+		hex.designs[label] = designSize(label)
+	end
 	hex.q, hex.r, hex.x, hex.y = q, r, x, y
-	hex.hover, hex.down, hex.breathe, hex.fade = false, false, false, false
-	hex.ease, hex.base, hex.animAt, hex.holdUntil, hex.badgeCount, hex.share = 1, 1, 0, 0, -1, -1
+	hex.hover, hex.down, hex.breathe = false, false, false
+	hex.ease, hex.animAt, hex.holdUntil, hex.landing, hex.badgeCount = 1, 0, 0, 0, -1
 	hex.select.Visible = false
 	hex.badge.Visible = false
+	hex.fill.ImageColor3 = PAINT.water
 	button.AutoButtonColor = false -- hover and press scale it instead
 	button.Position = UDim2.fromOffset(x, y)
 	button.Visible = false
@@ -142,14 +155,38 @@ function HoneycombHex.scaled(size: UDim2, k: number): UDim2
 	return UDim2.new(size.X.Scale * k, size.X.Offset * k, size.Y.Scale * k, size.Y.Offset * k)
 end
 
--- The shown view's zoom: hex text under CUE.minTextPixels on screen hides. The caller repaints
--- after a change.
+-- The shown view's zoom: hex text keeps to its TEXT sizes on screen. The caller repaints after.
 function HoneycombHex.setTextScale(scale: number)
 	textScale = scale
 end
 
-local function readable(textSize: number): boolean
-	return textSize * textScale >= CUE.minTextPixels
+-- `label` shows `text` (nil hides it) at an on-screen size within `range`: a TextScaled label with a
+-- UITextSizeConstraint shrinks to fit within it, any other label takes its design size clamped.
+local function paintText(hex: Hex, label: TextLabel, text: string?, range: { number })
+	set(label, "Visible", text ~= nil)
+	if not text then
+		return
+	end
+	set(label, "Text", text)
+	local low, high = range[1] / textScale, range[2] / textScale
+	local limit = label:FindFirstChildOfClass("UITextSizeConstraint")
+	if label.TextScaled and limit then
+		set(limit, "MinTextSize", math.clamp(math.floor(low), 1, 100))
+		set(limit, "MaxTextSize", math.clamp(math.ceil(high), 1, 100))
+	else
+		set(label, "TextScaled", false)
+		set(label, "TextSize", math.round(math.clamp(hex.designs[label], low, high)))
+	end
+end
+
+-- The price row: `text` (nil hides it), the coin, its colour.
+local function paintPrice(hex: Hex, text: string?, coin: boolean, color: Color3)
+	set(hex.priceRow, "Visible", text ~= nil)
+	paintText(hex, hex.price, text, TEXT.price)
+	if text then
+		set(hex.price, "TextColor3", color)
+		set(hex.coin, "Visible", coin)
+	end
 end
 
 local function setWater(hex: Hex, level: number)
@@ -157,37 +194,30 @@ local function setWater(hex: Hex, level: number)
 	set(hex.water, "Visible", level > 0)
 end
 
--- The template (a Model or a backpack's Accessory) and image a link shows; nil, nil for none. A
--- link with a 3D model shows nothing unless `model` (few ViewportFrames: Honeycomb.modelKeys).
-function HoneycombHex.artOf(link: Comb.Link, model: boolean): (Instance?, string?)
-	if link.kind == "gate" then
-		return nil, nil
-	elseif link.kind == "track" and link.id ~= "tool" then
-		local icon = ICONS[link.id :: string]
-		return nil, if icon then images[icon] else nil
-	elseif not model then
-		return nil, nil
-	end
-	local template = if link.kind == "track"
-		then ToolModels.find((Config.track("tool") :: Config.Track).levels[link.level :: number].model :: string)
-		else ToolModels.itemModel(Items.get(Config, link.id))
-	return template, if template then nil else images.unknown -- nil until replicated
+-- A hex's body: its colour, the rim a darker shade, the white outline, its water level and which
+-- marks show (the check, the lock, Back's arrow, the area flag).
+local function paintBody(hex: Hex, base: Color3, water: number, check: boolean, lock: boolean, arrow: boolean, area: boolean)
+	set(hex.button, "ImageColor3", base)
+	set(hex.bottom, "ImageColor3", base:Lerp(PAINT.rim, RIM_SHADE))
+	set(hex.outline, "ImageColor3", PAINT.outline)
+	setWater(hex, water)
+	set(hex.check, "Visible", check)
+	set(hex.lock, "Visible", lock)
+	set(hex.backArrow, "Visible", arrow)
+	set(hex.areaIcon, "Visible", area)
 end
 
--- A category hex's art: the current tool, the boosts' pip, else its first item's model.
-local function categoryArt(layout: Comb.Layout, catId: string, stats: Ladder.Stats): (Instance?, string?)
-	if catId == "tools" then
-		local template = ToolModels.find(stats.toolModel)
-		return template, if template then nil else images.unknown
-	elseif catId == "boosts" then
-		return nil, images.pipFull
+-- The template (a Model or a backpack's Accessory) and image a level shows; nil, nil for none (a
+-- gate shows AreaIcon; the tool its model in hand, see paintUpgrade).
+function HoneycombHex.artOf(link: Comb.Link): (Instance?, string?)
+	if link.kind == "gate" then
+		return nil, nil
+	elseif link.kind == "track" then
+		local icon = ICONS[link.id]
+		return nil, if icon then images[icon] else nil
 	end
-	for _, link in layout.categories[catId].chains[1].links do
-		if link.kind ~= "gate" then
-			return HoneycombHex.artOf(link, true)
-		end
-	end
-	return nil, images.unknown
+	local template = ToolModels.itemModel(Items.get(Config, link.id))
+	return template, if template then nil else images.unknown -- nil until replicated
 end
 
 -- A hex's art slot: `template` in its ViewportFrame (copied once per template), else `image` in its
@@ -204,98 +234,59 @@ function HoneycombHex.showArt(record: { art: Instance? }, view: ViewportFrame, i
 	end
 end
 
--- Category hexes take the category's colour (Tool orange, Boosts teal, items deep water).
-local function categoryColor(catId: string): Color3
-	return if catId == "tools" then colors.toolTag elseif catId == "boosts" then colors.speedTag else colors.deepWater
+-- The tool in hand's model.
+local function toolArt(stats: Ladder.Stats): (Instance?, string?)
+	local template = ToolModels.find(stats.toolModel)
+	return template, if template then nil else images.unknown
 end
 
--- A hex's body: colour (its rim a darker shade) and outline; `fade` tweens the colours.
-local function paintBody(hex: Hex, base: Color3, outline: Color3, fade: boolean)
-	local rim = base:Lerp(colors.outline, RIM_SHADE)
-	if fade then
-		TweenService:Create(hex.button, FADE, { ImageColor3 = base }):Play()
-		TweenService:Create(hex.bottom, FADE, { ImageColor3 = rim }):Play()
-	else
-		set(hex.button, "ImageColor3", base)
-		set(hex.bottom, "ImageColor3", rim)
+-- An upgrade hex's Level: owned of all levels ("2/6"), "MAX" when done; none for a gate.
+function HoneycombHex.levelText(upgrade: Comb.Upgrade, st: Comb.HexState): string?
+	if upgrade.kind == "gate" then
+		return nil
 	end
-	set(hex.outline, "ImageColor3", outline)
-end
-
-local function paintName(hex: Hex, text: string?)
-	set(hex.name, "Visible", text ~= nil and readable(designSize(hex.name)))
-	if text then
-		set(hex.name, "Text", text)
-	end
-end
-
--- The price row: `text` (nil hides it), the coin, its colour, small for an item at its stand.
-local function paintPrice(hex: Hex, text: string?, coin: boolean, color: Color3, small: boolean)
-	local size = if small then math.round(hex.priceSize * SMALL_PRICE) else hex.priceSize
-	set(hex.priceRow, "Visible", text ~= nil and readable(size))
-	if not text then
-		return
-	end
-	set(hex.price, "Text", text)
-	set(hex.price, "TextColor3", color)
-	set(hex.price, "TextSize", size)
-	set(hex.coin, "Visible", coin)
+	return if st.state == "max" then "MAX" else `{st.owned}/{st.total}`
 end
 
 -- A link's listed price (Config), before the team's scale.
 local function listedCost(link: Comb.Link): number
-	if link.kind == "track" then
-		return (Config.track(link.id :: string) :: Config.Track).levels[link.level :: number].cost
-	end
 	local item = Items.get(Config, link.id)
-	return if link.level == 1 then item.price else item.levels[(link.level :: number) - 1].cost
+	return if link.level == 1 then item.price else item.levels[link.level - 1].cost
 end
 
--- A link hex in its state (shared/Honeycomb.states); `model`: it may show its 3D model. Every hex
--- has its short name on top; at the bottom the next link's price, an item's price at its stand,
--- "Owned", "MAX" or how a closed gate opens. Later links are a darker shade, without a price.
-function HoneycombHex.paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, catId: string, view: Comb.View, fade: boolean, model: boolean)
+-- An upgrade's hex in state `st`: item blue (slate while locked, darker while bought at its stand
+-- first); its name, art, Level and at the bottom the next level's price (coral and a rising fill
+-- while short), the stand price, what a closed gate waits for, or "Open"; a check once maxed.
+function HoneycombHex.paintUpgrade(hex: Hex, upgrade: Comb.Upgrade, st: Comb.HexState, view: Comb.View, stats: Ladder.Stats)
 	local state = st.state
-	local base, outline = categoryColor(catId), colors.outline
-	local water, waterColor, check, lock, art, iconColor = 0, colors.shallowWater, false, false, true, colors.foam
-	local priceText, coin, priceColor, small = nil, false, colors.foam, false
-	hex.base = 1
-	if state == "owned" then
-		water, check, priceText = 1, true, "Owned"
-	elseif state == "max" then
-		water, outline, priceText = 1, colors.toolTag, "MAX"
+	local link = Comb.link(upgrade, st.owned)
+	local gate = upgrade.kind == "gate"
+	local base, water, art = PAINT.item, 0, true
+	local priceText, coin, priceColor = nil, false, PAINT.price
+	if state == "max" then
+		priceText = if gate then "Open" else nil
 	elseif state == "buy" then
 		priceText, coin = Hud.money(st.price :: number), true
 	elseif state == "short" then
-		base, water, waterColor = colors.locked, st.progress :: number, colors.shallowWater:Lerp(colors.locked, 0.5)
-		priceText, coin, priceColor = Hud.money(st.price :: number), true, colors.buyCoral
+		water, priceText, coin, priceColor = st.progress :: number, Hud.money(st.price :: number), true, PAINT.short
 	elseif Comb.elsewhere(link, st, view) then
-		base, small = base:Lerp(colors.outline, FUTURE_SHADE), true
-		priceText, coin = Hud.money(Hud.price(listedCost(link))), true
-	elseif state == "future" then
-		base = base:Lerp(colors.outline, FUTURE_SHADE)
-	elseif state == "gateOpen" then
-		-- passed: a small lock in water blue (the theme has no open-lock image yet)
-		base, art, hex.base, iconColor = colors.locked, false, CUE.gateScale, colors.shallowWater
-	elseif link.kind == "gate" then
-		base, art, lock = colors.locked, false, true
-		priceText, coin = Text.gate(Areas.byId(Config, link.areaId))
+		base, priceText, coin = PAINT.stand, Hud.money(Hud.price(listedCost(link))), true
 	else
-		base, art, lock = colors.locked, false, true
+		base, art = PAINT.locked, false
+		priceText = if gate then Text.gateWait(Areas.byId(Config, link.areaId)) else nil
 	end
-	paintBody(hex, base, outline, fade)
-	set(hex.fill, "ImageColor3", waterColor)
-	setWater(hex, water)
-	set(hex.check, "Visible", check)
-	set(hex.lock, "Visible", lock)
-	paintName(hex, Text.short(link))
-	paintPrice(hex, priceText, coin, priceColor, small)
-	local template, image = nil, if state == "gateOpen" then images.lock else nil
-	if art then
-		template, image = HoneycombHex.artOf(link, model)
+	paintBody(hex, base, water, state == "max", not art, false, gate and art)
+	local tool = upgrade.id == "tool"
+	paintText(hex, hex.name, if tool then Format.toolName(stats.toolName) else Text.short(link), TEXT.name)
+	paintText(hex, hex.level, HoneycombHex.levelText(upgrade, st), TEXT.level)
+	paintPrice(hex, priceText, coin, priceColor)
+	local template, image = nil, nil
+	if art and tool then
+		template, image = toolArt(stats)
+	elseif art then
+		template, image = HoneycombHex.artOf(link)
 	end
 	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
-	set(hex.icon, "ImageColor3", iconColor)
 	hex.breathe = state == "buy"
 end
 
@@ -304,7 +295,6 @@ local function paintBadge(hex: Hex, count: number)
 	local was = hex.badgeCount
 	hex.badgeCount = count
 	set(hex.count, "Text", tostring(count))
-	set(hex.count, "Visible", readable(designSize(hex.count)))
 	local info = TweenInfo.new(CUE.badgeSeconds, Enum.EasingStyle.Back, if count > 0 then Enum.EasingDirection.Out else Enum.EasingDirection.In)
 	if was < 0 then
 		set(hex.badge, "Visible", count > 0)
@@ -324,39 +314,32 @@ local function paintBadge(hex: Hex, count: number)
 	end
 end
 
--- A category hex: its name, art, badge, and how much of it is owned (water and "3/12").
-function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string, view: Comb.View, count: number, stats: Ladder.Stats)
+-- A category hex: orange, its name, art, "3/12" levels owned, "Open" and its badge.
+function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string, view: Comb.View, count: number)
 	local owned, total = Comb.ownedShare(layout, catId, view)
-	local share = if total > 0 then owned / total else 0
-	paintBody(hex, categoryColor(catId), colors.outline, false)
-	set(hex.fill, "ImageColor3", colors.shallowWater)
-	if hex.share >= 0 and share > hex.share then -- a buy: the water rises
-		hex.water.Visible = true
-		TweenService:Create(hex.water, TweenInfo.new(CUE.waterSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(hex.waterWidth, UDim.new(share, 0)) }):Play()
-	elseif share ~= hex.share then
-		setWater(hex, share)
+	paintBody(hex, PAINT.category, 0, false, false, false, catId == "areas")
+	paintText(hex, hex.name, Text.category(catId):upper(), TEXT.name)
+	paintText(hex, hex.level, `{owned}/{total}`, TEXT.level)
+	paintPrice(hex, "Open", false, PAINT.price)
+	local template, image = nil, nil
+	if catId == "boosts" then
+		image = images.pipFull
+	elseif catId ~= "areas" then
+		template, image = HoneycombHex.artOf(layout.categories[catId].upgrades[1].links[1])
 	end
-	hex.share = share
-	set(hex.check, "Visible", false)
-	set(hex.lock, "Visible", false)
-	paintName(hex, Text.category(catId):upper())
-	paintPrice(hex, `{owned}/{total}`, false, colors.foam, true)
-	HoneycombHex.showArt(hex, hex.view, hex.icon, categoryArt(layout, catId, stats))
+	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
 	paintBadge(hex, count)
 	hex.breathe = false
 end
 
--- The main view's centre: the tool in hand and its level (the tool chain's level, as its hexes
--- and the card count; none for the starting tool).
-function HoneycombHex.paintCentre(hex: Hex, stats: Ladder.Stats, level: number)
-	paintBody(hex, colors.toolTag, colors.outline, false)
-	setWater(hex, 0)
-	set(hex.check, "Visible", false)
-	set(hex.lock, "Visible", false)
-	paintName(hex, Format.toolName(stats.toolName))
-	paintPrice(hex, if level > 0 then `Lv {level}` else nil, false, colors.foam, true)
-	local template = ToolModels.find(stats.toolModel)
-	HoneycombHex.showArt(hex, hex.view, hex.icon, template, if template then nil else images.unknown)
+-- A category's centre: Back, with its arrow.
+function HoneycombHex.paintBack(hex: Hex)
+	paintBody(hex, PAINT.back, 0, false, false, true, false)
+	paintText(hex, hex.name, "Back", TEXT.name)
+	paintText(hex, hex.level, nil, TEXT.level)
+	paintPrice(hex, nil, false, PAINT.price)
+	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
+	hex.breathe = false
 end
 
 -- The scale an animation adds at `now` (1 when none plays).
@@ -393,68 +376,56 @@ function HoneycombHex.animScale(hex: Hex, now: number): number
 	return CUE.wakeOvershoot + (1 - CUE.wakeOvershoot) * (1 - (1 - u) * (1 - u))
 end
 
--- A landing (shop.md: the hex fills, the touching next hex wakes): holds the hex and `nextHex`, and
--- returns what starts it (Purchase.landed runs it as the coins arrive). `final`: the hex's state
--- once landed. `alive()` false stops it and lets both go; `update` hears each step, and the caller
--- repaints after it.
-function HoneycombHex.celebrate(hex: Hex, final: Comb.StateName, nextHex: Hex?, alive: () -> boolean, update: (Step) -> ()): () -> ()
+-- A landing on a bought hex: holds its look, and returns what starts it (Purchase.landed runs it as
+-- the coins arrive). The water rises; the hex pops as `paint()` shows its new level and a check
+-- flashes; bridgeSeconds after the check it wakes into its next level and `done()` runs (the caller
+-- repaints). `alive()` false stops it early (then `done()` too); a newer landing on the hex takes over.
+function HoneycombHex.celebrate(hex: Hex, paint: () -> (), alive: () -> boolean, done: () -> ()): () -> ()
+	hex.landing += 1
+	local mine = hex.landing
 	hex.holdUntil = math.huge
-	setWater(hex, 0)
-	set(hex.check, "Visible", false)
-	local function stop()
-		hex.holdUntil = 0
-		if nextHex then
-			nextHex.holdUntil = 0
+	local function live(): boolean
+		if hex.landing ~= mine then
+			return false -- a newer landing owns the hex
+		elseif not alive() then
+			hex.holdUntil = 0
+			done()
+			return false
 		end
-		update("stopped")
+		return true
 	end
 	return function()
-		if not alive() then
-			stop()
+		if not live() then
 			return
 		end
 		hex.water.Visible = true
 		local full = UDim2.new(hex.waterWidth, UDim.new(1, 0))
 		TweenService:Create(hex.water, TweenInfo.new(CUE.waterSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = full }):Play()
 		task.delay(CUE.waterSeconds, function()
-			if not alive() then
-				stop()
+			if not live() then
 				return
 			end
 			hex.animKind, hex.animAt = "pop", os.clock()
-			hex.holdUntil = 0 -- full now: the next paint matches; the check's stamp is Size only
-			if final == "owned" then
-				local check = hex.check
-				check.Size = UDim2.new()
-				check.Visible = true
-				local up = TweenService:Create(check, TweenInfo.new(CUE.checkSeconds * 0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = HoneycombHex.scaled(hex.checkSize, CUE.checkOvershoot) })
-				up.Completed:Once(function()
-					TweenService:Create(check, TweenInfo.new(CUE.checkSeconds * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Size = hex.checkSize }):Play()
-				end)
-				up:Play()
-			end
-			update("filled")
-			if not nextHex then
-				return
-			end
-			task.delay(CUE.bridgeSeconds, function()
-				if not alive() then
-					stop()
+			paint()
+			setWater(hex, 1)
+			local check = hex.check
+			check.Size = UDim2.new()
+			check.Visible = true
+			local up = TweenService:Create(check, TweenInfo.new(CUE.checkSeconds * 0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = HoneycombHex.scaled(hex.checkSize, CUE.checkOvershoot) })
+			up.Completed:Once(function()
+				TweenService:Create(check, TweenInfo.new(CUE.checkSeconds * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Size = hex.checkSize }):Play()
+			end)
+			up:Play()
+			task.delay(CUE.checkSeconds + CUE.bridgeSeconds, function()
+				if not live() then
 					return
 				end
-				nextHex.fade = true
-				nextHex.animKind, nextHex.animAt = "wake", os.clock()
-				nextHex.holdUntil = 0
-				update("woke")
+				hex.animKind, hex.animAt = "wake", os.clock()
+				hex.holdUntil = 0
+				done()
 			end)
 		end)
 	end
-end
-
--- A chain's window moved: the hex glides from (fromX, fromY), the slot its link sat in, to its own.
-function HoneycombHex.slide(hex: Hex, fromX: number, fromY: number)
-	hex.button.Position = UDim2.fromOffset(fromX, fromY)
-	TweenService:Create(hex.button, SLIDE, { Position = UDim2.fromOffset(hex.x, hex.y) }):Play()
 end
 
 -- A button springs when what it sent lands: down, past full size, back.

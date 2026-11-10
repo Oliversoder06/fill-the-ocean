@@ -21,13 +21,14 @@ local Gates = {}
 -- over its fill and price until then, "<price> · hold E" once it is the next gate on sale, then
 -- "Open". White, teal and orange on the navy outline read from a distance (Theme colours).
 local function signOf(area, gatesOpen: { number }, fill: number): (string, Color3, boolean)
-	local nextId, onSale = Areas.nextGate(Config, gatesOpen, fill)
+	local status = Areas.gateOffer(Config, gatesOpen, fill, area.id)
 	local title = area.name:upper()
-	if table.find(gatesOpen, area.id) then
+	if status == "open" then
 		return `{title}\nOpen`, colors.speedTag, false
-	elseif nextId == area.id and onSale then
+	elseif status == "buy" then
 		return `{title}\n{Hud.money(Hud.price(area.gate.price))} · hold E`, colors.toolTag, true
-	elseif fill >= area.gate.fill and nextId then
+	elseif status == "order" then
+		local nextId = Areas.nextGate(Config, gatesOpen, fill)
 		return `{title}\nOpen {Areas.byId(Config, nextId).name} first`, colors.foam, false
 	end
 	return `{title}\nFill to {Format.percent(area.gate.fill)} · {Hud.money(Hud.price(area.gate.price))}`, colors.foam, false

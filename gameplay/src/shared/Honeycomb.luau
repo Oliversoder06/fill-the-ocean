@@ -3,42 +3,31 @@
 -- Pure: config is passed in, so Lune tests and Roblox load it the same way. Hexes are flat-top, in
 -- axial coordinates (q, r); q is the column, r runs down it.
 --
--- Category view arrangement: one cluster of touching hexes (library shop.md), the category hex at
--- (0, 0). Each chain is an arm of neighbours growing outward from it: the four longest chains leave
--- along the diagonals (a view is wide like the screen), the two shortest after them up and down;
--- past six chains the rest start in the second ring beside an arm's first hex, left and right
--- first. Each next slot is the free neighbour farthest from the centre, the same direction on a tie.
--- Longer chains show a window of their links (Honeycomb.window): the i-th shown link sits in the
--- chain's slot i.
+-- One hex per upgrade: a track, an item, the backpacks (every pack, each the next level) or an
+-- area's gate; a click buys its next level. The main view: the tool at (0, 0) and a ring of
+-- categories. A category view: its Back hex at (0, 0) and its upgrades, earlier areas first, in
+-- Honeycomb.ringSlots, SPACING apart so a small even gap shows between them.
 
 export type Pos = { q: number, r: number }
--- A link of a chain: a track level, an item link (level 1 = the buy, then its upgrades) or an area
--- gate. `key` names its hex in Honeycomb.states.
-export type Link = {
-	key: string,
-	kind: "track" | "item" | "gate",
-	id: string?, -- track or item id
-	level: number?,
-	areaId: number, -- the area that opens it (a gate: the area it opens)
-}
-export type Chain = {
-	id: string, -- track id, item id, or "backpacks" (every backpack, each the next link)
+-- A level an upgrade's hex sells: a track level, an item link (level 1 = the buy, then its
+-- upgrades) or a gate (level 1 opens it; id "gate:<areaId>", common/Areas.gateId).
+export type Link = { kind: "track" | "item" | "gate", id: string, level: number, areaId: number }
+export type Upgrade = {
+	id: string, -- track id, item id, "backpacks" or the gate's id
+	kind: "track" | "item" | "backpacks" | "gate",
+	areaId: number, -- its first level's area
 	links: { Link },
-	slots: { Pos }, -- min(#links, MAX_VISIBLE) touching places, outward from the category hex
 }
-export type Category = {
-	id: string,
-	hex: Pos, -- (0, 0)
-	chains: { Chain },
-}
+export type Category = { id: string, upgrades: { Upgrade }, slots: { Pos } }
 export type Layout = {
-	main: { centre: { id: string, q: number, r: number }, ring: { { id: string, q: number, r: number } } },
+	tool: Upgrade, -- the main view's centre
+	ring: { { id: string, q: number, r: number } },
 	order: { string },
 	categories: { [string]: Category },
 }
-export type StateName = "owned" | "buy" | "short" | "future" | "locked" | "max" | "gateOpen" | "gateClosed"
--- price: buy and short; progress (wallet / price, 0..1): short only.
-export type HexState = { state: StateName, price: number?, progress: number? }
+export type StateName = "buy" | "short" | "max" | "locked"
+-- owned of total levels; price: buy and short; progress (wallet / price, 0..1): short only.
+export type HexState = { state: StateName, owned: number, total: number, price: number?, progress: number? }
 -- levels: track id -> levels owned. items: item id -> links owned (0 / nil none, 1 bought, 1 + n
 -- with n upgrades). price: the final price of a link now, nil when it can't be bought here.
 export type View = {
@@ -54,25 +43,34 @@ local SQRT3 = math.sqrt(3)
 local MONEY_EPSILON = 1e-6 -- as Items.affords: fractional coins from pours still buy
 -- Flat-top neighbour steps, clockwise from straight up.
 local STEPS = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 0, 1 }, { -1, 1 }, { -1, 0 } }
-local DIAGONALS = { 2, 3, 5, 6 } -- STEPS a category's longest chains leave by, clockwise
-local VERTICALS = { 1, 4 }
 local STEP_CONE = 0.5 -- cos 60 degrees: how far off its direction a gamepad step may land
-local CATEGORIES = { "tools", "boosts", "gear", "vehicles", "buildings", "staff" }
+local CATEGORIES = { "boosts", "gear", "vehicles", "buildings", "staff", "areas" }
+local ITEM_KINDS = { vehicles = "vehicle", buildings = "building", staff = "staff" }
+-- Rings 1 and 2: the cells on the vertical axis (top, bottom), then mirror pairs (left, right),
+-- the widest first.
+local RINGS = {
+	{ axis = { { 0, -1 }, { 0, 1 } }, pairs = { { { -1, 0 }, { 1, -1 } }, { { -1, 1 }, { 1, 0 } } } },
+	{
+		axis = { { 0, -2 }, { 0, 2 } },
+		pairs = { { { -2, 1 }, { 2, -1 } }, { { -2, 0 }, { 2, -2 } }, { { -2, 2 }, { 2, 0 } }, { { -1, -1 }, { 1, -2 } }, { { -1, 2 }, { 1, 1 } } },
+	},
+}
 
 local Honeycomb = {}
 
-Honeycomb.MAX_VISIBLE = 5
+Honeycomb.SPACING = 1.1 -- hex centres this many hex sizes apart: a small even gap
 
 function Honeycomb.toPixel(q: number, r: number, size: number): (number, number)
 	return size * 1.5 * q, size * SQRT3 * (r + q / 2)
 end
 
--- The box around `hexes` (flat-top, `size` from centre to corner): its centre and size in pixels.
-function Honeycomb.bounds(hexes: { Pos }, size: number): (number, number, number, number)
+-- The box around `hexes` (flat-top, `size` from centre to corner, centres `spacing` sizes apart,
+-- 1 by default): its centre and size in pixels.
+function Honeycomb.bounds(hexes: { Pos }, size: number, spacing: number?): (number, number, number, number)
 	local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
 	local halfH = size * SQRT3 / 2
 	for _, pos in hexes do
-		local x, y = Honeycomb.toPixel(pos.q, pos.r, size)
+		local x, y = Honeycomb.toPixel(pos.q, pos.r, size * (spacing or 1))
 		minX, maxX = math.min(minX, x - size), math.max(maxX, x + size)
 		minY, maxY = math.min(minY, y - halfH), math.max(maxY, y + halfH)
 	end
@@ -80,7 +78,7 @@ function Honeycomb.bounds(hexes: { Pos }, size: number): (number, number, number
 end
 
 -- The zoom that fits content (w x h) on a board, at most `maxZoom`, but never so small that a hex
--- (`hexPixels` tall on screen at zoom 1) drops under `minPixels`; then the board pans (true).
+-- (`hexPixels` tall on screen at zoom 1) drops under `minPixels` (then it overflows: true).
 function Honeycomb.zoom(contentW: number, contentH: number, boardW: number, boardH: number, hexPixels: number, minPixels: number, maxZoom: number): (number, boolean)
 	local fit = math.min(boardW / contentW, boardH / contentH, maxZoom)
 	local least = minPixels / hexPixels
@@ -88,12 +86,6 @@ function Honeycomb.zoom(contentW: number, contentH: number, boardW: number, boar
 		return fit, false
 	end
 	return least, true
-end
-
--- A pan offset kept so zoomed content (w x h) still covers the board where it is bigger than it.
-function Honeycomb.clampPan(x: number, y: number, contentW: number, contentH: number, boardW: number, boardH: number): (number, number)
-	local maxX, maxY = math.max(0, (contentW - boardW) / 2), math.max(0, (contentH - boardH) / 2)
-	return math.clamp(x, -maxX, maxX), math.clamp(y, -maxY, maxY)
 end
 
 -- When a hex at (q, r) starts popping in as a view opens: rings further out a little later.
@@ -131,174 +123,126 @@ function Honeycomb.distance(q1: number, r1: number, q2: number, r2: number): num
 	return (math.abs(dq) + math.abs(dr) + math.abs(dq + dr)) / 2
 end
 
--- Links from `entries` ({ kind, id, level, areaId }), with a gate before each one from a later
--- area than the one before it (the first is measured against the cove).
-local function makeChain(id: string, entries): Chain
-	local links = {}
-	local area = 1
-	for _, entry in entries do
-		if entry.areaId > area then
-			table.insert(links, { key = `gate:{id}:{entry.areaId}`, kind = "gate", areaId = entry.areaId })
+-- Where `count` (at most 18) hexes sit around a centre hex, symmetric about the vertical axis:
+-- ring 1 first, then ring 2; in each an odd count takes the top cell, then mirror pairs, then the
+-- top and bottom. Listed top to bottom, left to right, so the first upgrades sit nearest the top.
+function Honeycomb.ringSlots(count: number): { Pos }
+	assert(count <= 18, `honeycomb: {count} upgrades don't fit in two rings`)
+	local slots: { Pos } = {}
+	local function add(cell: { number })
+		table.insert(slots, { q = cell[1], r = cell[2] })
+	end
+	local left = count
+	for _, ring in RINGS do
+		local k = math.min(left, 2 + 2 * #ring.pairs)
+		left -= k
+		if k % 2 == 1 then
+			add(ring.axis[1])
+			k -= 1
 		end
-		area = math.max(area, entry.areaId)
-		entry.key = `{entry.kind}:{entry.id}:{entry.level}`
-		table.insert(links, entry)
-	end
-	return { id = id, links = links, slots = {} }
-end
-
-local function trackChain(track): Chain
-	local entries = {}
-	for level, data in track.levels do
-		table.insert(entries, { kind = "track", id = track.id, level = level, areaId = data.area })
-	end
-	return makeChain(track.id, entries)
-end
-
-local function itemEntries(item, entries)
-	for level = 1, #item.levels + 1 do
-		table.insert(entries, { kind = "item", id = item.id, level = level, areaId = item.area })
-	end
-	return entries
-end
-
-local function itemChains(config, kind: string, chains: { Chain })
-	for _, item in config.items do
-		if item.kind == kind then
-			table.insert(chains, makeChain(item.id, itemEntries(item, {})))
-		end
-	end
-	return chains
-end
-
--- A category's chains, from config only (a new track or item needs no layout change).
-local function chainsOf(config, catId: string): { Chain }
-	local chains = {}
-	if catId == "tools" or catId == "boosts" then
-		for _, track in config.tracks do
-			if (track.id == "tool") == (catId == "tools") then
-				table.insert(chains, trackChain(track))
+		for _, pair in ring.pairs do
+			if k >= 2 then
+				add(pair[1])
+				add(pair[2])
+				k -= 2
 			end
 		end
-	elseif catId == "gear" then
-		local packs = {}
-		for _, item in config.items do
-			if item.kind == "backpack" then
-				itemEntries(item, packs)
-			end
-		end
-		table.insert(chains, makeChain("backpacks", packs))
-		itemChains(config, "gadget", chains)
-	else
-		itemChains(config, ({ vehicles = "vehicle", buildings = "building", staff = "staff" })[catId], chains)
-	end
-	return chains
-end
-
-local function cell(pos: Pos): string
-	return `{pos.q},{pos.r}`
-end
-
--- Adds `count` slots to `chain` from `from`, each the free neighbour of the last farthest from the
--- centre, on a tie the one in direction `dir` (a STEPS index), else the first clockwise.
-local function grow(used: { [string]: boolean }, chain: Chain, from: Pos, dir: number, count: number)
-	for _ = 1, count do
-		local best: Pos?, bestDir, bestDistance = nil, dir, -1
-		for d, step in STEPS do
-			local pos = { q = from.q + step[1], r = from.r + step[2] }
-			local distance = Honeycomb.distance(0, 0, pos.q, pos.r)
-			if not used[cell(pos)] and (distance > bestDistance or (distance == bestDistance and d == dir)) then
-				best, bestDir, bestDistance = pos, d, distance
-			end
-		end
-		assert(best, `honeycomb: chain {chain.id} is boxed in at {cell(from)}`)
-		used[cell(best :: Pos)] = true
-		table.insert(chain.slots, best :: Pos)
-		from, dir = best :: Pos, bestDir
-	end
-end
-
--- A second-ring cell beside an arm's first hex for a chain past six: the one furthest left or right
--- (the screen is wide), and the step from that arm's hex into it.
-local function wedgeStart(used: { [string]: boolean }, arms: { Chain }): (Pos, number)
-	local best: Pos?, bestDir, bestX = nil, 0, -1
-	for _, arm in arms do
-		local first = arm.slots[1]
-		for d, step in STEPS do
-			local pos = { q = first.q + step[1], r = first.r + step[2] }
-			local x = math.abs((Honeycomb.toPixel(pos.q, pos.r, 1)))
-			if not used[cell(pos)] and Honeycomb.distance(0, 0, pos.q, pos.r) == 2 and x > bestX then
-				best, bestDir, bestX = pos, d, x
-			end
+		if k == 2 then
+			add(ring.axis[1])
+			add(ring.axis[2])
 		end
 	end
-	assert(best, "honeycomb: no room in the second ring")
-	return best :: Pos, bestDir
-end
-
-local function place(catId: string, chains: { Chain }): Category
-	local function slotCount(chain: Chain): number
-		return math.min(#chain.links, Honeycomb.MAX_VISIBLE)
-	end
-	-- Longest first (config order on a tie): the four longest take the diagonals, the two shortest
-	-- of the rest up and down, any others the second ring.
-	local order = {}
-	for i in chains do
-		table.insert(order, i)
-	end
-	table.sort(order, function(a: number, b: number): boolean
-		local na, nb = slotCount(chains[a]), slotCount(chains[b])
-		return if na ~= nb then na > nb else a < b
+	table.sort(slots, function(a: Pos, b: Pos): boolean
+		local ya, yb = 2 * a.r + a.q, 2 * b.r + b.q -- twice the row, so it stays whole
+		return if ya ~= yb then ya < yb else a.q < b.q
 	end)
-	local diagonal = math.min(4, #order)
-	local vertical = math.min(2, #order - diagonal)
-	local groups = { { table.unpack(order, 1, diagonal) }, { table.unpack(order, #order - vertical + 1, #order) }, { table.unpack(order, diagonal + 1, #order - vertical) } }
-	for _, group in groups do
-		table.sort(group) -- clockwise in config order
-	end
+	return slots
+end
 
-	local used = { [cell({ q = 0, r = 0 })] = true }
-	local arms = {}
-	for g, dirs in { DIAGONALS, VERTICALS } do
-		for k, i in groups[g] do
-			local chain = chains[i]
-			grow(used, chain, { q = 0, r = 0 }, dirs[k], slotCount(chain))
-			table.insert(arms, chain)
+local function trackUpgrade(track): Upgrade
+	local links = {}
+	for level, data in track.levels do
+		table.insert(links, { kind = "track", id = track.id, level = level, areaId = data.area } :: Link)
+	end
+	return { id = track.id, kind = "track", areaId = links[1].areaId, links = links }
+end
+
+local function itemLinks(item, links: { Link }): { Link }
+	for level = 1, #item.levels + 1 do
+		table.insert(links, { kind = "item", id = item.id, level = level, areaId = item.area })
+	end
+	return links
+end
+
+-- A category's upgrades from config only (a new track or item needs no layout change), earlier
+-- areas first (config order on a tie).
+local function upgradesOf(config, catId: string): { Upgrade }
+	local list: { Upgrade } = {}
+	if catId == "boosts" then
+		for _, track in config.tracks do
+			if track.id ~= "tool" then
+				table.insert(list, trackUpgrade(track))
+			end
+		end
+	elseif catId == "areas" then
+		for _, area in config.areas do
+			if area.gate then
+				local id = `gate:{area.id}` -- common/Areas.gateId (the spec checks they agree)
+				table.insert(list, { id = id, kind = "gate", areaId = area.id, links = { { kind = "gate", id = id, level = 1, areaId = area.id } } })
+			end
+		end
+	else
+		local packs: { Link } = {}
+		for _, item in config.items do
+			if catId == "gear" and item.kind == "backpack" then
+				itemLinks(item, packs)
+			elseif (catId == "gear" and item.kind == "gadget") or ITEM_KINDS[catId] == item.kind then
+				table.insert(list, { id = item.id, kind = "item", areaId = item.area, links = itemLinks(item, {}) })
+			end
+		end
+		if #packs > 0 then
+			table.insert(list, 1, { id = "backpacks", kind = "backpacks", areaId = packs[1].areaId, links = packs } :: Upgrade)
 		end
 	end
-	for _, i in groups[3] do
-		local chain = chains[i]
-		local start, dir = wedgeStart(used, arms)
-		used[cell(start)] = true
-		table.insert(chain.slots, start)
-		grow(used, chain, start, dir, slotCount(chain) - 1)
+	local index = {}
+	for i, upgrade in list do
+		index[upgrade] = i
 	end
-	return { id = catId, hex = { q = 0, r = 0 }, chains = chains }
+	table.sort(list, function(a: Upgrade, b: Upgrade): boolean
+		return if a.areaId ~= b.areaId then a.areaId < b.areaId else index[a] < index[b]
+	end)
+	return list
 end
 
 function Honeycomb.layout(config): Layout
-	local layout: Layout = { main = { centre = { id = "tool", q = 0, r = 0 }, ring = {} }, order = CATEGORIES, categories = {} }
+	local layout: Layout = { tool = trackUpgrade(config.track("tool")), ring = {}, order = CATEGORIES, categories = {} }
 	for i, catId in CATEGORIES do
-		table.insert(layout.main.ring, { id = catId, q = STEPS[i][1], r = STEPS[i][2] })
-		layout.categories[catId] = place(catId, chainsOf(config, catId))
+		table.insert(layout.ring, { id = catId, q = STEPS[i][1], r = STEPS[i][2] })
+		local upgrades = upgradesOf(config, catId)
+		layout.categories[catId] = { id = catId, upgrades = upgrades, slots = Honeycomb.ringSlots(#upgrades) }
 	end
 	return layout
 end
 
-local function linkOwned(view: View, link: Link): boolean
-	if link.kind == "track" then
-		return (view.levels[link.id :: string] or 0) >= (link.level :: number)
-	elseif link.kind == "item" then
-		return (view.items[link.id :: string] or 0) >= (link.level :: number)
-	end
-	return false
+-- The upgrades a view shows: the tool on "main", else the category's.
+function Honeycomb.upgrades(layout: Layout, viewId: string): { Upgrade }
+	return if viewId == "main" then { layout.tool } else layout.categories[viewId].upgrades
 end
 
--- Index of the furthest owned link (0 for none): links before it count as owned too (a bigger
--- backpack passes the earlier ones' upgrades).
-local function furthest(chain: Chain, view: View): number
+local function linkOwned(view: View, link: Link): boolean
+	if link.kind == "track" then
+		return (view.levels[link.id] or 0) >= link.level
+	elseif link.kind == "item" then
+		return (view.items[link.id] or 0) >= link.level
+	end
+	return view.openAreas[link.areaId] == true
+end
+
+-- How many of an upgrade's levels count as owned: up to the furthest one owned (a bigger backpack
+-- passes the earlier ones' upgrades).
+function Honeycomb.ownedCount(upgrade: Upgrade, view: View): number
 	local last = 0
-	for i, link in chain.links do
+	for i, link in upgrade.links do
 		if linkOwned(view, link) then
 			last = i
 		end
@@ -306,183 +250,127 @@ local function furthest(chain: Chain, view: View): number
 	return last
 end
 
--- How many of the chain's links (gates not counted) are owned, for Honeycomb.window.
-function Honeycomb.ownedCount(chain: Chain, view: View): number
-	local count = 0
-	for i = 1, furthest(chain, view) do
-		if chain.links[i].kind ~= "gate" then
-			count += 1
-		end
-	end
-	return count
+-- The level an upgrade's hex sells with `owned` levels owned: the next one, the last once maxed.
+function Honeycomb.link(upgrade: Upgrade, owned: number): Link
+	return upgrade.links[math.min(owned + 1, #upgrade.links)]
 end
 
--- Which link indices to show, in order (the i-th sits in chain.slots[i]): all of a short chain;
--- else from the last owned link (so its gate and the next link follow) onward, ending with the
--- chain's last link, the max end.
-function Honeycomb.window(chain: Chain, ownedCount: number, maxVisible: number?): { number }
-	local visible = maxVisible or Honeycomb.MAX_VISIBLE
-	local n = #chain.links
-	local shown = {}
-	if n <= visible then
-		for i = 1, n do
-			table.insert(shown, i)
-		end
-		return shown
+-- An upgrade's state: "max" with every level owned; else its next level's: "locked" in a closed
+-- area, of an unreachable item or without a price (not sold here); "buy" when the wallet pays it,
+-- else "short".
+function Honeycomb.state(upgrade: Upgrade, view: View): HexState
+	local owned, total = Honeycomb.ownedCount(upgrade, view), #upgrade.links
+	if owned == total then
+		return { state = "max", owned = owned, total = total }
 	end
-	local lastOwned, seen = 0, 0
-	for i, link in chain.links do
-		if seen == ownedCount then
-			break
-		elseif link.kind ~= "gate" then
-			seen += 1
-			lastOwned = i
-		end
+	local link = upgrade.links[owned + 1]
+	local price = view.price(link)
+	local shut = link.kind ~= "gate" and (not view.openAreas[link.areaId] or (link.kind == "item" and not view.reachable(link.id)))
+	if shut or not price then
+		return { state = "locked", owned = owned, total = total }
+	elseif view.wallet + MONEY_EPSILON >= price then
+		return { state = "buy", owned = owned, total = total, price = price }
 	end
-	local start = math.min(math.max(1, lastOwned), n - visible + 1)
-	for i = start, start + visible - 2 do
-		table.insert(shown, i)
-	end
-	table.insert(shown, n)
-	return shown
+	return { state = "short", owned = owned, total = total, price = price, progress = math.clamp(view.wallet / price, 0, 1) }
 end
 
--- For a window change (Honeycomb.window lists, old then new): the old slot each new slot's link sat
--- in, nil for a link new to the window, so its hexes can slide over.
-function Honeycomb.moves(old: { number }, new: { number }): { [number]: number? }
-	local moves = {}
-	for i, index in new do
-		moves[i] = table.find(old, index)
-	end
-	return moves
-end
-
-local function chainStates(chain: Chain, view: View, out: { [string]: HexState })
-	local ownedTo = furthest(chain, view)
-	local blocked, nextSeen = false, false
-	for i, link in chain.links do
-		local state: HexState
-		if link.kind == "gate" then
-			local open = view.openAreas[link.areaId] == true
-			blocked = blocked or (not open and i > ownedTo)
-			state = { state = if open then "gateOpen" else "gateClosed" }
-		elseif i <= ownedTo then
-			state = { state = if i == #chain.links then "max" else "owned" }
-		else
-			local first = not nextSeen
-			nextSeen = true
-			local price = if first then view.price(link) else nil
-			local shut = blocked or not view.openAreas[link.areaId] or (link.kind == "item" and not view.reachable(link.id :: string))
-			if shut or (first and not price) then
-				state = { state = "locked" }
-			elseif not first or not price then
-				state = { state = "future" }
-			elseif view.wallet + MONEY_EPSILON >= price then
-				state = { state = "buy", price = price }
-			else
-				state = { state = "short", price = price, progress = math.clamp(view.wallet / price, 0, 1) }
-			end
-		end
-		out[link.key] = state
-	end
-end
-
--- Every link's state in category `catId` (all links, shown or not), by Link.key. Only a chain's
--- first link not owned can be "buy" or "short"; links past a closed gate, in a closed area, of an
--- unreachable item or without a price are "locked".
-function Honeycomb.states(layout: Layout, catId: string, view: View): { [string]: HexState }
+-- Every upgrade's state in a view, by upgrade id.
+function Honeycomb.states(layout: Layout, viewId: string, view: View): { [string]: HexState }
 	local out = {}
-	for _, chain in layout.categories[catId].chains do
-		chainStates(chain, view, out)
+	for _, upgrade in Honeycomb.upgrades(layout, viewId) do
+		out[upgrade.id] = Honeycomb.state(upgrade, view)
 	end
 	return out
 end
 
--- The category and chain holding track or item `id` (a backpack: the backpacks chain), or nil.
-function Honeycomb.find(layout: Layout, id: string): (string?, Chain?)
-	for _, catId in layout.order do
-		for _, chain in layout.categories[catId].chains do
-			for _, link in chain.links do
-				if link.id == id then
-					return catId, chain
-				end
+-- Whether `upgrade` is `id` or sells it.
+local function sells(upgrade: Upgrade, id: string): boolean
+	if upgrade.id == id then
+		return true
+	end
+	for _, link in upgrade.links do
+		if link.id == id then
+			return true
+		end
+	end
+	return false
+end
+
+-- The view ("main" for the tool, else a category id) and upgrade that is or sells `id` (a track,
+-- item or gate; a backpack: the backpacks hex), or nil.
+function Honeycomb.find(layout: Layout, id: string): (string?, Upgrade?)
+	for _, viewId in { "main", table.unpack(layout.order) } do
+		for _, upgrade in Honeycomb.upgrades(layout, viewId) do
+			if sells(upgrade, id) then
+				return viewId, upgrade
 			end
 		end
 	end
 	return nil, nil
 end
 
--- The link key to select in category `catId` (`states`: Honeycomb.states): with `id`, its next link
--- (else its first); without, the first "buy" in chain order, else the first "short", else nil.
-function Honeycomb.pick(layout: Layout, catId: string, states: { [string]: HexState }, id: string?): string?
-	local first, short = nil, nil
-	for _, chain in layout.categories[catId].chains do
-		for _, link in chain.links do
-			local state = states[link.key].state
-			if id then
-				if link.id == id then
-					first = first or link.key
-					if state ~= "owned" then
-						return link.key
-					end
-				end
-			elseif state == "buy" then
-				return link.key
-			elseif state == "short" then
-				short = short or link.key
+-- The upgrade id to select in a view (`states`: Honeycomb.states): with `id`, the hex that is or
+-- sells it; without, the first "buy", else the first "short", else nil.
+function Honeycomb.pick(layout: Layout, viewId: string, states: { [string]: HexState }, id: string?): string?
+	local short = nil
+	for _, upgrade in Honeycomb.upgrades(layout, viewId) do
+		local state = states[upgrade.id].state
+		if id then
+			if sells(upgrade, id) then
+				return upgrade.id
 			end
+		elseif state == "buy" then
+			return upgrade.id
+		elseif state == "short" then
+			short = short or upgrade.id
 		end
 	end
-	return if id then first else short
+	return if id then nil else short
 end
 
--- Links owned in category `catId` and all its links (gates not counted), for its progress.
+-- Levels owned in category `catId` and all its levels, for its hex.
 function Honeycomb.ownedShare(layout: Layout, catId: string, view: View): (number, number)
 	local owned, total = 0, 0
-	for _, chain in layout.categories[catId].chains do
-		owned += Honeycomb.ownedCount(chain, view)
-		for _, link in chain.links do
-			if link.kind ~= "gate" then
-				total += 1
-			end
-		end
+	for _, upgrade in layout.categories[catId].upgrades do
+		owned += Honeycomb.ownedCount(upgrade, view)
+		total += #upgrade.links
 	end
 	return owned, total
 end
 
--- What Buy(id, bought) sends as `bought` for a link's id: track levels bought, or an item's
--- upgrades (-1 while the team doesn't own it).
+-- What Buy(id, bought) sends as `bought` for a link's id: track levels bought, an item's upgrades
+-- (-1 while the team doesn't own it), 1 for an open gate and 0 for a closed one.
 function Honeycomb.bought(link: Link, view: View): number
 	if link.kind == "track" then
-		return view.levels[link.id :: string] or 0
+		return view.levels[link.id] or 0
+	elseif link.kind == "gate" then
+		return if view.openAreas[link.areaId] then 1 else 0
 	end
-	return (view.items[link.id :: string] or 0) - 1
+	return (view.items[link.id] or 0) - 1
 end
 
--- The card's level line for a link in `state`: "Buy" for a first level, "Lv 2 → Lv 3", the
--- level owned, "MAX"; nothing for a gate.
+-- The card's level line for the link a hex in `state` shows: "Buy" for a first level,
+-- "Lv 2 → Lv 3", "MAX"; nothing for a gate.
 function Honeycomb.levelText(link: Link, state: StateName): string
-	local level = link.level
-	if link.kind == "gate" or not level then
+	if link.kind == "gate" then
 		return ""
 	elseif state == "max" then
 		return "MAX"
-	elseif state == "owned" then
-		return `Lv {level}`
-	elseif level == 1 then
+	elseif link.level == 1 then
 		return "Buy"
 	end
-	return `Lv {level - 1} → Lv {level}`
+	return `Lv {link.level - 1} → Lv {link.level}`
 end
 
--- The red balls: "buy" hexes per category id, and `total`; then the wallets that keep them: they
--- stay while low <= wallet < high (the dearest buy and the cheapest short, -huge / huge for none).
+-- The red balls: "buy" hexes per view id ("main": the tool; the categories), and `total`; then the
+-- wallets that keep them: they stay while low <= wallet < high (the dearest buy and the cheapest
+-- short, -huge / huge for none).
 function Honeycomb.badges(layout: Layout, view: View): ({ [string]: number }, number, number)
 	local counts = { total = 0 }
 	local low, high = -math.huge, math.huge
-	for _, catId in layout.order do
+	for _, viewId in { "main", table.unpack(layout.order) } do
 		local n = 0
-		for _, state in Honeycomb.states(layout, catId, view) do
+		for _, state in Honeycomb.states(layout, viewId, view) do
 			if state.state == "buy" then
 				n += 1
 				low = math.max(low, (state.price :: number) - MONEY_EPSILON)
@@ -490,7 +378,7 @@ function Honeycomb.badges(layout: Layout, view: View): ({ [string]: number }, nu
 				high = math.min(high, (state.price :: number) - MONEY_EPSILON)
 			end
 		end
-		counts[catId] = n
+		counts[viewId] = n
 		counts.total += n
 	end
 	return counts, low, high
@@ -498,38 +386,7 @@ end
 
 -- An item's first link the team can get now, just not here: at its stand or on a plot.
 function Honeycomb.elsewhere(link: Link, st: HexState, view: View): boolean
-	return st.state == "locked" and link.kind == "item" and link.level == 1 and view.openAreas[link.areaId] == true and view.reachable(link.id :: string)
-end
-
--- The links of `chain` whose hex shows its 3D model, so few ViewportFrames run: an item's own chain
--- (one model) its next link, else its last; other chains (the tool's models, the backpacks) the
--- last owned, the next and the max end.
-function Honeycomb.modelKeys(chain: Chain, states: { [string]: HexState }): { [string]: boolean }
-	local lastOwned, nextKey = nil, nil
-	local single = true
-	for _, link in chain.links do
-		if link.kind ~= "gate" then
-			single = single and link.kind == "item" and link.id == chain.id
-			local state = states[link.key].state
-			if state == "owned" or state == "max" then
-				lastOwned = link.key
-			elseif not nextKey then
-				nextKey = link.key
-			end
-		end
-	end
-	local last = chain.links[#chain.links].key
-	if single then
-		return { [nextKey or last] = true }
-	end
-	local keys = { [last] = true }
-	if lastOwned then
-		keys[lastOwned] = true
-	end
-	if nextKey then
-		keys[nextKey] = true
-	end
-	return keys
+	return st.state == "locked" and link.kind == "item" and link.level == 1 and view.openAreas[link.areaId] == true and view.reachable(link.id)
 end
 
 -- The buyer's LastBuy attribute (server/Run): "<id>@<bought>@<serverTime>", `bought` as

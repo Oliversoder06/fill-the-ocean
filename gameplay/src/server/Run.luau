@@ -9,8 +9,8 @@
 -- at once only the first gets it); state goes
 -- out as attributes. The server checks the distance and, for scoops, the pace (one per ActSeconds
 -- x the area's scoopFactor) when an action starts. A scoop is credited when it ends; a pour is
--- instant. Gates (Config.areas) are bought through their ProximityPrompt and open for the whole
--- team (save.gatesOpen, published as GatesOpen). Items
+-- instant. Gates (Config.areas) are bought through their ProximityPrompt or the honeycomb (Buy
+-- "gate:<areaId>") and open for the whole team (save.gatesOpen, published as GatesOpen). Items
 -- (Config.items, common/Items) are bought once through their area's stand prompt and levelled with
 -- Buy(itemId); a worn backpack adds to Capacity. Gadgets (kind "gadget") with a hotbar slot are taken
 -- out with Equip(itemId) instead of the tool: the Water Gun pours from its range (Act "pour"), the
@@ -827,12 +827,21 @@ end
 -- wallet at the team's price. `bought` is how many levels of `id` the buyer's client saw bought (-1:
 -- an item not owned, a building not built): when a teammate bought that level first, the buyer is
 -- told instead of buying the one after it. Items themselves are bought at their stand (onStand).
--- What TAB sells is Items.tabOffer. A buy sets the buyer's LastBuy (shared/Honeycomb.encodeBuy), so
--- only their client plays it as theirs.
+-- What TAB sells is Items.tabOffer, plus the gates (Areas.gateId(areaId), `bought` 0: openGate, as
+-- the gate prompt but from anywhere). A buy sets the buyer's LastBuy (shared/Honeycomb.encodeBuy),
+-- so only their client plays it as theirs.
+local openGate: (Player, any, boolean) -> boolean -- below, by the gate prompt's other checks
 local function onBuy(player: Player, id: unknown, bought: unknown)
 	local state = states[player]
 	local save = run.save
 	if not state or not save or type(id) ~= "string" or type(bought) ~= "number" or run.phase ~= "playing" or not allow(state, "buy", MAX_BUYS_PER_SECOND) then
+		return
+	end
+	local gate = Areas.fromGateId(Config, id)
+	if gate then
+		if bought == 0 and openGate(player, gate, false) then
+			player:SetAttribute("LastBuy", Honeycomb.encodeBuy(id, 1, workspace:GetServerTimeNow()))
+		end
 		return
 	end
 	local item = Items.get(Config, id)
@@ -1162,25 +1171,26 @@ local function onAct(player: Player, kind: unknown)
 	end)
 end
 
--- The gate prompt of `area`: when it is the next gate and on sale, the team's wallet pays its price
--- and it opens for the whole team.
-local function onGate(player: Player, area)
+-- Opens `area`'s gate for the whole team when it is the next gate and on sale (Areas.gateOffer) and
+-- the team's wallet pays its price; true when it opened. `reach`: the buyer must stand by its
+-- prompt (the gate prompt; the honeycomb's Buy skips it).
+openGate = function(player: Player, area, reach: boolean): boolean
 	local state = states[player]
 	local save = run.save
 	if not state or not save or run.phase ~= "playing" then
-		return
+		return false
 	end
-	if table.find(save.gatesOpen, area.id) then
+	local status = Areas.gateOffer(Config, save.gatesOpen, fillOf(run.current), area.id)
+	if status == "open" then
 		remotes.Card:FireClient(player, `A teammate already opened {area.name}`, CARD_SECONDS)
-		return
+		return false
 	end
 	local cost = price(area.gate.price)
-	local nextId, onSale = Areas.nextGate(Config, save.gatesOpen, fillOf(run.current))
-	if nextId ~= area.id or not onSale or not Items.affords(team.wallet, cost) then
-		return
+	if status ~= "buy" or not Items.affords(team.wallet, cost) then
+		return false
 	end
-	if not inReach(player, Map.gatePrompt(Map.gate(ocean, area))) then
-		return
+	if reach and not inReach(player, Map.gatePrompt(Map.gate(ocean, area))) then
+		return false
 	end
 	spend(cost)
 	table.insert(save.gatesOpen, area.id)
@@ -1188,6 +1198,7 @@ local function onGate(player: Player, area)
 	publishGates()
 	card(`{player.DisplayName} opened {area.name} for the team!`)
 	task.spawn(saveRun, `gate {area.id} opened`)
+	return true
 end
 
 -- The stand prompt of `area`: buys the cheapest item sold there that the team can buy now
@@ -1444,7 +1455,7 @@ function Run.start(oceanModel: Model)
 	for _, area in Config.areas do
 		if area.model then
 			Map.gatePrompt(Map.gate(ocean, area)).Triggered:Connect(function(player)
-				onGate(player, area)
+				openGate(player, area, true)
 			end)
 		end
 		local stand = Map.stand(ocean, area)

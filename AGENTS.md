@@ -89,27 +89,32 @@ Client (`src/client/`, all started from `init.client.luau`):
   wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
 - `Honeycomb.luau`: the upgrades honeycomb (`Hud.Honeycomb`, layout from `shared/Honeycomb`), a
   full-screen cover: opening blurs the world (`Lighting.HoneycombBlur`) and fades in `Backdrop`; the
-  hotbar, wallet, run panel and guide strip hide. A main view (the tool at the centre, a ring of
-  category hexes with a red `Badge` count and water for the share owned) and one view per category
-  (one cluster of touching copies of `Hud.Templates.Hex` in `Board.Canvas`, zoomed to fill with
-  `Canvas.Zoom`, dragged to pan only when hexes would drop under 64 px). Opens through `Window`
-  (no frame pop). Back (BackButton, Backspace, gamepad B) leaves a category, then closes;
-  `CloseButton` and Roblox's menu (Esc) close it. The `Tooltip` card sits by the hovered hex, else
-  the selected one (`HoneycombCard`). A mouse click on the next affordable hex buys it (`Buy(id,
-  bought)`; clicks are ignored until the last buy has landed); a tap or gamepad A selects first,
-  then buys; the D-pad / stick steps between hexes (`shared/Honeycomb.step`); a short hex shakes
-  and pulses the card. A landing fills the hex and wakes the next one (`Cues.honeycomb`), then a
-  windowed chain slides along; only your own buy (your `LastBuy`) also gets `Purchase.landed`. Only
-  attributes a hex reads refresh it (closed: the badges, and a wallet change only when it crosses a
-  badge's price). `Honeycomb.show(id)` opens on an id's next link and selects it (Goal);
+  hotbar, wallet, run panel and guide strip hide. One hex per upgrade (copies of
+  `Hud.Templates.Hex` in `Board.Canvas`, `Comb.SPACING` apart so a small even gap shows, the view
+  fitted to the board with `Canvas.Zoom`, no pan). The main view: the tool hex at the centre (a
+  click buys its next tool level) and a ring of six category hexes (Boosts, Gear, Vehicles,
+  Buildings, Staff, Areas) with a red `Badge` count; a category view: its Back hex at the centre
+  (click, Backspace, gamepad B: back to main, then close; the old `BackButton` is hidden) and its
+  upgrades around it (`Comb.ringSlots`). Opens through `Window` (no frame pop); `CloseButton` and
+  Roblox's menu (Esc) close it. The `Tooltip` card sits by the hovered hex, else the selected one
+  (`HoneycombCard`). A mouse click on an affordable hex buys its next level (`Buy(id, bought)`; a
+  gate: `Buy("gate:<areaId>", 0)`; clicks are ignored until the last buy has landed); a tap or
+  gamepad A selects first, then buys; the D-pad / stick steps between hexes
+  (`shared/Honeycomb.step`); a short hex shakes and pulses the card. A landing plays on the bought
+  hex (water rises, pop, check, Level ticks up, then it wakes; `Cues.honeycomb`); only your own buy
+  (your `LastBuy`) also gets `Purchase.landed`. Only attributes a hex reads refresh it (closed: the
+  badges, a wallet change only when it crosses a badge's price, the fill only when it puts a gate
+  on sale). `Honeycomb.show(id)` opens the view holding an id's hex and selects it (Goal);
   `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide: category hex, then the hex).
-- `HoneycombHex.luau`: the honeycomb's hexes: copies of the template, painting each state (a short
-  name on top, art, a price or state word at the bottom; 3D models only on
-  `shared/Honeycomb.modelKeys` links), the landing (`celebrate`), the window `slide`, enter / pop /
-  wake scales. `HoneycombText.luau`: its words (names, effects, reasons, gate texts, staff posts).
+- `HoneycombHex.luau`: the honeycomb's hexes: copies of the template coloured from one `PAINT`
+  table (categories orange, upgrades shallow-water blue, Back teal, locked slate, a white outline
+  on all), each upgrade painted in its state (`Name` on top, art, `Level` "2/6" / "MAX", the next
+  level's price at the bottom, coral with a rising fill while short; `BackArrow`, `AreaIcon`),
+  text kept 14-18 / 12-14 / 14-16 px on screen, the landing (`celebrate`), enter / pop / wake
+  scales. `HoneycombText.luau`: its words (names, effects, reasons, gate texts, staff posts).
   `HoneycombCard.luau`: the `Tooltip` card (words, placement, the staff `AssignButton`).
-  `HoneycombData.luau`: the layout, links by key and the team's state as `shared/Honeycomb` reads
-  it. `HoneycombButton.luau`: the `UpgradesButton` (right edge; squishes while Tab / gamepad Y /
+  `HoneycombData.luau`: the layout, upgrades by id and the team's state as `shared/Honeycomb` reads
+  it (gates priced through `Areas.gateOffer`). `HoneycombButton.luau`: the `UpgradesButton` (right edge; squishes while Tab / gamepad Y /
   mouse / touch is held; Tab / Y toggle as they go down, the mouse / touch on release); its
   `Badge` shows while anything can be bought.
 - `Stands.luau`: every stand's prompt texts ("Buy Backpack Tank (1,200)", the reason when a press
@@ -121,7 +126,7 @@ Client (`src/client/`, all started from `init.client.luau`):
   ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote) and
   `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`).
 - `Purchase.luau`: the purchase moment's sounds and coins, `Purchase.landed` (from `Honeycomb`):
-  a sting climbing per level up a chain, coins fly from the honeycomb's money into the hex, a chime
+  a sting climbing per level of an upgrade, coins fly from the honeycomb's money into the hex, a chime
   and "NEW!" stamp (`Templates.BoughtStamp`) on a first; `Purchase.deny` shakes a button; new-tool
   swing-up sparkles and speed-upgrade whoosh/FOV kick when the honeycomb closes (`Cues.purchase`).
 - `Footsteps.luau`: your steps on each dip of the camera bob (`CameraFeel.onStep`), others' every
@@ -186,14 +191,15 @@ Shared (`src/shared/`, pure unless noted):
 - `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
   (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
 - `Honeycomb.luau` (pure, tested): the upgrades honeycomb: flat-top hex maths (`toPixel`,
-  `bounds`, `zoom`, `clampPan`, `enterDelay`, `step` for gamepad moves), `layout(config)` (main
-  ring; each category one cluster of touching hexes: its chains grow outward from the category hex,
-  the four longest along the diagonals, two shortest up / down, any past six from the second
-  ring), `window`, `ownedCount`, `ownedShare`,
-  `states(layout, catId, view)`, `badges` (and the wallets that keep them), `find` (an id's
-  category and chain), `pick` (the link to select), `bought` (Buy's `bought`), `levelText`,
-  `elsewhere` (bought at a stand or plot), `modelKeys` (which hexes show a 3D model), `moves` (a
-  window's slide), the `LastBuy` attribute's `encodeBuy` / `decodeBuy`.
+  `bounds` (with `SPACING`, the gap), `zoom`, `enterDelay`, `step` for gamepad moves), `ringSlots`
+  (up to 18 cells around a centre, ring 1 then ring 2, mirror-symmetric, read top to bottom),
+  `layout(config)` (`tool`; the `ring` of categories; each category's upgrades, earlier areas
+  first, in `ringSlots`: one hex per track, item, the backpacks, and per gate in Areas), `upgrades`,
+  `ownedCount`, `link` (the level a hex sells), `state` / `states(layout, viewId, view)` (buy /
+  short / max / locked, owned of total), `ownedShare`, `badges` (per view, `main` the tool, and the
+  wallets that keep them), `find` (an id's view and upgrade), `pick` (the hex to select), `bought`
+  (Buy's `bought`), `levelText`, `elsewhere` (bought at a stand or plot), the `LastBuy` attribute's
+  `encodeBuy` / `decodeBuy`.
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
@@ -238,6 +244,9 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `buildingOffer` / `buildingStat` (the team's building levels), `tabOffer` (what TAB sells next:
   the one rule for server/Run's `onBuy`, `Hud.offer` and the honeycomb), `nextOwned` (the vehicle a Fire
   Station call brings next).
+- `Areas.luau` (pure): open areas (`open`, `openIds`), `nextGate`, `gateOffer` (open / buy / fill
+  / order: the one gate rule for server/Run's `openGate`, client/Gates' signs and the honeycomb),
+  `gateId` / `fromGateId` (`"gate:<areaId>"`, the honeycomb's Buy id), `byId`.
 - `RunStore.luau`: loads and saves runs (DataStore) and locks a run to one server (MemoryStore);
   `erase` (the lobby's New Game / Delete / profile reset) writes a blank save only while holding the lock.
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
@@ -283,7 +292,8 @@ The server publishes state as attributes; the client only reads them.
   track id, or an owned item's id to level it, or a built building's id to level it, for the team;
   `bought` is how many levels of it the client saw bought (-1 for an item not owned or a building
   not built): a lower count than the server's means a teammate bought that level first, and the
-  buyer gets a card instead of the level after it),
+  buyer gets a card instead of the level after it; `"gate:<areaId>", 0` buys that gate through
+  `openGate`, the gate prompt's own checks minus the reach),
   `Build` (plot number, building id; server checks plot empty, area open, the team's price, reach, rate),
   `Staff` (`"assign", itemId, areaId`: one of the team's staff's post, checked against
   `StaffRules.targets`; rate-limited),
@@ -303,9 +313,10 @@ The server publishes state as attributes; the client only reads them.
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Honeycomb, Card, Waiting,
   Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
-  the honeycomb's piece; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
-  cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton`, `CloseButton`,
-  `Wallet`, `Tooltip`; with `Lighting.HoneycombBlur` (a BlurEffect at Size 0).
+  the honeycomb's piece: `Name`, `Level` (above `PriceRow`), `BackArrow` and `AreaIcon` (hidden
+  ImageLabels); `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
+  cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton` (hidden by code),
+  `CloseButton`, `Wallet`, `Tooltip`; with `Lighting.HoneycombBlur` (a BlurEffect at Size 0).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.

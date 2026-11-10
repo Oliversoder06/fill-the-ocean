@@ -1,5 +1,5 @@
 -- The purchase moment's sounds and coins, played by client/Honeycomb when your own buy lands
--- (Purchase.landed): a cash register sting (higher for each level up a chain), coins fly from the
+-- (Purchase.landed): a cash register sting (higher for each level of an upgrade), coins fly from the
 -- honeycomb's money into the hex, and a first buy also chimes and slams a "NEW!" stamp (a copy of
 -- the BOUGHT stamp) onto it. A buy you can't make shakes the Buy button with a dull thud
 -- (Purchase.deny). A new tool swings into your hand when the honeycomb closes (client/Viewmodel)

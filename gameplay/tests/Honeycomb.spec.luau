@@ -1,30 +1,30 @@
 local Honeycomb = require("../src/shared/Honeycomb")
 local Config = require("../src/shared/Config")
+local Areas = require("../../common/Areas")
 
 local tests = {}
 
-local CATEGORIES = { "tools", "boosts", "gear", "vehicles", "buildings", "staff" }
+local CATEGORIES = { "boosts", "gear", "vehicles", "buildings", "staff", "areas" }
 
 local function key(pos): string
 	return `{pos.q},{pos.r}`
 end
 
-local function chain(layout, catId: string, id: string)
-	for _, c in layout.categories[catId].chains do
-		if c.id == id then
-			return c
-		end
-	end
-	error(`no chain {id} in {catId}`)
+-- The cell mirrored about the vertical axis (flat-top axial).
+local function mirror(pos)
+	return { q = 0 - pos.q, r = pos.r + pos.q } -- 0 - q: no "-0" in the cell's key
 end
 
-local function linkName(link): string
-	return if link.kind == "gate" then `gate{link.areaId}` else `{link.id}:{link.level}`
+local function upgrade(layout, id: string)
+	local _, found = Honeycomb.find(layout, id)
+	return found or error(`no upgrade sells {id}`)
 end
 
 local function costOf(link): number?
 	if link.kind == "track" then
 		return Config.track(link.id).levels[link.level].cost
+	elseif link.kind == "gate" then
+		return Areas.byId(Config, link.areaId).gate.price
 	end
 	for _, item in Config.items do
 		if item.id == link.id then
@@ -55,6 +55,14 @@ local function allOpen()
 	return { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true }
 end
 
+local function ids(list): string
+	local out = {}
+	for _, u in list do
+		table.insert(out, u.id)
+	end
+	return table.concat(out, ",")
+end
+
 function tests.to_pixel_is_flat_top_axial(t)
 	local x, y = Honeycomb.toPixel(0, 0, 10)
 	t.expectEq(x, 0)
@@ -83,292 +91,230 @@ function tests.neighbours_are_six_at_distance_one(t)
 end
 
 function tests.main_is_the_tool_and_a_ring_of_categories(t)
-	local main = Honeycomb.layout(Config).main
-	t.expectEq(main.centre.id, "tool")
-	t.expectEq(main.centre.q, 0)
-	t.expectEq(main.centre.r, 0)
-	t.expectEq(#main.ring, 6)
+	local layout = Honeycomb.layout(Config)
+	t.expectEq(layout.tool.id, "tool")
+	t.expectEq(#layout.tool.links, #Config.track("tool").levels, "one hex for every tool level")
+	t.expectEq(#layout.ring, 6)
 	local seen = {}
-	for i, hex in main.ring do
+	for i, hex in layout.ring do
 		t.expectEq(hex.id, CATEGORIES[i], "ring order")
+		t.expectEq(layout.order[i], CATEGORIES[i])
 		t.expectEq(Honeycomb.distance(0, 0, hex.q, hex.r), 1, "ring touches the centre")
 		t.expectEq(seen[key(hex)], nil, "ring hexes distinct")
 		seen[key(hex)] = true
 	end
 end
 
-function tests.no_overlaps_in_any_category(t)
+function tests.ring_slots_fill_ring_one_then_ring_two_without_overlaps(t)
+	for count = 0, 18 do
+		local slots = Honeycomb.ringSlots(count)
+		t.expectEq(#slots, count, `{count} slots`)
+		local used, inner = {}, 0
+		for _, pos in slots do
+			local d = Honeycomb.distance(0, 0, pos.q, pos.r)
+			if d < 1 or d > 2 then
+				error(`{count}: {key(pos)} is not in ring 1 or 2`)
+			elseif used[key(pos)] then
+				error(`{count}: {key(pos)} used twice`)
+			end
+			used[key(pos)] = true
+			inner += if d == 1 then 1 else 0
+		end
+		t.expectEq(inner, math.min(count, 6), `{count}: ring 1 fills first`)
+	end
+	t.expectEq((pcall(Honeycomb.ringSlots, 19)), false, "past ring 2 there is no room")
+end
+
+function tests.ring_slots_are_mirror_symmetric(t)
+	-- the mirror helper is right: same height, x flipped
+	local x, y = Honeycomb.toPixel(2, -1, 1)
+	local mx, my = Honeycomb.toPixel(mirror({ q = 2, r = -1 }).q, mirror({ q = 2, r = -1 }).r, 1)
+	t.expectNear(mx, -x, 1e-9)
+	t.expectNear(my, y, 1e-9)
+	for count = 0, 18 do
+		local used = {}
+		for _, pos in Honeycomb.ringSlots(count) do
+			used[key(pos)] = true
+		end
+		for _, pos in Honeycomb.ringSlots(count) do
+			t.expectEq(used[key(mirror(pos))], true, `{count}: the mirror of {key(pos)}`)
+		end
+	end
+end
+
+-- Slots read top to bottom, left to right, so the earliest upgrades sit nearest the top; the same
+-- count always gives the same slots.
+function tests.ring_slots_read_top_to_bottom_and_are_deterministic(t)
+	for count = 0, 18 do
+		local slots, again = Honeycomb.ringSlots(count), Honeycomb.ringSlots(count)
+		for i, pos in slots do
+			t.expectEq(key(again[i]), key(pos), `{count} slot {i}`)
+			if i > 1 then
+				local px, py = Honeycomb.toPixel(slots[i - 1].q, slots[i - 1].r, 1)
+				local x, y = Honeycomb.toPixel(pos.q, pos.r, 1)
+				if not (y > py + 1e-9 or (math.abs(y - py) < 1e-9 and x > px)) then
+					error(`{count}: slot {i} ({key(pos)}) reads before slot {i - 1}`)
+				end
+			end
+		end
+	end
+	t.expectEq(key(Honeycomb.ringSlots(1)[1]), "0,-1", "one: straight up")
+	local two = Honeycomb.ringSlots(2)
+	t.expectEq(`{key(two[1])} {key(two[2])}`, "-1,0 1,-1", "two: upper left and right")
+	t.expectEq(key(Honeycomb.ringSlots(7)[1]), "0,-2", "seven: ring 1 and the top of ring 2")
+end
+
+function tests.each_category_sits_in_ring_slots(t)
 	local layout = Honeycomb.layout(Config)
 	for _, catId in CATEGORIES do
 		local cat = layout.categories[catId]
-		t.expectEq(cat.hex.q, 0)
-		t.expectEq(cat.hex.r, 0)
-		local used = { [key(cat.hex)] = "category" }
-		local function take(pos, what)
-			if used[key(pos)] then
-				error(`{catId}: {what} overlaps {used[key(pos)]} at {key(pos)}`)
-			end
-			used[key(pos)] = what
-		end
-		for _, c in cat.chains do
-			t.expectEq(#c.slots, math.min(#c.links, Honeycomb.MAX_VISIBLE), `{c.id} slot count`)
-			for i, pos in c.slots do
-				take(pos, `{c.id} slot {i}`)
-			end
+		local want = Honeycomb.ringSlots(#cat.upgrades)
+		t.expectEq(#cat.slots, #want, `{catId} slot count`)
+		for i, pos in want do
+			t.expectEq(key(cat.slots[i]), key(pos), `{catId} slot {i}`)
 		end
 	end
 end
 
--- Every hex of a view, the centre first.
-local function viewHexes(layout, viewId: string)
-	local list = { { q = 0, r = 0 } }
-	if viewId == "main" then
-		for _, hex in layout.main.ring do
-			table.insert(list, { q = hex.q, r = hex.r })
-		end
-		return list
-	end
-	for _, c in layout.categories[viewId].chains do
-		table.move(c.slots, 1, #c.slots, #list + 1, list)
-	end
-	return list
-end
-
-local function touching(a, b): boolean
-	return Honeycomb.distance(a.q, a.r, b.q, b.r) == 1
-end
-
-function tests.every_view_is_one_touching_cluster(t)
+function tests.upgrades_land_in_their_categories_by_area(t)
 	local layout = Honeycomb.layout(Config)
-	for _, viewId in { "main", table.unpack(CATEGORIES) } do
-		local hexes = viewHexes(layout, viewId)
-		local reached, queue = { [key(hexes[1])] = true }, { hexes[1] }
-		while #queue > 0 do
-			local at = table.remove(queue) :: any
-			for _, other in hexes do
-				if not reached[key(other)] and touching(at, other) then
-					reached[key(other)] = true
-					table.insert(queue, other)
-				end
-			end
-		end
-		for _, hex in hexes do
-			t.expectEq(reached[key(hex)], true, `{viewId}: {key(hex)} touches the cluster`)
+	local function list(catId)
+		return ids(layout.categories[catId].upgrades)
+	end
+	t.expectEq(list("boosts"), "pickup,hold,quick,walk,tip")
+	t.expectEq(list("gear"), "backpacks,waterGun,gardenHose,heatGloves,icePick,jetpackTank,cloudNet")
+	t.expectEq(list("vehicles"), "fireTruck,tanker,snowcatTanker,waterBomber")
+	t.expectEq(list("buildings"), "pump,waterTower,pipeline,rainMachine")
+	t.expectEq(list("staff"), "helper,lifeguard,firefighter,plumber")
+	t.expectEq(list("areas"), "gate:2,gate:3,gate:4,gate:5")
+	for _, catId in CATEGORIES do
+		local last = 0
+		for _, u in layout.categories[catId].upgrades do
+			t.expectEq(u.areaId >= last, true, `{catId}: {u.id} after an earlier area`)
+			last = u.areaId
 		end
 	end
 end
 
--- Each chain starts next to the category hex (past 6 chains: next to another chain's first hex, which
--- does) and each next link touches the one before it.
-function tests.each_link_touches_the_one_before_it(t)
+-- One hex per upgrade: every track level, item link and gate is sold by exactly one hex.
+function tests.every_level_is_sold_by_one_hex(t)
 	local layout = Honeycomb.layout(Config)
-	local centre = { q = 0, r = 0 }
-	for _, catId in CATEGORIES do
-		local chains = layout.categories[catId].chains
-		for _, c in chains do
-			local first = c.slots[1]
-			if not touching(first, centre) then
-				t.expectEq(#chains > 6, true, `{catId} {c.id}: off the category hex with only {#chains} chains`)
-				local beside = false
-				for _, other in chains do
-					beside = beside or (other ~= c and touching(other.slots[1], centre) and touching(other.slots[1], first))
-				end
-				t.expectEq(beside, true, `{c.id} starts beside another chain's first hex`)
-			end
-			for i = 2, #c.slots do
-				t.expectEq(touching(c.slots[i - 1], c.slots[i]), true, `{c.id} slot {i} touches slot {i - 1}`)
-			end
+	local count, hexes = {}, 1
+	local function add(u)
+		for _, link in u.links do
+			local k = `{link.kind}:{link.id}:{link.level}`
+			count[k] = (count[k] or 0) + 1
 		end
 	end
-end
-
-function tests.chains_grow_outward(t)
-	local layout = Honeycomb.layout(Config)
+	add(layout.tool)
 	for _, catId in CATEGORIES do
-		for _, c in layout.categories[catId].chains do
-			local last = 0
-			for i, pos in c.slots do
-				local d = Honeycomb.distance(0, 0, pos.q, pos.r)
-				t.expectEq(d > last, true, `{catId} {c.id} slot {i} further out than the one before`)
-				last = d
-			end
+		for _, u in layout.categories[catId].upgrades do
+			add(u)
+			hexes += 1
 		end
 	end
-end
-
-function tests.layout_is_deterministic(t)
-	local a, b = Honeycomb.layout(Config), Honeycomb.layout(Config)
-	for _, catId in CATEGORIES do
-		local hexes, again = viewHexes(a, catId), viewHexes(b, catId)
-		for i, pos in hexes do
-			t.expectEq(key(again[i]), key(pos), `{catId} hex {i}`)
-		end
-	end
-end
-
-function tests.every_track_level_and_item_level_appears_once(t)
-	local layout = Honeycomb.layout(Config)
-	local count = {}
-	local total = 0
-	for _, catId in CATEGORIES do
-		for _, c in layout.categories[catId].chains do
-			for _, link in c.links do
-				if link.kind ~= "gate" then
-					local k = `{link.kind}:{link.id}:{link.level}`
-					count[k] = (count[k] or 0) + 1
-					total += 1
-				end
-			end
-		end
-	end
-	local expected = 0
+	local packs, gates = 0, 0
 	for _, track in Config.tracks do
 		for level in track.levels do
 			t.expectEq(count[`track:{track.id}:{level}`], 1, `track {track.id} level {level}`)
-			expected += 1
 		end
 	end
 	for _, item in Config.items do
+		packs += if item.kind == "backpack" then 1 else 0
 		for level = 1, #item.levels + 1 do
 			t.expectEq(count[`item:{item.id}:{level}`], 1, `item {item.id} link {level}`)
-			expected += 1
 		end
 	end
-	t.expectEq(total, expected, "nothing extra")
+	for _, area in Config.areas do
+		if area.gate then
+			gates += 1
+			t.expectEq(count[`gate:{Areas.gateId(area.id)}:1`], 1, `gate {area.id}`)
+		end
+	end
+	t.expectEq(hexes, #Config.tracks + #Config.items - packs + 1 + gates, "one hex per track, item and gate; one for the backpacks")
 end
 
-function tests.chains_land_in_their_categories(t)
+function tests.upgrades_hold_their_levels_in_order(t)
 	local layout = Honeycomb.layout(Config)
-	local function ids(catId)
-		local list = {}
-		for _, c in layout.categories[catId].chains do
-			table.insert(list, c.id)
+	local function links(id)
+		local out = {}
+		for _, link in upgrade(layout, id).links do
+			table.insert(out, `{link.id}:{link.level}@{link.areaId}`)
 		end
-		return table.concat(list, ",")
+		return table.concat(out, ",")
 	end
-	t.expectEq(ids("tools"), "tool")
-	t.expectEq(ids("boosts"), "pickup,hold,quick,walk,tip")
-	t.expectEq(ids("gear"), "backpacks,waterGun,gardenHose,heatGloves,icePick,jetpackTank,cloudNet")
-	t.expectEq(ids("vehicles"), "fireTruck,tanker,snowcatTanker,waterBomber")
-	t.expectEq(ids("buildings"), "pump,waterTower,pipeline,rainMachine")
-	t.expectEq(ids("staff"), "helper,lifeguard,firefighter,plumber")
-end
-
-function tests.gates_sit_before_the_first_link_of_a_later_area(t)
-	local layout = Honeycomb.layout(Config)
-	local function names(c)
-		local list = {}
-		for _, link in c.links do
-			table.insert(list, linkName(link))
-		end
-		return table.concat(list, ",")
-	end
-	t.expectEq(names(chain(layout, "boosts", "pickup")), "pickup:1,gate2,pickup:2,pickup:3,gate3,pickup:4")
-	t.expectEq(names(chain(layout, "boosts", "hold")), "hold:1")
-	t.expectEq(names(chain(layout, "gear", "waterGun")), "waterGun:1,waterGun:2,waterGun:3", "an area-1 item has no gate")
-	t.expectEq(names(chain(layout, "gear", "gardenHose")), "gate2,gardenHose:1,gardenHose:2,gardenHose:3")
-	t.expectEq(names(chain(layout, "staff", "plumber")), "gate5,plumber:1,plumber:2,plumber:3")
+	t.expectEq(links("pickup"), "pickup:1@1,pickup:2@2,pickup:3@2,pickup:4@3")
+	t.expectEq(links("waterGun"), "waterGun:1@1,waterGun:2@1,waterGun:3@1")
 	t.expectEq(
-		names(chain(layout, "gear", "backpacks")),
-		"backpackTank:1,backpackTank:2,backpackTank:3,gate2,bigTank:1,bigTank:2,bigTank:3,gate3,twinTanks:1,twinTanks:2,twinTanks:3,gate4,insulatedTank:1,insulatedTank:2,insulatedTank:3,gate5,cloudBag:1,cloudBag:2,cloudBag:3"
+		links("backpacks"),
+		"backpackTank:1@1,backpackTank:2@1,backpackTank:3@1,bigTank:1@2,bigTank:2@2,bigTank:3@2,twinTanks:1@3,twinTanks:2@3,twinTanks:3@3,insulatedTank:1@4,insulatedTank:2@4,insulatedTank:3@4,cloudBag:1@5,cloudBag:2@5,cloudBag:3@5"
 	)
-	local tool = chain(layout, "tools", "tool")
-	t.expectEq(#tool.links, 21)
-	t.expectEq(linkName(tool.links[4]), "tool:4")
-	t.expectEq(linkName(tool.links[5]), "gate2")
-	t.expectEq(linkName(tool.links[6]), "tool:5")
-	t.expectEq(linkName(tool.links[11]), "gate3")
-	t.expectEq(linkName(tool.links[12]), "tool:10")
-	t.expectEq(linkName(tool.links[21]), "tool:19")
+	local gate = upgrade(layout, "gate:4")
+	t.expectEq(gate.kind, "gate")
+	t.expectEq(links("gate:4"), "gate:4:1@4")
+	t.expectEq(gate.links[1].kind, "gate")
 end
 
-function tests.window_keeps_last_owned_next_and_max(t)
+function tests.owned_count_is_the_furthest_level_owned(t)
 	local layout = Honeycomb.layout(Config)
-	local tool = chain(layout, "tools", "tool")
-	local function shown(owned, max)
-		return table.concat(Honeycomb.window(tool, owned, max), ",")
-	end
-	t.expectEq(shown(0), "1,2,3,4,21", "start: the first links and the max end")
-	t.expectEq(shown(4), "4,5,6,7,21", "last owned, the gate, next, following, max")
-	t.expectEq(shown(18), "17,18,19,20,21", "near the end it runs into the max")
-	t.expectEq(shown(19), "17,18,19,20,21", "all owned")
-	t.expectEq(shown(9, 4), "10,11,12,21", "a smaller window still keeps last owned, next and max")
-	local short = chain(layout, "gear", "gardenHose")
-	t.expectEq(table.concat(Honeycomb.window(short, 2), ","), "1,2,3,4", "a short chain shows everything")
-	for owned = 0, 19 do
-		local list = Honeycomb.window(tool, owned)
-		t.expectEq(#list, Honeycomb.MAX_VISIBLE)
-		t.expectEq(list[#list], 21, "max end shown")
-		for i = 2, #list do
-			if list[i] <= list[i - 1] then
-				error(`window {owned} not increasing`)
-			end
-		end
-	end
-end
-
-function tests.moves_say_which_old_slot_each_shown_link_came_from(t)
-	local moves = Honeycomb.moves({ 1, 2, 3, 4, 5, 6, 21 }, { 2, 3, 4, 5, 6, 7, 21 })
-	t.expectEq(moves[1], 2)
-	t.expectEq(moves[5], 6)
-	t.expectEq(moves[6], nil, "a link new to the window")
-	t.expectEq(moves[7], 7, "the max end stays")
-	moves = Honeycomb.moves({ 4, 5, 6, 7, 8, 9, 21 }, { 6, 7, 8, 9, 10, 11, 21 })
-	t.expectEq(moves[1], 3, "a gate passed: two slots")
-	t.expectEq(moves[5], nil)
-end
-
-function tests.owned_count_counts_links_up_to_the_furthest_owned(t)
-	local layout = Honeycomb.layout(Config)
-	t.expectEq(Honeycomb.ownedCount(chain(layout, "tools", "tool"), view({ levels = { tool = 7 } })), 7)
-	local backpacks = chain(layout, "gear", "backpacks")
+	t.expectEq(Honeycomb.ownedCount(layout.tool, view({ levels = { tool = 7 } })), 7)
+	local backpacks = upgrade(layout, "backpacks")
 	t.expectEq(Honeycomb.ownedCount(backpacks, view({})), 0)
 	t.expectEq(Honeycomb.ownedCount(backpacks, view({ items = { backpackTank = 2 } })), 2)
 	t.expectEq(Honeycomb.ownedCount(backpacks, view({ items = { backpackTank = 1, bigTank = 1 } })), 4, "a bigger pack passes the earlier links")
+	t.expectEq(Honeycomb.ownedCount(upgrade(layout, "gate:2"), view({})), 0)
+	t.expectEq(Honeycomb.ownedCount(upgrade(layout, "gate:2"), view({ openAreas = { [1] = true, [2] = true } })), 1)
 end
 
-function tests.states_owned_gate_closed_and_locked(t)
+function tests.states_count_levels_owned_of_all(t)
 	local layout = Honeycomb.layout(Config)
-	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, wallet = 1e12 }))
-	t.expectEq(s["track:pickup:1"].state, "owned")
-	t.expectEq(s["gate:pickup:2"].state, "gateClosed")
-	t.expectEq(s["track:pickup:2"].state, "locked", "the next link behind a closed gate")
-	t.expectEq(s["track:pickup:3"].state, "locked")
-	t.expectEq(s["gate:pickup:3"].state, "gateClosed")
-	t.expectEq(s["track:pickup:4"].state, "locked")
+	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1, quick = 3 } }))
+	t.expectEq(s.pickup.owned, 1)
+	t.expectEq(s.pickup.total, 4)
+	t.expectEq(s.quick.owned, 3)
+	t.expectEq(s.quick.total, 7)
+	t.expectEq(s.hold.owned, 0)
+	local main = Honeycomb.states(layout, "main", view({ levels = { tool = 2 } }))
+	t.expectEq(main.tool.owned, 2)
+	t.expectEq(main.tool.total, 19)
 end
 
-function tests.states_next_affordable_is_buy_then_future(t)
+function tests.states_next_affordable_is_buy(t)
 	local layout = Honeycomb.layout(Config)
 	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 20000 }))
-	t.expectEq(s["gate:pickup:2"].state, "gateOpen")
-	t.expectEq(s["track:pickup:2"].state, "buy")
-	t.expectEq(s["track:pickup:2"].price, 14062)
-	t.expectEq(s["track:pickup:3"].state, "future", "only the next link can be bought")
-	t.expectEq(s["gate:pickup:3"].state, "gateClosed")
-	t.expectEq(s["track:pickup:4"].state, "locked")
+	t.expectEq(s.pickup.state, "buy")
+	t.expectEq(s.pickup.price, 14062, "the next level's price")
 	s = Honeycomb.states(layout, "boosts", view({ wallet = 39.9999999 }))
-	t.expectEq(s["track:hold:1"].state, "buy", "fractional coins still buy")
+	t.expectEq(s.hold.state, "buy", "fractional coins still buy")
+	t.expectEq(Honeycomb.states(layout, "main", view({ wallet = 20 })).tool.state, "buy", "Cup (20)")
 end
 
-function tests.states_next_short_shows_progress(t)
+function tests.states_short_shows_progress(t)
 	local layout = Honeycomb.layout(Config)
 	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 7031 }))
-	t.expectEq(s["track:pickup:2"].state, "short")
-	t.expectEq(s["track:pickup:2"].price, 14062)
-	t.expectNear(s["track:pickup:2"].progress, 0.5, 1e-9)
+	t.expectEq(s.pickup.state, "short")
+	t.expectEq(s.pickup.price, 14062)
+	t.expectNear(s.pickup.progress, 0.5, 1e-9)
 	s = Honeycomb.states(layout, "boosts", view({ wallet = -5 }))
-	t.expectEq(s["track:hold:1"].state, "short")
-	t.expectEq(s["track:hold:1"].progress, 0, "progress clamps at 0")
+	t.expectEq(s.hold.state, "short")
+	t.expectEq(s.hold.progress, 0, "progress clamps at 0")
 end
 
-function tests.states_last_owned_link_is_max(t)
+function tests.states_max_when_every_level_is_owned(t)
 	local layout = Honeycomb.layout(Config)
 	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 4, hold = 1 }, openAreas = allOpen() }))
-	t.expectEq(s["track:pickup:3"].state, "owned")
-	t.expectEq(s["track:pickup:4"].state, "max")
-	t.expectEq(s["track:hold:1"].state, "max")
-	t.expectEq(s["gate:pickup:3"].state, "gateOpen")
+	t.expectEq(s.pickup.state, "max")
+	t.expectEq(s.pickup.owned, 4)
+	t.expectEq(s.pickup.price, nil)
+	t.expectEq(s.hold.state, "max")
+end
+
+function tests.states_locked_behind_a_closed_area(t)
+	local layout = Honeycomb.layout(Config)
+	local s = Honeycomb.states(layout, "boosts", view({ levels = { pickup = 1 }, wallet = 1e12 }))
+	t.expectEq(s.pickup.state, "locked", "pickup 2 opens with Mountain Spring")
+	s = Honeycomb.states(layout, "vehicles", view({ wallet = 1e12 }))
+	t.expectEq(s.fireTruck.state, "locked")
 end
 
 function tests.states_locked_when_unreachable_or_unpriced(t)
@@ -380,10 +326,8 @@ function tests.states_locked_when_unreachable_or_unpriced(t)
 			return id ~= "cloudNet"
 		end,
 	}))
-	t.expectEq(s["item:cloudNet:1"].state, "locked", "unreachable")
-	t.expectEq(s["item:cloudNet:2"].state, "locked")
-	t.expectEq(s["item:icePick:1"].state, "buy")
-	t.expectEq(s["item:icePick:2"].state, "future")
+	t.expectEq(s.cloudNet.state, "locked", "unreachable")
+	t.expectEq(s.icePick.state, "buy")
 	s = Honeycomb.states(layout, "gear", view({
 		openAreas = allOpen(),
 		wallet = 1e12,
@@ -391,48 +335,50 @@ function tests.states_locked_when_unreachable_or_unpriced(t)
 			return if link.id == "waterGun" then nil else costOf(link)
 		end,
 	}))
-	t.expectEq(s["item:waterGun:1"].state, "locked", "no price: can't be bought here")
-	t.expectEq(s["item:waterGun:2"].state, "future")
+	t.expectEq(s.waterGun.state, "locked", "no price: can't be bought here")
 end
 
 function tests.states_a_bigger_backpack_passes_the_earlier_links(t)
 	local layout = Honeycomb.layout(Config)
-	local s = Honeycomb.states(layout, "gear", view({ items = { backpackTank = 1, bigTank = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 1e12 }))
-	t.expectEq(s["item:backpackTank:2"].state, "owned")
-	t.expectEq(s["item:backpackTank:3"].state, "owned")
-	t.expectEq(s["item:bigTank:1"].state, "owned")
-	t.expectEq(s["item:bigTank:2"].state, "buy")
-	t.expectEq(s["item:bigTank:3"].state, "future")
-	t.expectEq(s["gate:backpacks:3"].state, "gateClosed")
-	t.expectEq(s["item:twinTanks:1"].state, "locked")
+	local v = view({ items = { backpackTank = 1, bigTank = 1 }, openAreas = { [1] = true, [2] = true }, wallet = 1e12 })
+	local st = Honeycomb.states(layout, "gear", v).backpacks
+	t.expectEq(st.state, "buy")
+	t.expectEq(st.owned, 4)
+	t.expectEq(st.total, 15)
+	local link = Honeycomb.link(upgrade(layout, "backpacks"), st.owned)
+	t.expectEq(`{link.id}:{link.level}`, "bigTank:2", "the worn pack's next upgrade")
+	st = Honeycomb.states(layout, "gear", view({ items = { backpackTank = 3, bigTank = 3 }, openAreas = { [1] = true, [2] = true }, wallet = 1e12 })).backpacks
+	t.expectEq(st.state, "locked", "the next pack's area is closed")
 end
 
-function tests.at_most_one_buy_or_short_per_chain(t)
+function tests.gate_states_follow_the_gates_price(t)
 	local layout = Honeycomb.layout(Config)
-	for _, wallet in { 0, 1e12 } do
-		local v = view({ openAreas = allOpen(), wallet = wallet, levels = { tool = 3 }, items = { helper = 2 } })
-		for _, catId in CATEGORIES do
-			local s = Honeycomb.states(layout, catId, v)
-			for _, c in layout.categories[catId].chains do
-				local next = 0
-				for _, link in c.links do
-					local state = s[link.key].state
-					if state == "buy" or state == "short" then
-						next += 1
-					end
-				end
-				t.expectEq(next, 1, `{c.id} has exactly one next link`)
-			end
+	local function onSale(id)
+		return function(link)
+			return if link.id == id then costOf(link) else nil
 		end
 	end
+	local s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:2"), wallet = 8000 }))
+	t.expectEq(s["gate:2"].state, "short", "on sale, not enough yet")
+	t.expectNear(s["gate:2"].progress, 0.5, 1e-9)
+	t.expectEq(s["gate:3"].state, "locked", "not on sale")
+	s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:2"), wallet = 16000 }))
+	t.expectEq(s["gate:2"].state, "buy")
+	s = Honeycomb.states(layout, "areas", view({ price = onSale("gate:3"), openAreas = { [1] = true, [2] = true } }))
+	t.expectEq(s["gate:2"].state, "max", "open")
+	t.expectEq(s["gate:2"].owned, 1)
+	t.expectEq(s["gate:2"].total, 1)
+	t.expectEq(s["gate:3"].state, "short")
 end
 
 function tests.badges_count_buy_hexes(t)
 	local layout = Honeycomb.layout(Config)
 	local rich = Honeycomb.badges(layout, view({ openAreas = allOpen(), wallet = 1e12 }))
-	local sum = 0
+	local sum = rich.main
+	t.expectEq(rich.main, 1, "the tool")
 	for _, catId in CATEGORIES do
-		t.expectEq(rich[catId], #layout.categories[catId].chains, `{catId}: every chain's first link`)
+		local want = if catId == "areas" then 0 else #layout.categories[catId].upgrades
+		t.expectEq(rich[catId], want, `{catId}: every upgrade (every gate open)`)
 		sum += rich[catId]
 	end
 	t.expectEq(rich.total, sum)
@@ -440,10 +386,13 @@ function tests.badges_count_buy_hexes(t)
 	t.expectEq(poor.total, 0)
 	t.expectEq(poor.boosts, 0)
 	local start = Honeycomb.badges(layout, view({ wallet = 100 }))
-	t.expectEq(start.tools, 1, "Cup (20)")
+	t.expectEq(start.main, 1, "Cup (20)")
 	t.expectEq(start.boosts, 3, "Hold (40), Quick (35), Sneakers (69), not Pickup (192) or Tip (300)")
 	t.expectEq(start.gear, 0)
+	t.expectEq(start.areas, 0)
 	t.expectEq(start.total, 4)
+	local gates = Honeycomb.badges(layout, view({ wallet = 1e12, levels = { tool = 19, pickup = 4, hold = 1, quick = 7, walk = 7, tip = 4 } }))
+	t.expectEq(gates.areas, 4, "every gate priced here and paid for")
 end
 
 function tests.badges_say_which_wallets_keep_them(t)
@@ -466,52 +415,20 @@ end
 
 function tests.elsewhere_is_an_open_items_first_link_bought_at_its_stand(t)
 	local layout = Honeycomb.layout(Config)
-	local gun = chain(layout, "gear", "waterGun")
-	local locked = { state = "locked" }
+	local gun = upgrade(layout, "waterGun")
+	local locked = { state = "locked", owned = 0, total = 3 }
 	t.expectEq(Honeycomb.elsewhere(gun.links[1], locked, view({})), true)
 	t.expectEq(Honeycomb.elsewhere(gun.links[2], locked, view({})), false, "an upgrade is bought here")
-	t.expectEq(Honeycomb.elsewhere(gun.links[1], { state = "future" }, view({})), false)
+	t.expectEq(Honeycomb.elsewhere(gun.links[1], { state = "short", owned = 0, total = 3 }, view({})), false)
 	local unreachable = view({ reachable = function()
 		return false
 	end })
 	t.expectEq(Honeycomb.elsewhere(gun.links[1], locked, unreachable), false)
-	local hose = chain(layout, "gear", "gardenHose")
-	t.expectEq(hose.links[2].level, 1, "after its area's gate")
-	t.expectEq(Honeycomb.elsewhere(hose.links[2], locked, view({})), false, "closed area")
-	t.expectEq(Honeycomb.elsewhere(hose.links[2], locked, view({ openAreas = allOpen() })), true)
-	t.expectEq(Honeycomb.elsewhere(chain(layout, "tools", "tool").links[1], locked, view({})), false, "a track")
-end
-
-function tests.model_keys_keep_few_models_per_chain(t)
-	local layout = Honeycomb.layout(Config)
-	local function keys(catId, id, v)
-		local list = {}
-		for key in Honeycomb.modelKeys(chain(layout, catId, id), Honeycomb.states(layout, catId, v)) do
-			table.insert(list, key)
-		end
-		table.sort(list)
-		return table.concat(list, ",")
-	end
-	local tool = chain(layout, "tools", "tool")
-	local maxKey = tool.links[#tool.links].key
-	t.expectEq(keys("tools", "tool", view({ levels = { tool = 4 } })), `{maxKey},track:tool:4,track:tool:5`, "last owned, next, max")
-	t.expectEq(keys("tools", "tool", view({})), `track:tool:1,{maxKey}`, "none owned: next and max")
-	t.expectEq(keys("gear", "waterGun", view({})), "item:waterGun:1", "one model per item: its next link")
-	t.expectEq(keys("gear", "waterGun", view({ items = { waterGun = 1 } })), "item:waterGun:2")
-	local gun = chain(layout, "gear", "waterGun")
-	t.expectEq(keys("gear", "waterGun", view({ items = { waterGun = #gun.links } })), gun.links[#gun.links].key, "maxed: its last link")
-	t.expectEq(keys("gear", "backpacks", view({ items = { backpackTank = 2 } })) ~= "", true)
-	for _, catId in CATEGORIES do
-		local v = view({ levels = { tool = 4 }, items = { backpackTank = 2 } })
-		local s = Honeycomb.states(layout, catId, v)
-		local n = 1 -- the category hex
-		for _, c in layout.categories[catId].chains do
-			for _ in Honeycomb.modelKeys(c, s) do
-				n += 1
-			end
-		end
-		t.expectEq(n <= 12, true, `{catId}: {n} models at most 12`)
-	end
+	local hose = upgrade(layout, "gardenHose")
+	t.expectEq(Honeycomb.elsewhere(hose.links[1], locked, view({})), false, "closed area")
+	t.expectEq(Honeycomb.elsewhere(hose.links[1], locked, view({ openAreas = allOpen() })), true)
+	t.expectEq(Honeycomb.elsewhere(layout.tool.links[1], locked, view({})), false, "a track")
+	t.expectEq(Honeycomb.elsewhere(upgrade(layout, "gate:2").links[1], locked, view({})), false, "a gate")
 end
 
 function tests.last_buy_round_trips(t)
@@ -521,31 +438,33 @@ function tests.last_buy_round_trips(t)
 	t.expectEq(buy.id, "waterGun")
 	t.expectEq(buy.level, 3)
 	t.expectEq(buy.at, 1234.5)
+	t.expectEq((Honeycomb.decodeBuy(Honeycomb.encodeBuy(Areas.gateId(2), 1, 5)) :: any).id, "gate:2", "a gate's buy")
 	t.expectEq(Honeycomb.decodeBuy(nil), nil)
 	t.expectEq(Honeycomb.decodeBuy(""), nil)
 	t.expectEq(Honeycomb.decodeBuy("tool@x@1"), nil)
 end
 
-function tests.every_hex_sits_within_6_of_the_centre(t)
-	local layout = Honeycomb.layout(Config)
-	for _, viewId in { "main", table.unpack(CATEGORIES) } do
-		for _, pos in viewHexes(layout, viewId) do
-			if Honeycomb.distance(0, 0, pos.q, pos.r) > 6 then
-				error(`{viewId}: {key(pos)} is more than 6 hexes out`)
-			end
-		end
+-- Every hex of a view, the centre first.
+local function viewHexes(layout, viewId: string)
+	local list = { { q = 0, r = 0 } }
+	local cells = if viewId == "main" then layout.ring else layout.categories[viewId].slots
+	for _, pos in cells do
+		table.insert(list, { q = pos.q, r = pos.r })
 	end
+	return list
 end
 
 -- A 1366 x 768 screen's board (between the title and the close button, about 1366 x 540 px; hexes
--- 110 x 96 at zoom 1, touching): every view fits with hexes at least 64 px tall, without panning.
-function tests.every_view_fits_a_small_laptop_without_panning(t)
+-- 110 x 96 at zoom 1, SPACING apart): every view fits with hexes at least 80 px tall.
+function tests.every_view_fits_a_small_laptop_with_big_hexes(t)
 	local layout = Honeycomb.layout(Config)
 	for _, viewId in { "main", table.unpack(CATEGORIES) } do
-		local _, _, w, h = Honeycomb.bounds(viewHexes(layout, viewId), 55)
+		local _, _, w, h = Honeycomb.bounds(viewHexes(layout, viewId), 55, Honeycomb.SPACING)
 		local zoom, pans = Honeycomb.zoom(w, h, 1366, 540, 96, 64, 1.6)
-		t.expectEq(pans, false, `{viewId} pans at zoom {zoom}`)
+		t.expectEq(pans, false, `{viewId} fits`)
+		t.expectEq(zoom * 96 >= 80, true, `{viewId}: hexes {zoom * 96} px tall`)
 	end
+	t.expectEq(Honeycomb.SPACING > 1 and Honeycomb.SPACING <= 1.15, true, "a small even gap")
 end
 
 function tests.bounds_cover_every_hex(t)
@@ -559,6 +478,9 @@ function tests.bounds_cover_every_hex(t)
 	t.expectNear(cy, 10 * math.sqrt(3) / 2, 1e-9)
 	t.expectNear(w, 50, 1e-9)
 	t.expectNear(h, 20 * math.sqrt(3), 1e-9)
+	_, _, w, h = Honeycomb.bounds({ { q = 0, r = 0 }, { q = 2, r = 0 } }, 10, 1.1)
+	t.expectNear(w, 30 * 1.1 + 20, 1e-9, "spaced centres, hexes their own size")
+	t.expectNear(h, 10 * math.sqrt(3) * 1.1 + 10 * math.sqrt(3), 1e-9)
 end
 
 function tests.zoom_fits_the_board_and_pans_below_the_smallest_hex(t)
@@ -573,75 +495,79 @@ function tests.zoom_fits_the_board_and_pans_below_the_smallest_hex(t)
 	t.expectEq(pans, true)
 end
 
-function tests.clamp_pan_keeps_the_content_over_the_board(t)
-	local x, y = Honeycomb.clampPan(100, -100, 300, 300, 400, 400)
-	t.expectEq(x, 0, "content smaller than the board: no pan")
-	t.expectEq(y, 0)
-	x, y = Honeycomb.clampPan(150, -100, 600, 500, 400, 400)
-	t.expectEq(x, 100)
-	t.expectEq(y, -50)
-	x, y = Honeycomb.clampPan(-20, 20, 600, 500, 400, 400)
-	t.expectEq(x, -20)
-	t.expectEq(y, 20)
-end
-
-function tests.find_names_the_category_and_chain_of_an_id(t)
+function tests.find_names_the_view_and_upgrade_of_an_id(t)
 	local layout = Honeycomb.layout(Config)
-	local catId, c = Honeycomb.find(layout, "tool")
-	t.expectEq(catId, "tools")
-	t.expectEq((c :: any).id, "tool")
-	catId, c = Honeycomb.find(layout, "quick")
-	t.expectEq(catId, "boosts")
-	t.expectEq((c :: any).id, "quick")
-	catId, c = Honeycomb.find(layout, "bigTank")
-	t.expectEq(catId, "gear")
-	t.expectEq((c :: any).id, "backpacks", "a backpack's links sit in the backpacks chain")
+	local viewId, u = Honeycomb.find(layout, "tool")
+	t.expectEq(viewId, "main")
+	t.expectEq((u :: any).id, "tool")
+	viewId, u = Honeycomb.find(layout, "quick")
+	t.expectEq(viewId, "boosts")
+	t.expectEq((u :: any).id, "quick")
+	viewId, u = Honeycomb.find(layout, "bigTank")
+	t.expectEq(viewId, "gear")
+	t.expectEq((u :: any).id, "backpacks", "a backpack sits in the backpacks hex")
 	t.expectEq((Honeycomb.find(layout, "pump")), "buildings")
+	t.expectEq((Honeycomb.find(layout, "gate:3")), "areas")
 	t.expectEq((Honeycomb.find(layout, "nope")), nil)
 end
 
-function tests.pick_selects_an_ids_next_link_else_the_first_buy_else_short(t)
+function tests.pick_selects_an_ids_hex_else_the_first_buy_else_short(t)
 	local layout = Honeycomb.layout(Config)
 	local s = Honeycomb.states(layout, "boosts", view({ wallet = 100 }))
-	t.expectEq(Honeycomb.pick(layout, "boosts", s), "track:hold:1", "Pickup (192) is short, Hold (40) buys")
-	t.expectEq(Honeycomb.pick(layout, "boosts", s, "tip"), "track:tip:1")
+	t.expectEq(Honeycomb.pick(layout, "boosts", s), "hold", "Pickup (192) is short, Hold (40) buys")
+	t.expectEq(Honeycomb.pick(layout, "boosts", s, "tip"), "tip")
 	s = Honeycomb.states(layout, "boosts", view({ wallet = 0 }))
-	t.expectEq(Honeycomb.pick(layout, "boosts", s), "track:pickup:1", "nothing buys: the first short")
+	t.expectEq(Honeycomb.pick(layout, "boosts", s), "pickup", "nothing buys: the first short")
 	local maxed = { pickup = 4, hold = 1, quick = 7, walk = 7, tip = 4 }
 	s = Honeycomb.states(layout, "boosts", view({ levels = maxed, openAreas = allOpen() }))
-	t.expectEq(Honeycomb.pick(layout, "boosts", s, "pickup"), "track:pickup:4", "a maxed id: its max end")
+	t.expectEq(Honeycomb.pick(layout, "boosts", s, "pickup"), "pickup", "a maxed id: still its hex")
 	t.expectEq(Honeycomb.pick(layout, "boosts", s), nil, "nothing to buy or save for")
+	s = Honeycomb.states(layout, "gear", view({}))
+	t.expectEq(Honeycomb.pick(layout, "gear", s, "bigTank"), "backpacks")
 end
 
-function tests.owned_share_counts_links_not_gates(t)
+function tests.owned_share_counts_levels(t)
 	local layout = Honeycomb.layout(Config)
 	local owned, total = Honeycomb.ownedShare(layout, "boosts", view({ levels = { pickup = 2, quick = 1 } }))
 	t.expectEq(owned, 3)
 	t.expectEq(total, 4 + 1 + 7 + 7 + 4)
+	owned, total = Honeycomb.ownedShare(layout, "areas", view({ openAreas = { [1] = true, [2] = true } }))
+	t.expectEq(owned, 1)
+	t.expectEq(total, 4)
 end
 
 function tests.bought_is_what_the_buy_remote_compares(t)
 	local layout = Honeycomb.layout(Config)
-	local tool = chain(layout, "tools", "tool").links[1]
+	local tool = layout.tool.links[1]
 	t.expectEq(Honeycomb.bought(tool, view({ levels = { tool = 3 } })), 3)
 	t.expectEq(Honeycomb.bought(tool, view({})), 0)
-	local gun = chain(layout, "gear", "waterGun").links[2]
+	local gun = upgrade(layout, "waterGun").links[2]
 	t.expectEq(Honeycomb.bought(gun, view({})), -1, "not owned")
 	t.expectEq(Honeycomb.bought(gun, view({ items = { waterGun = 1 } })), 0, "just bought")
 	t.expectEq(Honeycomb.bought(gun, view({ items = { waterGun = 3 } })), 2)
+	local gate = upgrade(layout, "gate:2").links[1]
+	t.expectEq(Honeycomb.bought(gate, view({})), 0, "closed")
+	t.expectEq(Honeycomb.bought(gate, view({ openAreas = { [1] = true, [2] = true } })), 1, "open")
+end
+
+function tests.link_is_the_next_level_else_the_last(t)
+	local layout = Honeycomb.layout(Config)
+	local pickup = upgrade(layout, "pickup")
+	t.expectEq(Honeycomb.link(pickup, 0).level, 1)
+	t.expectEq(Honeycomb.link(pickup, 2).level, 3)
+	t.expectEq(Honeycomb.link(pickup, 4).level, 4, "maxed: the last")
 end
 
 function tests.level_text_reads_the_step_a_link_buys(t)
 	local layout = Honeycomb.layout(Config)
-	local tool = chain(layout, "tools", "tool")
+	local tool = layout.tool
 	t.expectEq(Honeycomb.levelText(tool.links[1], "buy"), "Buy")
 	t.expectEq(Honeycomb.levelText(tool.links[3], "short"), "Lv 2 → Lv 3")
-	t.expectEq(Honeycomb.levelText(tool.links[3], "owned"), "Lv 3")
-	t.expectEq(Honeycomb.levelText(tool.links[21], "max"), "MAX")
-	t.expectEq(Honeycomb.levelText(tool.links[5], "gateClosed"), "")
-	local gun = chain(layout, "gear", "waterGun")
+	t.expectEq(Honeycomb.levelText(tool.links[19], "max"), "MAX")
+	t.expectEq(Honeycomb.levelText(upgrade(layout, "gate:2").links[1], "buy"), "")
+	local gun = upgrade(layout, "waterGun")
 	t.expectEq(Honeycomb.levelText(gun.links[1], "locked"), "Buy")
-	t.expectEq(Honeycomb.levelText(gun.links[2], "future"), "Lv 1 → Lv 2")
+	t.expectEq(Honeycomb.levelText(gun.links[2], "short"), "Lv 1 → Lv 2")
 end
 
 function tests.enter_delay_grows_with_distance_and_caps(t)
