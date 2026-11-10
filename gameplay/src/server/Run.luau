@@ -353,9 +353,9 @@ local function earn(player: Player?, coins: number)
 	team.wallet += coins
 	setGlobal("Wallet", team.wallet)
 	local state = player and states[player]
-	if state then
+	if player and state then
 		state.earned += coins
-		(player :: Player):SetAttribute("Earned", state.earned)
+		player:SetAttribute("Earned", state.earned)
 	end
 end
 
