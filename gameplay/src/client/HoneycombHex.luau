@@ -109,6 +109,15 @@ function HoneycombHex.parts(button: ImageButton)
 	}
 end
 
+-- A label's text size at view scale 1: TextScaled labels have no real TextSize (it reads 8).
+local function designSize(label: TextLabel): number
+	if not label.TextScaled then
+		return label.TextSize
+	end
+	local limit = label:FindFirstChildOfClass("UITextSizeConstraint")
+	return if limit then limit.MaxTextSize else label.Size.Y.Offset
+end
+
 -- A hidden copy of `template` at axial (q, r), `x`, `y` from the canvas centre, in `parent`.
 function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number, y: number, parent: Instance): Hex
 	local button = template:Clone()
@@ -117,7 +126,7 @@ function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number
 	hex.waterWidth = hex.water.Size.X
 	hex.checkSize = hex.check.Size
 	hex.badgeSize = hex.badge.Size
-	hex.priceSize = hex.price.TextSize
+	hex.priceSize = designSize(hex.price)
 	hex.q, hex.r, hex.x, hex.y = q, r, x, y
 	hex.hover, hex.down, hex.breathe, hex.fade = false, false, false, false
 	hex.ease, hex.base, hex.animAt, hex.holdUntil, hex.badgeCount, hex.share = 1, 1, 0, 0, -1, -1
@@ -234,7 +243,7 @@ local function paintBody(hex: Hex, base: Color3, outline: Color3, fade: boolean)
 end
 
 local function paintName(hex: Hex, text: string?)
-	set(hex.name, "Visible", text ~= nil and readable(hex.name.TextSize))
+	set(hex.name, "Visible", text ~= nil and readable(designSize(hex.name)))
 	if text then
 		set(hex.name, "Text", text)
 	end
@@ -315,7 +324,7 @@ local function paintBadge(hex: Hex, count: number)
 	local was = hex.badgeCount
 	hex.badgeCount = count
 	set(hex.count, "Text", tostring(count))
-	set(hex.count, "Visible", readable(hex.count.TextSize))
+	set(hex.count, "Visible", readable(designSize(hex.count)))
 	local info = TweenInfo.new(CUE.badgeSeconds, Enum.EasingStyle.Back, if count > 0 then Enum.EasingDirection.Out else Enum.EasingDirection.In)
 	if was < 0 then
 		set(hex.badge, "Visible", count > 0)

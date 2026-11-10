@@ -155,7 +155,7 @@ Cues.honeycomb = {
 	breatheSeconds = 1.5,
 	gateScale = 0.85,
 	minHexPixels = 64,
-	minTextPixels = 11,
+	minTextPixels = 8,
 	maxZoom = 1.5,
 }
 

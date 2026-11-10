@@ -108,6 +108,10 @@ function Stands.start()
 				signs[stand.key] = sign
 			end
 			local shown = if prompt and Stands.reachable(stand, snap.items) then prompt else nil
+			-- an unreachable stand (Cloud Catcher without the Jetpack Tank) offers nothing
+			if prompt then
+				set(prompt, "Enabled", shown ~= nil)
+			end
 			local s = sign :: BillboardGui
 			set(s, "Adornee", if shown then shown.Parent else nil)
 			set(s, "Enabled", shown ~= nil)
