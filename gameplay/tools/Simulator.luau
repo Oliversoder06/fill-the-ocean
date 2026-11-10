@@ -18,6 +18,7 @@ local Boosts = require("../src/shared/Boosts")
 local BuildingRules = require("../src/shared/BuildingRules")
 local Config = require("../src/shared/Config")
 local Ladder = require("../src/shared/Ladder")
+local Milestones = require("../src/shared/Milestones")
 local StaffRules = require("../src/shared/StaffRules")
 local VehicleRules = require("../src/shared/VehicleRules")
 local Water = require("../src/shared/Water")
@@ -66,7 +67,7 @@ local function newState(teamSize: number)
 		gatesOpen = {} :: { number },
 		boost = nil :: string?,
 		boostEnds = 0,
-		boostsPlayed = {} :: { string },
+		milestones = {} :: { number },
 		money = 0,
 		current = 0,
 		t = 0,
@@ -452,15 +453,16 @@ function Simulator.run(teamSize: number, log: ((string) -> ())?): Result
 				result.gateMoney[area.id] = { money = s.money, income = income(s, true).coins }
 			end
 		end
-		local milestone = Boosts.crossed(Config.boosts.milestones, before, fill)
-		if milestone and fill < 1 then
-			for _, kind in Config.boosts.kinds do
-				if not table.find(s.boostsPlayed, kind.id) then
-					table.insert(s.boostsPlayed, kind.id)
-					s.boost, s.boostEnds = kind.id, s.t + Config.boosts.seconds
-					break
-				end
+		-- as server/Run's checkMilestones: the last new milestone passed starts its boost (Raindrops,
+		-- revives and the rest don't touch coins)
+		local last = nil
+		for _, index in Milestones.reach(Config, s.milestones, before, fill) do
+			if not Milestones.reward(Config, index).ending then
+				last = index
 			end
+		end
+		if last and fill < 1 then
+			s.boost, s.boostEnds = Milestones.reward(Config, last).boost, s.t + Config.boosts.seconds
 		end
 		return full
 	end
@@ -478,6 +480,14 @@ function Simulator.run(teamSize: number, log: ((string) -> ())?): Result
 			dt -= Config.tripDistance / 2 / (now.walk :: number) -- the team starts at Spawn, halfway along
 		end
 		first = false
+		if s.boost and s.t >= s.boostEnds then -- it ran out while buying
+			s.boost = nil
+			reconsider()
+			dt = now.step
+		end
+		if s.boost then
+			dt = math.min(dt, s.boostEnds - s.t) -- the boost ends mid-step
+		end
 		local boostBefore = s.boost
 		if advance(dt, now.coins, now.litres) then
 			break
