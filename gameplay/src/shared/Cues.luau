@@ -109,19 +109,23 @@ Cues.purchase = {
 	sparkle = "Sparkle",
 }
 
--- The honeycomb upgrades (client/Honeycomb), seconds and scales. A buy landing: the Buy button
--- bounces (bounceLow -> bounceHigh -> 1), coins fly in, the hex's water rises (waterSeconds), the hex
--- pops (popFrom -> 1) as its check stamps (checkOvershoot), the bridge to the next hex fills, and
--- the next hex wakes (wakeFrom -> wakeOvershoot -> 1). The sting climbs stingPitchStep a level in a
--- chain, up to stingPitchMax. Opening a view: the canvas glides from glideZoomFrom and hexes pop in
--- from enterFrom, enterStagger later per ring out (at most enterCap). A hex you can buy breathes up
--- to breatheScale and back every breatheSeconds; a gate hex sits at gateScale. Hexes are never
--- shown under minHexPixels tall (the board pans instead), and a view grows to at most maxZoom; hex
--- text that would show under minTextPixels on screen hides.
--- A windowed chain slides one slot per link over slideSeconds after a landing. Colours fade in over
--- fadeSeconds; hovers ease over quickSeconds. The Upgrades button squishes to holdScale while held
--- (holdDownSeconds) and springs back (holdUpSeconds).
+-- The honeycomb upgrades (client/Honeycomb), seconds and scales. Opening blurs the world to blur
+-- and fades the Backdrop in over coverSeconds; closing takes them away over uncoverSeconds. A buy
+-- landing: coins fly in, the hex's water rises (waterSeconds), the hex pops (popFrom -> 1) as its
+-- check stamps (checkOvershoot), and bridgeSeconds later the touching next hex wakes (wakeFrom ->
+-- wakeOvershoot -> 1). The sting climbs stingPitchStep a level in a chain, up to stingPitchMax. A
+-- refused click shakes the hex and pulses the card's hint (needPulse). Opening a view: the canvas
+-- glides from glideZoomFrom and hexes pop in from enterFrom, enterStagger later per ring out (at
+-- most enterCap). A hex you can buy breathes up to breatheScale and back every breatheSeconds; a
+-- gate hex sits at gateScale. Hexes are never shown under minHexPixels tall (the board pans
+-- instead), and a view grows to at most maxZoom; hex text that would show under minTextPixels on
+-- screen hides. A windowed chain slides one slot per link over slideSeconds after a landing.
+-- Colours fade in over fadeSeconds; hovers ease over quickSeconds. The Upgrades button squishes to
+-- holdScale while held (holdDownSeconds) and springs back (holdUpSeconds).
 Cues.honeycomb = {
+	blur = 18,
+	coverSeconds = 0.25,
+	uncoverSeconds = 0.15,
 	quickSeconds = 0.08,
 	fadeSeconds = 0.25,
 	slideSeconds = 0.25,
@@ -156,7 +160,7 @@ Cues.honeycomb = {
 	gateScale = 0.85,
 	minHexPixels = 64,
 	minTextPixels = 8,
-	maxZoom = 1.5,
+	maxZoom = 1.6,
 }
 
 -- The purchase sting's pitch for the `level`-th link bought in a chain: one step higher each, capped.

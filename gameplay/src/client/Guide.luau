@@ -97,8 +97,6 @@ function Guide.start()
 	local upgrades = Hud.find(gui, "UpgradesButton")
 	local upgradesRing = Hud.find(upgrades, "GuideRing")
 	local closeButton = Hud.find(gui, "Honeycomb.CloseButton")
-	local buyButton = Hud.find(gui, "Honeycomb.Detail.BuyButton")
-	local buyRing = Hud.find(buyButton, "GuideRing")
 	local handTemplate = Hud.find(gui, "Templates.ClickHand")
 	assert(handTemplate:IsA("GuiObject"), "StarterGui.Hud.Templates.ClickHand must be an ImageLabel or TextLabel")
 	local hand = handTemplate:Clone() :: GuiObject
@@ -167,9 +165,8 @@ function Guide.start()
 			if not Honeycomb.isOpen() then
 				return 5, "Buy your first upgrade", nil, upgrades
 			end
-			-- the category hex, then the upgrade's hex, then Buy
-			local click = Honeycomb.guideTarget(track.id)
-			return 6, if click == buyButton then "Buy it!" else `Buy {track.name}`, nil, click
+			-- the category hex, then the upgrade's hex (a click on it buys)
+			return 6, `Buy {track.name}`, nil, Honeycomb.guideTarget(track.id)
 		end
 		if Honeycomb.isOpen() then
 			return 4, `Pour more water: {Hud.money(money)} / {Hud.money(cost)} coins`, nil, closeButton
@@ -295,10 +292,9 @@ function Guide.start()
 			step, message, goal, click = current(levels :: { [string]: number }, ocean :: Model)
 		end
 
-		set(panel, "Visible", active and not Honeycomb.isOpen()) -- the strip would cover the window's header; the hand still shows
+		set(panel, "Visible", active and not Honeycomb.isOpen()) -- hidden under the honeycomb's cover; the hand still shows
 		set(skip, "Visible", active and not thanks)
 		set(upgradesRing, "Visible", click == upgrades)
-		set(buyRing, "Visible", click == buyButton)
 		placeTrail(if active then goal else pointed)
 		pointHand(click)
 		if not active then

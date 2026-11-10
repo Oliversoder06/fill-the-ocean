@@ -110,9 +110,6 @@ function tests.no_overlaps_in_any_category(t)
 			end
 			used[key(pos)] = what
 		end
-		for i, pos in cat.spine do
-			take(pos, `spine {i}`)
-		end
 		for _, c in cat.chains do
 			t.expectEq(#c.slots, math.min(#c.links, Honeycomb.MAX_VISIBLE), `{c.id} slot count`)
 			for i, pos in c.slots do
@@ -122,29 +119,89 @@ function tests.no_overlaps_in_any_category(t)
 	end
 end
 
-function tests.chains_are_connected_by_bridges_between_neighbours(t)
+-- Every hex of a view, the centre first.
+local function viewHexes(layout, viewId: string)
+	local list = { { q = 0, r = 0 } }
+	if viewId == "main" then
+		for _, hex in layout.main.ring do
+			table.insert(list, { q = hex.q, r = hex.r })
+		end
+		return list
+	end
+	for _, c in layout.categories[viewId].chains do
+		table.move(c.slots, 1, #c.slots, #list + 1, list)
+	end
+	return list
+end
+
+local function touching(a, b): boolean
+	return Honeycomb.distance(a.q, a.r, b.q, b.r) == 1
+end
+
+function tests.every_view_is_one_touching_cluster(t)
+	local layout = Honeycomb.layout(Config)
+	for _, viewId in { "main", table.unpack(CATEGORIES) } do
+		local hexes = viewHexes(layout, viewId)
+		local reached, queue = { [key(hexes[1])] = true }, { hexes[1] }
+		while #queue > 0 do
+			local at = table.remove(queue) :: any
+			for _, other in hexes do
+				if not reached[key(other)] and touching(at, other) then
+					reached[key(other)] = true
+					table.insert(queue, other)
+				end
+			end
+		end
+		for _, hex in hexes do
+			t.expectEq(reached[key(hex)], true, `{viewId}: {key(hex)} touches the cluster`)
+		end
+	end
+end
+
+-- Each chain starts next to the category hex (past 6 chains: next to another chain's first hex, which
+-- does) and each next link touches the one before it.
+function tests.each_link_touches_the_one_before_it(t)
+	local layout = Honeycomb.layout(Config)
+	local centre = { q = 0, r = 0 }
+	for _, catId in CATEGORIES do
+		local chains = layout.categories[catId].chains
+		for _, c in chains do
+			local first = c.slots[1]
+			if not touching(first, centre) then
+				t.expectEq(#chains > 6, true, `{catId} {c.id}: off the category hex with only {#chains} chains`)
+				local beside = false
+				for _, other in chains do
+					beside = beside or (other ~= c and touching(other.slots[1], centre) and touching(other.slots[1], first))
+				end
+				t.expectEq(beside, true, `{c.id} starts beside another chain's first hex`)
+			end
+			for i = 2, #c.slots do
+				t.expectEq(touching(c.slots[i - 1], c.slots[i]), true, `{c.id} slot {i} touches slot {i - 1}`)
+			end
+		end
+	end
+end
+
+function tests.chains_grow_outward(t)
 	local layout = Honeycomb.layout(Config)
 	for _, catId in CATEGORIES do
-		local cat = layout.categories[catId]
-		local reached = { [key(cat.hex)] = true }
-		for _, bridge in cat.bridges do
-			t.expectEq(Honeycomb.distance(bridge[1].q, bridge[1].r, bridge[2].q, bridge[2].r), 1, `{catId} spine bridge`)
-			t.expectEq(reached[key(bridge[1])], true, `{catId} spine grows from the category`)
-			reached[key(bridge[2])] = true
-		end
-		for _, pos in cat.spine do
-			t.expectEq(reached[key(pos)], true, `{catId} spine hex {key(pos)} joined`)
-		end
-		for _, c in cat.chains do
-			t.expectEq(#c.bridges, #c.slots, `{c.id} one bridge per slot`)
-			t.expectEq(reached[key(c.bridges[1][1])], true, `{c.id} starts at the category or the spine`)
-			for i, bridge in c.bridges do
-				t.expectEq(key(bridge[2]), key(c.slots[i]), `{c.id} bridge {i} ends at slot {i}`)
-				if i > 1 then
-					t.expectEq(key(bridge[1]), key(c.slots[i - 1]), `{c.id} bridge {i} starts at slot {i - 1}`)
-				end
-				t.expectEq(Honeycomb.distance(bridge[1].q, bridge[1].r, bridge[2].q, bridge[2].r), 1, `{c.id} bridge {i} joins neighbours`)
+		for _, c in layout.categories[catId].chains do
+			local last = 0
+			for i, pos in c.slots do
+				local d = Honeycomb.distance(0, 0, pos.q, pos.r)
+				t.expectEq(d > last, true, `{catId} {c.id} slot {i} further out than the one before`)
+				last = d
 			end
+		end
+	end
+end
+
+function tests.layout_is_deterministic(t)
+	local a, b = Honeycomb.layout(Config), Honeycomb.layout(Config)
+	for _, catId in CATEGORIES do
+		local hexes, again = viewHexes(a, catId), viewHexes(b, catId)
+		for i, pos in hexes do
+			t.expectEq(key(again[i]), key(pos), `{catId} hex {i}`)
 		end
 	end
 end
@@ -469,75 +526,25 @@ function tests.last_buy_round_trips(t)
 	t.expectEq(Honeycomb.decodeBuy("tool@x@1"), nil)
 end
 
-function tests.every_category_fits_11_columns_by_4_rows(t)
+function tests.every_hex_sits_within_6_of_the_centre(t)
 	local layout = Honeycomb.layout(Config)
-	for _, catId in CATEGORIES do
-		local cat = layout.categories[catId]
-		local minC, maxC, minR, maxR = math.huge, -math.huge, math.huge, -math.huge
-		local function grow(pos)
-			-- flat-top offset rows: odd columns sit half a hex lower
-			local row = pos.r + (pos.q - pos.q % 2) / 2
-			minC, maxC = math.min(minC, pos.q), math.max(maxC, pos.q)
-			minR, maxR = math.min(minR, row), math.max(maxR, row)
-		end
-		grow(cat.hex)
-		for _, pos in cat.spine do
-			grow(pos)
-		end
-		for _, c in cat.chains do
-			for _, pos in c.slots do
-				grow(pos)
-			end
-		end
-		if maxC - minC + 1 > 11 or maxR - minR + 1 > 4 then
-			error(`{catId} is {maxC - minC + 1} x {maxR - minR + 1}`)
-		end
-	end
-end
-
--- The first half of a category's chains run right from the category's column, the rest left, one
--- row each from the top, so the view is wide and short like the board.
-function tests.chains_run_outward_in_two_groups(t)
-	local layout = Honeycomb.layout(Config)
-	for _, catId in CATEGORIES do
-		local chains = layout.categories[catId].chains
-		local perSide = math.ceil(#chains / 2)
-		local lastRow = { [1] = -1, [-1] = -1 }
-		for i, c in chains do
-			local side = if i <= perSide then 1 else -1
-			local row = c.slots[1].r + (c.slots[1].q - c.slots[1].q % 2) / 2
-			t.expectEq(row > lastRow[side], true, `{catId} {c.id}: below the chain before it on its side`)
-			lastRow[side] = row
-			for step, pos in c.slots do
-				t.expectEq(pos.q, side * step, `{catId} {c.id} slot {step} column`)
-				t.expectEq(pos.r + (pos.q - pos.q % 2) / 2, row, `{catId} {c.id} slot {step} stays on its row`)
-			end
-			if side == 1 and i == 1 or side == -1 and i == perSide + 1 then
-				t.expectEq(row, 0, `{catId}: each group starts beside the category hex`)
+	for _, viewId in { "main", table.unpack(CATEGORIES) } do
+		for _, pos in viewHexes(layout, viewId) do
+			if Honeycomb.distance(0, 0, pos.q, pos.r) > 6 then
+				error(`{viewId}: {key(pos)} is more than 6 hexes out`)
 			end
 		end
 	end
 end
 
--- The Studio board (912 x 412 px, hexes 110 x 96 at zoom 1, client/Honeycomb's spacing 1.14):
--- every category view fits it at zoom 0.7 or more, without panning.
-function tests.every_category_fits_the_board_without_panning(t)
+-- A 1366 x 768 screen's board (between the title and the close button, about 1366 x 540 px; hexes
+-- 110 x 96 at zoom 1, touching): every view fits with hexes at least 64 px tall, without panning.
+function tests.every_view_fits_a_small_laptop_without_panning(t)
 	local layout = Honeycomb.layout(Config)
-	local spaced = 55 * 1.14
-	for _, catId in CATEGORIES do
-		local cat = layout.categories[catId]
-		local hexes = { cat.hex }
-		for _, c in cat.chains do
-			for _, pos in c.slots do
-				table.insert(hexes, pos)
-			end
-		end
-		local _, _, w, h = Honeycomb.bounds(hexes, spaced)
-		local zoom, pans = Honeycomb.zoom(w, h, 912, 412, 96, 64, 1.5)
-		t.expectEq(pans, false, `{catId} pans`)
-		if zoom < 0.7 then
-			error(`{catId} fits at zoom {zoom}, under 0.7`)
-		end
+	for _, viewId in { "main", table.unpack(CATEGORIES) } do
+		local _, _, w, h = Honeycomb.bounds(viewHexes(layout, viewId), 55)
+		local zoom, pans = Honeycomb.zoom(w, h, 1366, 540, 96, 64, 1.6)
+		t.expectEq(pans, false, `{viewId} pans at zoom {zoom}`)
 	end
 end
 
@@ -642,6 +649,16 @@ function tests.enter_delay_grows_with_distance_and_caps(t)
 	t.expectNear(Honeycomb.enterDelay(1, 0, 0.03, 0.1), 0.03, 1e-9)
 	t.expectNear(Honeycomb.enterDelay(2, -1, 0.03, 0.1), 0.06, 1e-9)
 	t.expectEq(Honeycomb.enterDelay(7, 0, 0.03, 0.1), 0.1)
+end
+
+function tests.step_goes_to_the_nearest_point_in_the_pushed_direction(t)
+	local points = { { x = 0, y = 0 }, { x = 10, y = 0 }, { x = 10, y = -10 }, { x = 30, y = 0 }, { x = -10, y = 5 } }
+	t.expectEq(Honeycomb.step(points, 1, 1, 0), 2, "right: the nearest, not the far one")
+	t.expectEq(Honeycomb.step(points, 1, 0, -1), 3, "up: within 60 degrees")
+	t.expectEq(Honeycomb.step(points, 1, -1, 0), 5, "left")
+	t.expectEq(Honeycomb.step(points, 1, 0, 1), nil, "nothing below")
+	t.expectEq(Honeycomb.step(points, 2, 1, 0), 4, "from another point")
+	t.expectEq(Honeycomb.step(points, 3, 0, -1), nil, "past the edge")
 end
 
 return tests

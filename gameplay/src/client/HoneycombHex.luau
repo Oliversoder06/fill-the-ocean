@@ -1,7 +1,8 @@
--- The honeycomb's hexes and bridges (client/Honeycomb): copies of Hud.Templates.Hex and
--- Templates.Bridge, painted in their state (shared/Honeycomb.states), and their animations: popping
--- in, a landing (the hex fills, the bridge fills, the next hex wakes), sliding along a chain's
--- window. Numbers in Cues.honeycomb, colours and images from the sunbaked-sea theme.
+-- The honeycomb's hexes (client/Honeycomb): copies of Hud.Templates.Hex, painted in their state
+-- (shared/Honeycomb.states) with a short name on top, art in the middle and a price or state word
+-- at the bottom, and their animations: popping in, a landing (the hex fills, then the touching next
+-- hex wakes), sliding along a chain's window. Numbers in Cues.honeycomb, colours and images from the
+-- sunbaked-sea theme.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
@@ -32,7 +33,7 @@ local RIM_SHADE = 0.4 -- a hex's rim: its colour this far toward the outline nav
 -- Art for the tracks that have an icon (the tool shows its 3D model; the rest none until drawn).
 local ICONS = { pickup = "pipFull", tip = "coin" }
 
--- On-screen pixels per template pixel in the shown view (the window's fit times the view's zoom).
+-- On-screen pixels per template pixel in the shown view (its zoom).
 local textScale = 1
 
 export type Hex = {
@@ -64,7 +65,7 @@ export type Hex = {
 	catId: string?,
 	slots: { Hex }?, -- a chain's slot hexes, this one among them
 	slot: number?,
-	key: string?, -- the link shown now
+	key: string?, -- the link shown now ("centre", "cat:<id>" or "home" for the views' fixed hexes)
 	art: Instance?,
 	hover: boolean,
 	down: boolean,
@@ -78,8 +79,6 @@ export type Hex = {
 	badgeCount: number,
 	share: number, -- a category hex's owned share as last painted (-1: never)
 }
-
-export type Bridge = { frame: Frame, fill: Frame, fillHeight: UDim }
 
 -- A landing's progress for its caller: the hex is full, the next hex woke, or it stopped (the view
 -- changed or the hex shows another link).
@@ -139,26 +138,12 @@ function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number
 	return hex
 end
 
--- A hidden copy of `template` from (ax, ay) to (bx, by), under the hexes it joins (`hexZ`).
-function HoneycombHex.newBridge(template: Frame, ax: number, ay: number, bx: number, by: number, hexZ: number, parent: Instance): Bridge
-	local frame = template:Clone()
-	frame.Position = UDim2.fromOffset((ax + bx) / 2, (ay + by) / 2)
-	frame.Rotation = math.deg(math.atan2(by - ay, bx - ax)) -- its Fill grows from a toward b
-	frame.ZIndex = hexZ - 1
-	frame.BackgroundColor3 = colors.outline
-	frame.Visible = false
-	frame.Parent = parent
-	local fill = Hud.find(frame, "Fill") :: Frame
-	fill.BackgroundColor3 = colors.shallowWater
-	return { frame = frame, fill = fill, fillHeight = fill.Size.Y }
-end
-
 function HoneycombHex.scaled(size: UDim2, k: number): UDim2
 	return UDim2.new(size.X.Scale * k, size.X.Offset * k, size.Y.Scale * k, size.Y.Offset * k)
 end
 
--- The shown view's scale (fit x zoom): hex text under CUE.minTextPixels on screen hides. The
--- caller repaints after a change.
+-- The shown view's zoom: hex text under CUE.minTextPixels on screen hides. The caller repaints
+-- after a change.
 function HoneycombHex.setTextScale(scale: number)
 	textScale = scale
 end
@@ -170,11 +155,6 @@ end
 local function setWater(hex: Hex, level: number)
 	set(hex.water, "Size", UDim2.new(hex.waterWidth, UDim.new(level, 0)))
 	set(hex.water, "Visible", level > 0)
-end
-
-function HoneycombHex.setBridge(bridge: Bridge, level: number)
-	set(bridge.fill, "Size", UDim2.new(UDim.new(level, 0), bridge.fillHeight))
-	set(bridge.fill, "Visible", level > 0)
 end
 
 -- The template (a Model or a backpack's Accessory) and image a link shows; nil, nil for none. A
@@ -210,8 +190,8 @@ local function categoryArt(layout: Comb.Layout, catId: string, stats: Ladder.Sta
 	return nil, images.unknown
 end
 
--- A hex's (or the detail's) art slot: `template` in its ViewportFrame (copied once per template),
--- else `image` in its Icon, else nothing.
+-- A hex's art slot: `template` in its ViewportFrame (copied once per template), else `image` in its
+-- Icon, else nothing.
 function HoneycombHex.showArt(record: { art: Instance? }, view: ViewportFrame, icon: ImageLabel, template: Instance?, image: string?)
 	if template and record.art ~= template then
 		ToolModels.showIn(view, template :: any)
@@ -271,18 +251,19 @@ local function listedCost(link: Comb.Link): number
 	return if link.level == 1 then item.price else item.levels[(link.level :: number) - 1].cost
 end
 
--- A link hex in its state (shared/Honeycomb.states); `model`: it may show its 3D model. Only the
--- next link (and an item's first, at its stand) shows a price; later ones are a darker shade.
+-- A link hex in its state (shared/Honeycomb.states); `model`: it may show its 3D model. Every hex
+-- has its short name on top; at the bottom the next link's price, an item's price at its stand,
+-- "Owned", "MAX" or how a closed gate opens. Later links are a darker shade, without a price.
 function HoneycombHex.paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, catId: string, view: Comb.View, fade: boolean, model: boolean)
 	local state = st.state
 	local base, outline = categoryColor(catId), colors.outline
 	local water, waterColor, check, lock, art, iconColor = 0, colors.shallowWater, false, false, true, colors.foam
-	local name, priceText, coin, priceColor, small = nil, nil, false, colors.foam, false
+	local priceText, coin, priceColor, small = nil, false, colors.foam, false
 	hex.base = 1
 	if state == "owned" then
-		water, check = 1, true
+		water, check, priceText = 1, true, "Owned"
 	elseif state == "max" then
-		water, name, outline = 1, "MAX", colors.toolTag
+		water, outline, priceText = 1, colors.toolTag, "MAX"
 	elseif state == "buy" then
 		priceText, coin = Hud.money(st.price :: number), true
 	elseif state == "short" then
@@ -297,9 +278,8 @@ function HoneycombHex.paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, ca
 		-- passed: a small lock in water blue (the theme has no open-lock image yet)
 		base, art, hex.base, iconColor = colors.locked, false, CUE.gateScale, colors.shallowWater
 	elseif link.kind == "gate" then
-		local area = Areas.byId(Config, link.areaId)
-		base, art, name, lock = colors.locked, false, area.name, true
-		priceText, coin = Text.gate(area)
+		base, art, lock = colors.locked, false, true
+		priceText, coin = Text.gate(Areas.byId(Config, link.areaId))
 	else
 		base, art, lock = colors.locked, false, true
 	end
@@ -308,7 +288,7 @@ function HoneycombHex.paintLink(hex: Hex, link: Comb.Link, st: Comb.HexState, ca
 	setWater(hex, water)
 	set(hex.check, "Visible", check)
 	set(hex.lock, "Visible", lock)
-	paintName(hex, name)
+	paintName(hex, Text.short(link))
 	paintPrice(hex, priceText, coin, priceColor, small)
 	local template, image = nil, if state == "gateOpen" then images.lock else nil
 	if art then
@@ -367,7 +347,7 @@ function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string
 end
 
 -- The main view's centre: the tool in hand and its level (the tool chain's level, as its hexes
--- and the detail count; none for the starting tool).
+-- and the card count; none for the starting tool).
 function HoneycombHex.paintCentre(hex: Hex, stats: Ladder.Stats, level: number)
 	paintBody(hex, colors.toolTag, colors.outline, false)
 	setWater(hex, 0)
@@ -413,11 +393,11 @@ function HoneycombHex.animScale(hex: Hex, now: number): number
 	return CUE.wakeOvershoot + (1 - CUE.wakeOvershoot) * (1 - (1 - u) * (1 - u))
 end
 
--- A landing (shop.md: the hex fills, the bridge into `nextHex` fills, the next hex wakes): holds
--- the hex and the next one, and returns what starts it (Purchase.landed runs it as the coins
--- arrive). `final`: the hex's state once landed. `alive()` false stops it and lets both go;
--- `update` hears each step, and the caller repaints after it.
-function HoneycombHex.celebrate(hex: Hex, final: Comb.StateName, nextHex: Hex?, bridge: Bridge?, alive: () -> boolean, update: (Step) -> ()): () -> ()
+-- A landing (shop.md: the hex fills, the touching next hex wakes): holds the hex and `nextHex`, and
+-- returns what starts it (Purchase.landed runs it as the coins arrive). `final`: the hex's state
+-- once landed. `alive()` false stops it and lets both go; `update` hears each step, and the caller
+-- repaints after it.
+function HoneycombHex.celebrate(hex: Hex, final: Comb.StateName, nextHex: Hex?, alive: () -> boolean, update: (Step) -> ()): () -> ()
 	hex.holdUntil = math.huge
 	setWater(hex, 0)
 	set(hex.check, "Visible", false)
@@ -454,12 +434,9 @@ function HoneycombHex.celebrate(hex: Hex, final: Comb.StateName, nextHex: Hex?, 
 				up:Play()
 			end
 			update("filled")
-			if not (nextHex and bridge) then
+			if not nextHex then
 				return
 			end
-			HoneycombHex.setBridge(bridge, 0)
-			bridge.fill.Visible = true
-			TweenService:Create(bridge.fill, TweenInfo.new(CUE.bridgeSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(UDim.new(1, 0), bridge.fillHeight) }):Play()
 			task.delay(CUE.bridgeSeconds, function()
 				if not alive() then
 					stop()

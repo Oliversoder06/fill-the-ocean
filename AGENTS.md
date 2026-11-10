@@ -87,24 +87,31 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Payout.luau`: when your `Earned` goes up (your own income; teammates' and staff/building pay
   just raise the wallet), coins burst from the pour, land around you and fly into the
   wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
-- `Honeycomb.luau`: the upgrades window (`Hud.Honeycomb`, layout from `shared/Honeycomb`): a main
-  view (the tool at the centre, a ring of category hexes with a red `Badge` count and water for the
-  share owned) and one view per category (its chains of copies of `Hud.Templates.Hex`, joined by
-  `Templates.Bridge`s, in `Board.Canvas`, zoomed to fit with `Canvas.Zoom`, dragged to pan when
-  hexes would drop under 64 px). Opens through `Window`. The `UpgradesButton` (right edge)
-  squishes while Tab / gamepad Y / mouse / touch is held; Tab / Y open or close it as they go down,
-  the mouse / touch on release; its `Badge` shows while anything can be bought. Back (BackButton,
-  Backspace, gamepad B) leaves a category, then closes; Roblox's menu (Esc) closes it. Selecting a
-  hex fills `Detail` (Buy sends `Buy(id, bought)`; it ignores clicks until the last buy has landed;
-  `AssignButton` posts staff). A landing fills the hex, its bridge and wakes the next hex
-  (`Cues.honeycomb`), then a windowed chain slides along; only your own buy (your `LastBuy`) also
-  gets `Purchase.landed`. Only attributes a hex reads refresh it (closed: the badges, and a wallet
-  change only when it crosses a badge's price). `Honeycomb.show(id)` opens on an id's next link
-  (Goal); `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide).
-- `HoneycombHex.luau`: the honeycomb's hexes and bridges: copies of the templates, painting each
-  state (3D models only on `shared/Honeycomb.modelKeys` links), the landing (`celebrate`), the
-  window `slide`, enter / pop / wake scales. `HoneycombText.luau`: its words (names, effects,
-  reasons, the Buy button's word, gate texts, staff posts).
+- `Honeycomb.luau`: the upgrades honeycomb (`Hud.Honeycomb`, layout from `shared/Honeycomb`), a
+  full-screen cover: opening blurs the world (`Lighting.HoneycombBlur`) and fades in `Backdrop`; the
+  hotbar, wallet, run panel and guide strip hide. A main view (the tool at the centre, a ring of
+  category hexes with a red `Badge` count and water for the share owned) and one view per category
+  (one cluster of touching copies of `Hud.Templates.Hex` in `Board.Canvas`, zoomed to fill with
+  `Canvas.Zoom`, dragged to pan only when hexes would drop under 64 px). Opens through `Window`
+  (no frame pop). Back (BackButton, Backspace, gamepad B) leaves a category, then closes;
+  `CloseButton` and Roblox's menu (Esc) close it. The `Tooltip` card sits by the hovered hex, else
+  the selected one (`HoneycombCard`). A mouse click on the next affordable hex buys it (`Buy(id,
+  bought)`; clicks are ignored until the last buy has landed); a tap or gamepad A selects first,
+  then buys; the D-pad / stick steps between hexes (`shared/Honeycomb.step`); a short hex shakes
+  and pulses the card. A landing fills the hex and wakes the next one (`Cues.honeycomb`), then a
+  windowed chain slides along; only your own buy (your `LastBuy`) also gets `Purchase.landed`. Only
+  attributes a hex reads refresh it (closed: the badges, and a wallet change only when it crosses a
+  badge's price). `Honeycomb.show(id)` opens on an id's next link and selects it (Goal);
+  `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide: category hex, then the hex).
+- `HoneycombHex.luau`: the honeycomb's hexes: copies of the template, painting each state (a short
+  name on top, art, a price or state word at the bottom; 3D models only on
+  `shared/Honeycomb.modelKeys` links), the landing (`celebrate`), the window `slide`, enter / pop /
+  wake scales. `HoneycombText.luau`: its words (names, effects, reasons, gate texts, staff posts).
+  `HoneycombCard.luau`: the `Tooltip` card (words, placement, the staff `AssignButton`).
+  `HoneycombData.luau`: the layout, links by key and the team's state as `shared/Honeycomb` reads
+  it. `HoneycombButton.luau`: the `UpgradesButton` (right edge; squishes while Tab / gamepad Y /
+  mouse / touch is held; Tab / Y toggle as they go down, the mouse / touch on release); its
+  `Badge` shows while anything can be bought.
 - `Stands.luau`: every stand's prompt texts ("Buy Backpack Tank (1,200)", the reason when a press
   buys nothing) and its price sign (copies of `Hud.Templates.StandSign`, from `Items.standOffer`
   and `shared/Format`, at the team's price); hides the Fire Station's `CallPrompt` until the team owns a vehicle.
@@ -179,8 +186,10 @@ Shared (`src/shared/`, pure unless noted):
 - `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
   (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
 - `Honeycomb.luau` (pure, tested): the upgrades honeycomb: flat-top hex maths (`toPixel`,
-  `bounds`, `zoom`, `clampPan`, `enterDelay`), `layout(config)` (main ring, each category's chains
-  of track / item / gate links with slots and bridges), `window`, `ownedCount`, `ownedShare`,
+  `bounds`, `zoom`, `clampPan`, `enterDelay`, `step` for gamepad moves), `layout(config)` (main
+  ring; each category one cluster of touching hexes: its chains grow outward from the category hex,
+  the four longest along the diagonals, two shortest up / down, any past six from the second
+  ring), `window`, `ownedCount`, `ownedShare`,
   `states(layout, catId, view)`, `badges` (and the wallets that keep them), `find` (an id's
   category and chain), `pick` (the link to select), `bought` (Buy's `bought`), `levelText`,
   `elsewhere` (bought at a stand or plot), `modelKeys` (which hexes show a 3D model), `moves` (a
@@ -294,7 +303,9 @@ The server publishes state as attributes; the client only reads them.
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Honeycomb, Card, Waiting,
   Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
-  and `Templates.Bridge` the honeycomb's pieces).
+  the honeycomb's piece; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
+  cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton`, `CloseButton`,
+  `Wallet`, `Tooltip`; with `Lighting.HoneycombBlur` (a BlurEffect at Size 0).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.

@@ -1,6 +1,6 @@
 -- The honeycomb's words (client/Honeycomb): category and link names, what a level does, why a link
--- can't be bought here, the Buy button's word, a gate's price or fill, a staff's post. Prices go
--- through Hud.price, numbers through shared/Format and Hud.short.
+-- can't be bought here, a gate's price or fill, a staff's post. Prices go through Hud.price,
+-- numbers through shared/Format and Hud.short.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -169,13 +169,13 @@ function HoneycombText.gate(area): (string, boolean)
 	return Hud.money(Hud.price(area.gate.price)), true
 end
 
--- The detail's level line for an item's first link got elsewhere (Comb.elsewhere): where.
+-- The card's level line for an item's first link got elsewhere (Comb.elsewhere): where.
 function HoneycombText.where(link: Comb.Link): string
 	local item = Items.get(Config, link.id)
 	return if item.kind == "building" then "On a plot" else `At the {Format.standName(Config, item.stand, Areas.byId(Config, link.areaId))}`
 end
 
--- The detail's words for a link: why it can't be bought here (nil when it can).
+-- The card's hint for a link: why it can't be bought here (nil when it can).
 function HoneycombText.reason(link: Comb.Link, st: Comb.HexState, view: Comb.View): string?
 	local state = st.state
 	local area = Areas.byId(Config, link.areaId)
@@ -199,21 +199,6 @@ function HoneycombText.reason(link: Comb.Link, st: Comb.HexState, view: Comb.Vie
 	return nil
 end
 
--- The Buy button's word when it can't buy.
-function HoneycombText.word(link: Comb.Link, st: Comb.HexState, view: Comb.View): string
-	local state = st.state
-	if state == "owned" then
-		return "OWNED"
-	elseif state == "max" then
-		return "MAX"
-	elseif state == "gateOpen" then
-		return "OPEN"
-	elseif Comb.elsewhere(link, st, view) then
-		return if Items.get(Config, link.id).kind == "building" then "ON A PLOT" else "AT STAND"
-	end
-	return "LOCKED"
-end
-
 function HoneycombText.name(link: Comb.Link): string
 	if link.kind == "gate" then
 		return `{Areas.byId(Config, link.areaId).name} gate`
@@ -223,6 +208,16 @@ function HoneycombText.name(link: Comb.Link): string
 		return if track.id == "tool" then Format.toolName(name) else name -- the level line counts tools
 	end
 	return Items.get(Config, link.id).name
+end
+
+-- A hex's name on top: a gate's area, a track level's name, an item ("Water Gun", then "Water Gun 2").
+function HoneycombText.short(link: Comb.Link): string
+	if link.kind == "gate" then
+		return Areas.byId(Config, link.areaId).name
+	elseif link.kind == "item" and (link.level :: number) > 1 then
+		return `{Items.get(Config, link.id).name} {link.level}`
+	end
+	return HoneycombText.name(link)
 end
 
 -- One line: what the link's level does (a track: against the level before it).

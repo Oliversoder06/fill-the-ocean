@@ -1,22 +1,26 @@
 -- The upgrades honeycomb (StarterGui.Hud.Honeycomb, built in Studio; layout: library
 -- ui/screens/shop.md; where each hex sits and its state: shared/Honeycomb). Tab, gamepad Y or the
--- Upgrades button opens and closes it during a run (client/Window pops it in). The main view: the
--- current tool at the centre and a ring of category hexes, each with a red badge counting what can be
--- bought inside and water showing how much of it is owned; a click glides into the category: its hex,
--- a spine of bridges and every upgrade as a chain of hexes joined by bridges (client/HoneycombHex), long chains
--- windowed around the next link. Selecting a hex fills the Detail strip (words: client/HoneycombText),
--- whose Buy button sends Buy(id, bought) (`bought`: what this client saw bought, so a teammate's buy
--- of the same level wins). Everything is the team's, from its wallet at the team's price (Hud.price);
--- the server checks every buy and sets the buyer's LastBuy. Items are first bought at their stand
--- (buildings on a plot), so their first hex says where. Detail.AssignButton moves a hired staff to
--- its next post (Staff("assign", itemId, areaId), StaffRules.nextPost). Your confirmed buy (your
--- LastBuy) moves the selection to the next link at once, so a quick second Buy buys it; a click on
--- a hex still landing is ignored. A landing fills its hex,
--- then the bridge, and wakes the next hex (a windowed chain then slides along); your own buy (your
--- LastBuy) also gets coins, a sting and, for a first, a NEW! stamp (client/Purchase). Back (the
--- button, Backspace, gamepad B) glides out, then closes; Roblox's menu closes it.
+-- Upgrades button opens and closes it during a run: a full-screen cover (the world blurs through
+-- Lighting.HoneycombBlur, the Backdrop darkens, the rest of the HUD hides) with one cluster of
+-- touching hexes in the middle. The main view: the current tool at the centre and a ring of category
+-- hexes, each with a red badge counting what can be bought inside and water showing how much of it
+-- is owned; a click glides into the category: its hex and every upgrade as a chain of touching hexes
+-- (client/HoneycombHex), long chains windowed around the next link. A small card (Tooltip, words:
+-- client/HoneycombText) sits by the hovered hex, else the selected one. A mouse click on the next
+-- affordable hex buys it; on touch the first tap selects and the next buys; on a gamepad the D-pad
+-- or stick steps between hexes and A buys. A buy sends Buy(id, bought) (`bought`: what this client
+-- saw bought, so a teammate's buy of the same level wins). Everything is the team's, from its wallet
+-- at the team's price (Hud.price); the server checks every buy and sets the buyer's LastBuy. Items
+-- are first bought at their stand (buildings on a plot), so their first hex says where. A hired
+-- staff's card shows Tooltip.AssignButton, which moves it to its next post (Staff("assign", itemId,
+-- areaId), StaffRules.nextPost); clicking its hex pins the card. Your confirmed buy (your LastBuy)
+-- moves the selection to the next link at once; a click on a hex still landing is ignored. A
+-- landing fills its hex and wakes the next one (a windowed chain then slides along); your own buy
+-- also gets coins, a sting and, for a first, a NEW! stamp (client/Purchase). Back (the button,
+-- Backspace, gamepad B) glides out, then closes; Roblox's menu closes it.
 local ContextActionService = game:GetService("ContextActionService")
 local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -28,33 +32,34 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Comb = require(ReplicatedStorage.Shared.Honeycomb)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
-local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
-local Areas = require(ReplicatedStorage.Common.Areas)
-local Items = require(ReplicatedStorage.Common.Items)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
 local Hud = require(script.Parent.Hud)
+local Card = require(script.Parent.HoneycombCard)
+local Data = require(script.Parent.HoneycombData)
 local Hex = require(script.Parent.HoneycombHex)
 local Text = require(script.Parent.HoneycombText)
 local Purchase = require(script.Parent.Purchase)
+local UpgradesButton = require(script.Parent.HoneycombButton)
 local Window = require(script.Parent.Window)
 
 local player = Players.LocalPlayer
-local colors, images, motion = Theme.colors, Theme.images, Theme.motion
+local motion = Theme.motion
 local set, pressable = Hud.set, Hud.pressable
 local CUE = Cues.honeycomb
 
-local QUICK = TweenInfo.new(CUE.quickSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
--- Upgrades button: squish down while held, spring back past full size on release.
-local HOLD_DOWN = TweenInfo.new(CUE.holdDownSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local HOLD_UP = TweenInfo.new(CUE.holdUpSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local BUY_GUARD = 0.4 -- seconds Buy ignores clicks after a buy is sent or lands, so a double click buys once
 local PENDING_SECONDS = 2 -- a sent buy without its LastBuy by then was refused (or a teammate's won)
 local REFRESH_OPEN = 0.1 -- seconds between state refreshes (after an attribute change) while open
 local REFRESH_CLOSED = 0.25 -- only the badges while closed
-local SPACING = 1.14 -- hex centres sit this much further apart than touching, so the bridges show
-local FIT_MARGIN = 28 -- pixels of screen height the window leaves free, so its bottom never clips
 local PRESS_RATE = 25 -- per second: hover and press scales catch up in about 0.08 s
 local DRAG_SLOP = 8 -- pixels a press on the board may move and still click its hex
+local STICK = 0.6 -- thumbstick push that steps the selection (let go under it to step again)
+local PAD_STEPS = {
+	[Enum.KeyCode.DPadUp] = Vector2.new(0, -1),
+	[Enum.KeyCode.DPadDown] = Vector2.new(0, 1),
+	[Enum.KeyCode.DPadLeft] = Vector2.new(-1, 0),
+	[Enum.KeyCode.DPadRight] = Vector2.new(1, 0),
+}
 
 local Honeycomb = {}
 
@@ -72,108 +77,18 @@ function Honeycomb.isOpen(): boolean
 	return isOpen
 end
 
--- What the guide's hand should tap next to buy track or item `id`: the category hex, the link's
--- hex, the Buy button (or Back out of another category); nil while closed.
+-- What the guide's hand should tap next to buy track or item `id`: the category hex, then the
+-- link's hex (or Back out of another category); nil while closed.
 function Honeycomb.guideTarget(id: string): GuiObject?
 	return if guideTarget then guideTarget(id) else nil
 end
 
-local layout = Comb.layout(Config)
-
--- Every link by key, with its chain and category.
-type Info = { link: Comb.Link, chain: Comb.Chain, catId: string }
-local infos: { [string]: Info } = {}
-for _, catId in layout.order do
-	for _, chain in layout.categories[catId].chains do
-		for _, link in chain.links do
-			infos[link.key] = { link = link, chain = chain, catId = catId }
-		end
-	end
-end
-
--- Where one of the team's staff works (the server's Staff attribute: an area id, 0 for nowhere), or
--- nil until the server has published it.
-local function postOf(id: string): number?
-	for _, entry in StaffRules.decode(ReplicatedStorage:GetAttribute("Staff")) do
-		if entry.id == id then
-			return entry.post
-		end
-	end
-	return nil
-end
-
--- The posts staff `item` may work now, as the server checks them (StaffRules.targets).
-local function postsOf(item): { number }
-	local items = Hud.items()
-	return StaffRules.targets(Config, item, items.owned, Items.reachable(Config, items, Areas.openIds(Hud.gatesOpen())))
-end
-
--- The team's state as shared/Honeycomb reads it. Only what TAB sells has a price (Items.tabOffer):
--- an item's first link is bought at its stand or built on a plot.
-local function readView(): Comb.View
-	local snap = Hud.snapshot()
-	local levels = Hud.levels(0) :: { [string]: number }
-	local items = {}
-	for _, item in Config.items do
-		local bought = if item.kind == "building" then snap.buildings[item.id] elseif Items.owned(snap.items, item.id) then snap.items.itemLevels[item.id] else nil
-		items[item.id] = if bought then bought + 1 else 0
-	end
-	return {
-		levels = levels,
-		items = items,
-		openAreas = Areas.open(Hud.gatesOpen()),
-		wallet = Hud.wallet(),
-		price = function(link: Comb.Link): number?
-			local id = link.id
-			if not id then
-				return nil -- a gate
-			end
-			local level, status = Items.tabOffer(Config, levels, snap.items, snap.buildings, id, snap.openAreas, Ladder.helps(Config, levels, id))
-			return if status == "buy" then Items.price(Config, level.cost, snap.teamSize) else nil
-		end,
-		reachable = function(id: string): boolean
-			return Items.reachable(Config, snap.items, { Items.get(Config, id).area })[1] ~= nil
-		end,
-	}
-end
+local layout, infos = Data.layout, Data.infos
+local readView, readsState, nextLinkKey, firstLinkKey, firstBuy = Data.read, Data.readsState, Data.nextLinkKey, Data.firstLinkKey, Data.firstBuy
 
 -- Whether water flows past a hex in `state` into the next one.
 local function lit(state: Comb.StateName): boolean
 	return state == "owned" or state == "max" or state == "gateOpen"
-end
-
--- The next link after `key` in its chain that isn't a gate, or nil.
-local function nextLinkKey(key: string): string?
-	local info = infos[key]
-	local after = false
-	for _, link in info.chain.links do
-		if after and link.kind ~= "gate" then
-			return link.key
-		end
-		after = after or link.key == key
-	end
-	return nil
-end
-
--- The first link of a category that isn't a gate.
-local function firstLinkKey(catId: string): string
-	for _, link in layout.categories[catId].chains[1].links do
-		if link.kind ~= "gate" then
-			return link.key
-		end
-	end
-	error(`honeycomb: {catId}'s first chain has only gates`)
-end
-
--- Whether buying `link` gets something new: a track's first level or a new tool model.
-local function firstBuy(link: Comb.Link): boolean
-	if link.kind ~= "track" then
-		return false
-	elseif link.level == 1 then
-		return true
-	end
-	local levels = (Config.track(link.id :: string) :: Config.Track).levels
-	return link.id == "tool" and levels[link.level :: number].model ~= levels[(link.level :: number) - 1].model
 end
 
 local function sameWindow(a: { number }, b: { number }): boolean
@@ -188,16 +103,6 @@ local function sameWindow(a: { number }, b: { number }): boolean
 	return true
 end
 
--- Attributes a hex's state reads, besides Wallet (shared/Honeycomb.states through readView).
-local function readsState(name: string): boolean
-	return name == "TeamSize"
-		or name == "Owned"
-		or name == "GatesOpen"
-		or name:sub(1, 6) == "Level_"
-		or name:sub(1, 10) == "ItemLevel_"
-		or name:sub(1, 14) == "BuildingLevel_"
-end
-
 local function noop() end
 
 local function never(): boolean
@@ -207,9 +112,7 @@ end
 type ViewData = {
 	id: string,
 	hexes: { Hex.Hex },
-	bridges: { Hex.Bridge },
-	byKey: { [string]: Hex.Hex },
-	into: { [Hex.Hex]: Hex.Bridge }, -- the bridge leading into each chain slot
+	byKey: { [string]: Hex.Hex }, -- by link key, and the fixed hexes' "centre", "cat:<id>", "home"
 	slots: { { Hex.Hex } }, -- per chain
 	windows: { [number]: { number } }, -- per chain: the link indices its slots show (Comb.window)
 	landing: { [{ Hex.Hex }]: string }, -- chains (by their slots) whose landing plays, the landing link's key: their window holds
@@ -219,8 +122,10 @@ type ViewData = {
 	w: number,
 	h: number,
 	zoom: number,
-	pans: boolean,
+	pans: boolean, -- too big for the board at the smallest hex (phones): drag to pan
 }
+
+type Input = Card.Input
 
 -- A buy sent (by link key) until its LastBuy lands or PENDING_SECONDS pass.
 type Pending = { key: string, id: string, have: number, at: number, cost: number }
@@ -230,61 +135,41 @@ function Honeycomb.start()
 	local buyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Buy") :: RemoteEvent
 	local staffRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Staff") :: RemoteEvent
 	local root = Hud.find(gui, "Honeycomb") :: Frame
-	local fit = Hud.find(root, "Scale") :: UIScale
+	local backdrop = Hud.find(root, "Backdrop") :: Frame
 	local closeButton = Hud.find(root, "CloseButton")
+	local closeLabel = Hud.find(closeButton, "Label") :: TextLabel
 	local backButton = Hud.find(root, "BackButton")
-	local breadcrumb = Hud.find(root, "Breadcrumb")
+	local title = Hud.find(root, "Title") :: TextLabel
 	local walletAmount = Hud.find(root, "Wallet.Amount")
 	local board = Hud.find(root, "Board") :: Frame
 	local canvas = Hud.find(board, "Canvas") :: Frame
 	local zoomScale = Hud.find(canvas, "Zoom") :: UIScale
-	local detail = Hud.find(root, "Detail")
-	local detailArt = { art = nil :: Instance? }
-	local detailView = Hud.find(detail, "View")
-	local detailIcon = Hud.find(detail, "Icon")
-	local itemName = Hud.find(detail, "ItemName")
-	local levelText = Hud.find(detail, "LevelText")
-	local effect = Hud.find(detail, "Effect")
-	local needText = Hud.find(detail, "NeedText") :: TextLabel
-	local needPulse = Hud.find(needText, "Pulse") :: UIScale
-	local buyButton = Hud.find(detail, "BuyButton")
-	local buyPress = Hud.find(buyButton, "Press") :: UIScale
-	local buyLabel = Hud.find(buyButton, "Label")
-	local buyPriceRow = Hud.find(buyButton, "PriceRow")
-	local buyPrice = Hud.find(buyPriceRow, "Price")
-	local assignButton = Hud.find(detail, "AssignButton")
-	local assignLabel = Hud.find(assignButton, "Label")
+	local card = Card.new(root)
+	local blur = Lighting:FindFirstChild("HoneycombBlur") :: BlurEffect
+	assert(blur and blur:IsA("BlurEffect"), "Lighting is missing HoneycombBlur (a BlurEffect, built in Studio)")
 	local upgrades = Hud.find(gui, "UpgradesButton")
 	local upgradesBadge = Hud.find(upgrades, "Badge")
 	local upgradesCount = upgradesBadge:FindFirstChild("Count") -- optional: the total on the ball
-	local upgradesPress = Hud.find(upgrades, "Press") :: UIScale
-	local upgradesKey = Hud.find(upgrades, "Key")
-	local upgradesKeyText = Hud.find(upgradesKey, "Text")
 	local hexTemplate = Hud.find(gui, "Templates.Hex") :: ImageButton
 	Hex.parts(hexTemplate) -- fail at start, not on the first open
-	local bridgeTemplate = Hud.find(gui, "Templates.Bridge") :: Frame
-	Hud.find(bridgeTemplate, "Fill")
 
-	-- The window's own size (offset, its design size) and the board's inside it, to fit views.
-	local design = root.Size
-	assert(design.X.Scale == 0 and design.Y.Scale == 0, "Hud.Honeycomb needs an offset Size (its design size)")
-	assert(board.Parent == root, "Hud.Honeycomb.Board must sit directly in Hud.Honeycomb")
-	local boardSize = Vector2.new(
-		board.Size.X.Scale * design.X.Offset + board.Size.X.Offset,
-		board.Size.Y.Scale * design.Y.Offset + board.Size.Y.Offset
-	)
-	local hexSize = hexTemplate.Size.X.Offset / 2 -- flat-top: centre to corner
+	-- Flat-top: centre to corner, so hexes this far apart (Comb.toPixel) touch; the outline image
+	-- draws the thin dark line between them.
+	local hexSize = hexTemplate.Size.X.Offset / 2
 	local hexHeight = hexTemplate.Size.Y.Offset
 	assert(hexSize > 0 and hexHeight > 0, "Hud.Templates.Hex needs an offset Size")
-	local spaced = hexSize * SPACING
 	local canvasBase = canvas.Position
+	local shade = backdrop.BackgroundTransparency -- Studio's value: how dark the cover gets
+	backdrop.BackgroundTransparency = 1
+	blur.Size = 0
+	local cover = TweenInfo.new(CUE.coverSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local uncover = TweenInfo.new(CUE.uncoverSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
 	-- Tab would also toggle Roblox's player list; the game has its own Board, so hide that list.
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 
 	local open = false
-	local fitScale = 1
-	local window = Window.new(root, fit)
+	local window = Window.new(root, nil) -- full screen: no frame pop
 	local views: { [string]: ViewData } = {}
 	local viewId = "main"
 	local selectedKey: string? = nil
@@ -299,7 +184,9 @@ function Honeycomb.start()
 	local pending: { [string]: Pending } = {}
 	local landed: { [string]: Pending } = {} -- your buys the server confirmed (LastBuy), until their hex lands
 	local badgeLow, badgeHigh = -math.huge, math.huge -- wallets that keep the badges (Comb.badges)
-	local gamepad = false
+	local input: Input = "mouse"
+	local cardKey: string? = nil -- the link the card shows
+	local overCard = false -- the mouse is on the card
 
 	local function inRun(): boolean
 		return ReplicatedStorage:GetAttribute("Phase") == "playing"
@@ -339,14 +226,16 @@ function Honeycomb.start()
 	end
 
 	local function clampPan(v: ViewData)
-		panX, panY = Comb.clampPan(panX, panY, v.w * v.zoom, v.h * v.zoom, boardSize.X, boardSize.Y)
+		local size = board.AbsoluteSize
+		panX, panY = Comb.clampPan(panX, panY, v.w * v.zoom, v.h * v.zoom, size.X, size.Y)
 		applyPan()
 	end
 
-	-- Zoom to fit the board, never under CUE.minHexPixels a hex on screen (then the board pans).
+	-- Zoom to fill the board, never under CUE.minHexPixels a hex on screen (then the board pans).
 	local function fitView(v: ViewData)
-		v.zoom, v.pans = Comb.zoom(v.w, v.h, boardSize.X, boardSize.Y, hexHeight * fitScale, CUE.minHexPixels, CUE.maxZoom)
-		Hex.setTextScale(v.zoom * fitScale)
+		local size = board.AbsoluteSize
+		v.zoom, v.pans = Comb.zoom(v.w, v.h, size.X, size.Y, hexHeight, CUE.minHexPixels, CUE.maxZoom)
+		Hex.setTextScale(v.zoom)
 		clampPan(v)
 	end
 
@@ -358,57 +247,38 @@ function Honeycomb.start()
 		end
 	end
 
-	local function refit()
-		local size = gui.AbsoluteSize -- the Hud's area inside the top bar and safe insets
-		fitScale = math.min(size.X / design.X.Offset, (size.Y - FIT_MARGIN) / design.Y.Offset, 1)
-		if open then
-			fit.Scale = fitScale
-		end
+	board:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 		local v = views[viewId]
 		if v then
 			fitView(v)
 			zoomScale.Scale = v.zoom
 			dirty = true -- hex text may cross the smallest readable size
 		end
-	end
-	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(refit)
-	refit()
+	end)
 
-	local function newHex(v: ViewData, q: number, r: number, cx: number, cy: number): Hex.Hex
-		local x, y = Comb.toPixel(q, r, spaced)
+	local function newHex(v: ViewData, q: number, r: number, cx: number, cy: number, key: string?): Hex.Hex
+		local x, y = Comb.toPixel(q, r, hexSize)
 		local hex = Hex.new(hexTemplate, q, r, x - cx, y - cy, canvas)
+		hex.key = key
 		table.insert(v.hexes, hex)
 		return hex
-	end
-
-	local function newBridge(v: ViewData, a: Comb.Pos, b: Comb.Pos, cx: number, cy: number): Hex.Bridge
-		local ax, ay = Comb.toPixel(a.q, a.r, spaced)
-		local bx, by = Comb.toPixel(b.q, b.r, spaced)
-		local bridge = Hex.newBridge(bridgeTemplate, ax - cx, ay - cy, bx - cx, by - cy, hexTemplate.ZIndex, canvas)
-		table.insert(v.bridges, bridge)
-		return bridge
 	end
 
 	local selectKey: (string?) -> ()
 	local showView: (string, string?) -> ()
 	local setOpen: (boolean, string?) -> ()
 	local dragMoved = false -- the last press on the board dragged: its release clicks nothing
+	local actions: { [Hex.Hex]: (Input) -> () } = {} -- what a click on each hex does (gamepad A too)
 
-	-- Hover (mouse or gamepad selection) grows a hex and shows its ring; press shrinks it. Clicks
-	-- count only while open and not at the end of a drag.
-	local function hook(hex: Hex.Hex, onClick: () -> ())
+	-- Hover grows a hex; press shrinks it. Clicks count only while open and not at the end of a drag.
+	local function hook(hex: Hex.Hex, onClick: (Input) -> ())
 		local button = hex.button
+		actions[hex] = onClick
 		button.MouseEnter:Connect(function()
 			hex.hover = true
 		end)
 		button.MouseLeave:Connect(function()
 			hex.hover, hex.down = false, false
-		end)
-		button.SelectionGained:Connect(function()
-			hex.hover = true
-		end)
-		button.SelectionLost:Connect(function()
-			hex.hover = false
 		end)
 		button.MouseButton1Down:Connect(function()
 			hex.down = true
@@ -416,20 +286,19 @@ function Honeycomb.start()
 		button.MouseButton1Up:Connect(function()
 			hex.down = false
 		end)
-		button.Activated:Connect(function(input: InputObject)
-			local kind = input.UserInputType
-			local pointer = kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch
+		button.Activated:Connect(function(inputObject: InputObject)
+			local kind = inputObject.UserInputType
 			if kind == Enum.UserInputType.Touch then
 				hex.hover = false -- a finger leaves no hover behind
 			end
-			if open and not (pointer and dragMoved) then
-				onClick()
+			if open and not dragMoved then
+				onClick(if kind == Enum.UserInputType.Touch then "touch" elseif kind == Enum.UserInputType.MouseButton1 then "mouse" else "gamepad")
 			end
 		end)
 	end
 
 	local function emptyView(id: string): ViewData
-		return { id = id, hexes = {}, bridges = {}, byKey = {}, into = {}, slots = {}, windows = {}, landing = {}, ring = {}, w = 0, h = 0, zoom = 1, pans = false }
+		return { id = id, hexes = {}, byKey = {}, slots = {}, windows = {}, landing = {}, ring = {}, w = 0, h = 0, zoom = 1, pans = false }
 	end
 
 	local function buildMain(): ViewData
@@ -438,38 +307,38 @@ function Honeycomb.start()
 		for _, hex in layout.main.ring do
 			table.insert(positions, { q = hex.q, r = hex.r })
 		end
-		local cx, cy, w, h = Comb.bounds(positions, spaced)
+		local cx, cy, w, h = Comb.bounds(positions, hexSize)
 		v.w, v.h = w, h
-		local centre = newHex(v, 0, 0, cx, cy)
+		local centre = newHex(v, 0, 0, cx, cy, "centre")
 		hook(centre, function()
 			showView("tools")
 		end)
 		v.centre = centre
+		v.byKey.centre = centre
 		for _, at in layout.main.ring do
-			local hex = newHex(v, at.q, at.r, cx, cy)
+			local hex = newHex(v, at.q, at.r, cx, cy, `cat:{at.id}`)
 			hex.catId = at.id
 			hook(hex, function()
 				showView(at.id)
 			end)
 			v.ring[at.id] = hex
+			v.byKey[`cat:{at.id}`] = hex
 		end
 		return v
 	end
+
+	local clickLink: (Hex.Hex, Input) -> ()
 
 	local function buildCategory(catId: string): ViewData
 		local cat = layout.categories[catId]
 		local v = emptyView(catId)
 		local positions: { Comb.Pos } = { cat.hex }
-		table.move(cat.spine, 1, #cat.spine, 2, positions)
 		for _, chain in cat.chains do
 			table.move(chain.slots, 1, #chain.slots, #positions + 1, positions)
 		end
-		local cx, cy, w, h = Comb.bounds(positions, spaced)
+		local cx, cy, w, h = Comb.bounds(positions, hexSize)
 		v.w, v.h = w, h
-		for _, bridge in cat.bridges do
-			Hex.setBridge(newBridge(v, bridge[1], bridge[2], cx, cy), 1) -- the spine is always full
-		end
-		local catHex = newHex(v, cat.hex.q, cat.hex.r, cx, cy)
+		local catHex = newHex(v, cat.hex.q, cat.hex.r, cx, cy, "home")
 		catHex.catId = catId
 		catHex.button.ZIndex = hexTemplate.ZIndex + 1 -- its badge over the chain hexes beside it
 		hook(catHex, function()
@@ -483,13 +352,9 @@ function Honeycomb.start()
 				local hex = newHex(v, pos.q, pos.r, cx, cy)
 				hex.slots, hex.slot = slots, i
 				slots[i] = hex
-				hook(hex, function()
-					if v.landing[slots] ~= hex.key then -- the hex you just bought: the selection moved on
-						selectKey(hex.key)
-					end
+				hook(hex, function(kind: Input)
+					clickLink(hex, kind)
 				end)
-				local bridge = chain.bridges[i]
-				v.into[hex] = newBridge(v, bridge[1], bridge[2], cx, cy)
 			end
 		end
 		return v
@@ -498,9 +363,6 @@ function Honeycomb.start()
 	local function setVisible(v: ViewData, visible: boolean)
 		for _, hex in v.hexes do
 			hex.button.Visible = visible
-		end
-		for _, bridge in v.bridges do
-			bridge.frame.Visible = visible
 		end
 	end
 
@@ -515,10 +377,10 @@ function Honeycomb.start()
 		local function alive(): boolean
 			return token == animToken and hex.key == key
 		end
-		return Hex.celebrate(hex, states[key].state, nextHex, nextHex and v.into[nextHex], alive, function(step: Hex.Step)
+		return Hex.celebrate(hex, states[key].state, nextHex, alive, function(step: Hex.Step)
 			dirty = true
 			if step == "filled" and nextHex then
-				return -- the bridge and the next hex follow
+				return -- the next hex wakes after
 			end
 			if v.landing[slots] == key then -- a quick rebuy's landing in this chain may have taken over
 				v.landing[slots] = nil
@@ -532,46 +394,14 @@ function Honeycomb.start()
 		end)
 	end
 
-	local function paintDetail(view: Comb.View)
-		local info = if selectedKey then infos[selectedKey] else nil
-		local st = if info then states[info.link.key] else nil
-		set(detail, "Visible", st ~= nil)
-		if not (info and st) then
-			return
-		end
-		local link = info.link
-		local state = st.state
-		local template, image = nil, images.lock
-		if link.kind ~= "gate" then
-			template, image = Hex.artOf(link, true)
-		end
-		Hex.showArt(detailArt, detailView, detailIcon, template, image)
-		set(itemName, "Text", Text.name(link))
-		set(levelText, "Text", if link.kind == "gate" then "Gate" elseif Comb.elsewhere(link, st, view) then Text.where(link) else Comb.levelText(link, state))
-		set(effect, "Text", Text.effect(link, view))
-		local need = Text.reason(link, st, view)
-		set(needText, "Visible", need ~= nil)
-		if need then
-			set(needText, "Text", need)
-		end
-		local priced = state == "buy" or state == "short"
-		set(buyLabel, "Text", if priced then "BUY" else Text.word(link, st, view))
-		set(buyPriceRow, "Visible", priced)
-		if priced then
-			set(buyPrice, "Text", Hud.money(st.price :: number))
-			set(buyPrice, "TextColor3", if state == "short" then colors.buyCoral else colors.foam)
-		end
-		set(buyButton, "ImageColor3", if state == "buy" then colors.buyCoral else colors.locked)
-		local item = if link.kind == "item" then Items.get(Config, link.id) else nil
-		local hired = item ~= nil and item.kind == "staff" and (view.items[item.id] or 0) > 0
-		set(assignButton, "Visible", hired)
-		if hired then
-			set(assignLabel, "Text", Text.assign(item, postOf(item.id)))
-		end
+	-- The card shows link `cardKey` (none for the views' own hexes).
+	local function paintCard(view: Comb.View)
+		local info = if cardKey then infos[cardKey] else nil
+		Card.paint(card, if info then info.link else nil, if info then states[info.link.key] else nil, view, input)
 	end
 
 	-- Re-reads the team's state: badges always; while open the shown view, the landings since the
-	-- last refresh (yours from LastBuy, teammates' silent) and the detail.
+	-- last refresh (yours from LastBuy, teammates' silent) and the card.
 	local function refresh()
 		local now = os.clock()
 		expirePending(now)
@@ -591,7 +421,7 @@ function Honeycomb.start()
 		local stats = Ladder.stats(Config, view.levels)
 		local catId = if viewId == "main" then "tools" else viewId
 		states = Comb.states(layout, catId, view)
-		if not selectedKey then
+		if not selectedKey and viewId ~= "main" then
 			selectedKey = Comb.pick(layout, catId, states, pickId) or firstLinkKey(catId)
 			pickId = nil
 		end
@@ -604,14 +434,13 @@ function Honeycomb.start()
 			local centre = v.centre :: Hex.Hex
 			for key, sent in landed do
 				landed[key] = nil
-				Hex.bounce(buyPress)
 				centre.animKind, centre.animAt = "pop", now
 				local token = animToken
 				playOwn(sent, view, centre.button, noop, function()
 					return open and token == animToken
 				end)
 			end
-			paintDetail(view)
+			paintCard(view)
 			return
 		end
 
@@ -642,6 +471,7 @@ function Honeycomb.start()
 		-- Windows: a chain whose landing plays (or waits) keeps the links it shows, so the hex you
 		-- bought fills where it is; then it slides to its new window.
 		table.clear(v.byKey)
+		v.byKey.home = v.catHex
 		for ci, chain in cat.chains do
 			local slots = v.slots[ci]
 			local want = Comb.window(chain, Comb.ownedCount(chain, view))
@@ -685,7 +515,7 @@ function Honeycomb.start()
 		local retryAt = math.huge
 		for ci, chain in cat.chains do
 			local models = Comb.modelKeys(chain, states)
-			for i, hex in v.slots[ci] do
+			for _, hex in v.slots[ci] do
 				local key = hex.key :: string
 				if waiting[key] then
 					continue
@@ -698,8 +528,6 @@ function Honeycomb.start()
 					hex.fade = false
 					hex.holdUntil = now + CUE.fadeSeconds
 				end
-				local before = v.slots[ci][i - 1]
-				Hex.setBridge(v.into[hex], if not before or lit(states[before.key :: string].state) then 1 else 0)
 			end
 		end
 		for _, hex in landings do
@@ -708,7 +536,6 @@ function Honeycomb.start()
 			landed[key] = nil
 			local start = celebrate(v, hex)
 			if mine then
-				Hex.bounce(buyPress)
 				local token = animToken
 				playOwn(mine, view, hex.button, start, function()
 					return open and token == animToken and hex.key == key
@@ -723,11 +550,10 @@ function Honeycomb.start()
 			local st = states[key]
 			if not st or lit(st.state) then
 				landed[key] = nil
-				Hex.bounce(buyPress)
 				playOwn(sent, view, nil, noop, never)
 			end
 		end
-		paintDetail(view)
+		paintCard(view)
 		if retryAt < math.huge then
 			dirty, nextRefresh = true, retryAt
 		end
@@ -768,6 +594,63 @@ function Honeycomb.start()
 		refresh()
 	end
 
+	-- Assign: the card's hired staff moves to its next allowed post.
+	local function assign()
+		local info = if cardKey then infos[cardKey] else nil
+		if info then
+			Card.assign(card, info.link, readView(), staffRemote)
+		end
+	end
+
+	-- A press on a link's hex that means it: buys it if it is next and the wallet pays it (the
+	-- server checks again); a gamepad's A on a hired staff posts it; else the hex shakes and the
+	-- card's hint pulses.
+	local function activate(hex: Hex.Hex, kind: Input)
+		local now = os.clock()
+		local key = hex.key :: string
+		local info = infos[key]
+		expirePending(now)
+		if now < guardUntil or pending[key] then
+			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
+		end
+		local view = readView()
+		local st = Comb.states(layout, info.catId, view)[key]
+		if st.state == "buy" then
+			local have = Comb.bought(info.link, view)
+			buyRemote:FireServer(info.link.id, have) -- what we saw bought: a teammate's buy first wins
+			pending[key] = { key = key, id = info.link.id :: string, have = have, at = now, cost = st.price :: number }
+			guardUntil = now + BUY_GUARD
+		elseif kind == "gamepad" and Card.hiredStaff(info.link, view) then
+			assign()
+		elseif st.state ~= "owned" and st.state ~= "max" and st.state ~= "gateOpen" then
+			Purchase.deny(hex.button)
+			Card.pulse(card)
+		end
+	end
+
+	-- A mouse click acts at once; a tap or A selects first (the card shows) and acts on the selected hex.
+	clickLink = function(hex: Hex.Hex, kind: Input)
+		local key = hex.key :: string
+		if views[viewId].landing[hex.slots :: { Hex.Hex }] == key then
+			return -- the hex you just bought: the selection moved on
+		end
+		local again = selectedKey == key
+		selectKey(key)
+		if kind == "mouse" or again then
+			activate(hex, kind)
+		end
+	end
+
+	-- Gamepad: the selection steps toward unit direction (dx, dy) (Comb.step).
+	local function step(dx: number, dy: number)
+		local v = views[viewId]
+		local from = (if selectedKey then v.byKey[selectedKey] else nil) or v.centre or v.catHex :: Hex.Hex
+		local to = Comb.step(v.hexes, table.find(v.hexes, from) :: number, dx, dy)
+		if to then
+			selectKey(v.hexes[to].key)
+		end
+	end
+
 	-- Shows a view (glides in: the canvas zooms up, hexes pop in ring by ring); `pick`: the id whose
 	-- next link to select.
 	showView = function(id: string, pick: string?)
@@ -784,7 +667,8 @@ function Honeycomb.start()
 		end
 		setVisible(v, true)
 		viewId = id
-		selectedKey, pickId, lastOwned = nil, pick, nil
+		selectedKey = if input == "gamepad" and id == "main" then "centre" else nil
+		pickId, lastOwned, cardKey = pick, nil, nil
 		table.clear(v.windows)
 		table.clear(v.landing)
 		panX, panY = 0, 0
@@ -798,13 +682,9 @@ function Honeycomb.start()
 			hex.button.Position = UDim2.fromOffset(hex.x, hex.y) -- a slide cut short
 		end
 		set(backButton, "Visible", id ~= "main")
-		set(breadcrumb, "Text", if id == "main" then "UPGRADES" else `UPGRADES › {Text.category(id):upper()}`)
+		set(title, "Text", if id == "main" then "UPGRADES" else `UPGRADES › {Text.category(id):upper()}`)
 		refresh()
-		local selected = if selectedKey then v.byKey[selectedKey] else nil
-		panTo(v, selected)
-		if gamepad then
-			GuiService.SelectedObject = if selected then selected.button elseif v.centre then v.centre.button else nil
-		end
+		panTo(v, if selectedKey then v.byKey[selectedKey] else nil)
 	end
 
 	local function back()
@@ -815,12 +695,41 @@ function Honeycomb.start()
 		end
 	end
 
+	-- Gamepad while open: the D-pad and left stick step the selection, A presses the selected hex.
+	local stickHeld = false
+	local function onPad(_, inputState: Enum.UserInputState, inputObject: InputObject)
+		local code = inputObject.KeyCode
+		if code == Enum.KeyCode.Thumbstick1 then
+			local push = Vector2.new(inputObject.Position.X, -inputObject.Position.Y)
+			if push.Magnitude > STICK and not stickHeld then
+				step(push.Unit.X, push.Unit.Y)
+			end
+			stickHeld = push.Magnitude > STICK
+		elseif inputState == Enum.UserInputState.Begin then
+			local v = views[viewId]
+			local hex = if selectedKey then v.byKey[selectedKey] else nil
+			if code == Enum.KeyCode.ButtonA then
+				if hex then
+					actions[hex]("gamepad")
+				else
+					selectKey(if viewId == "main" then "centre" else "home")
+				end
+			else
+				local dir = PAD_STEPS[code]
+				step(dir.X, dir.Y)
+			end
+		end
+		return Enum.ContextActionResult.Sink
+	end
+
 	setOpen = function(value: boolean, pick: string?)
 		if value then
 			local was = open
 			open, isOpen = true, true
 			if not was then
-				window.open(fitScale)
+				window.open(1)
+				TweenService:Create(backdrop, cover, { BackgroundTransparency = shade }):Play()
+				TweenService:Create(blur, cover, { Size = CUE.blur }):Play()
 				-- Esc belongs to Roblox's menu (which closes the window, below), so Back is Backspace / B.
 				ContextActionService:BindActionAtPriority("HoneycombBack", function(_, inputState)
 					if inputState == Enum.UserInputState.Begin then
@@ -828,6 +737,7 @@ function Honeycomb.start()
 					end
 					return Enum.ContextActionResult.Sink
 				end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Backspace, Enum.KeyCode.ButtonB)
+				ContextActionService:BindActionAtPriority("HoneycombPad", onPad, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.DPadUp, Enum.KeyCode.DPadDown, Enum.KeyCode.DPadLeft, Enum.KeyCode.DPadRight, Enum.KeyCode.Thumbstick1, Enum.KeyCode.ButtonA)
 			end
 			if pick or not was then
 				showView(if pick then Comb.find(layout, pick) or "main" else "main", pick)
@@ -835,12 +745,12 @@ function Honeycomb.start()
 		elseif open then
 			open, isOpen = false, false
 			animToken += 1
+			cardKey = nil
 			ContextActionService:UnbindAction("HoneycombBack")
-			local selected = GuiService.SelectedObject
-			if selected and selected:IsDescendantOf(root) then
-				GuiService.SelectedObject = nil
-			end
-			window.close(fitScale)
+			ContextActionService:UnbindAction("HoneycombPad")
+			TweenService:Create(backdrop, uncover, { BackgroundTransparency = 1 }):Play()
+			TweenService:Create(blur, uncover, { Size = 0 }):Play()
+			window.close(1)
 		end
 	end
 	GuiService.MenuOpened:Connect(function()
@@ -864,73 +774,31 @@ function Honeycomb.start()
 			return backButton
 		end
 		local key = Comb.pick(layout, catId, states, id)
-		if key and key == selectedKey then
-			return buyButton
-		end
 		local hex = if key then v.byKey[key] else nil
 		return if hex then hex.button else nil
 	end
 
-	-- The Upgrades button (right edge) shows where the honeycomb is. Holding Tab / Y / the mouse / a
-	-- finger squishes it down; letting go springs it back up. Tab and Y open (or close) it as they go
-	-- down, so a release that never arrives (focus moving) can't swallow the press; the mouse and a
-	-- finger open it on release, like a button. Its key tag tells keyboard and gamepad players which
-	-- key does it; its Badge shows while something can be bought now.
-	local held = false
-	local hovered = false
-	local function hold()
-		held = true
-		TweenService:Create(upgradesPress, HOLD_DOWN, { Scale = CUE.holdScale }):Play()
-	end
-	local function release(toggle: boolean)
-		if not held then
-			return
-		end
-		held = false
-		TweenService:Create(upgradesPress, HOLD_UP, { Scale = if hovered then motion.hoverScale else 1 }):Play()
-		if toggle then
-			setOpen(not open and inRun())
-		end
-	end
-	ContextActionService:BindAction("ToggleUpgrades", function(_, inputState)
-		if inputState == Enum.UserInputState.Begin then
-			hold()
-			setOpen(not open and inRun())
-		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
-			release(false)
-		end
-		return Enum.ContextActionResult.Sink
-	end, false, Enum.KeyCode.Tab, Enum.KeyCode.ButtonY)
-	upgrades.MouseEnter:Connect(function()
-		hovered = true
-		if not held then
-			TweenService:Create(upgradesPress, QUICK, { Scale = motion.hoverScale }):Play()
-		end
-	end)
-	upgrades.MouseLeave:Connect(function()
-		hovered = false
-		if held then
-			release(false) -- dragged off the button: cancel, like a normal button
-		else
-			TweenService:Create(upgradesPress, QUICK, { Scale = 1 }):Play()
-		end
-	end)
-	upgrades.MouseButton1Down:Connect(hold) -- touch fires these too
-	upgrades.MouseButton1Up:Connect(function()
-		release(true)
+	UpgradesButton.start(upgrades, function()
+		setOpen(not open and inRun())
 	end)
 
 	local function onInputType(kind: Enum.UserInputType)
-		gamepad = kind.Name:sub(1, 7) == "Gamepad"
-		set(upgradesKey, "Visible", kind ~= Enum.UserInputType.Touch)
-		set(upgradesKeyText, "Text", if gamepad then "Y" else "TAB")
+		if kind.Name:sub(1, 7) == "Gamepad" then
+			input = "gamepad"
+		elseif kind == Enum.UserInputType.Touch then
+			input = "touch"
+		elseif kind == Enum.UserInputType.Keyboard or kind.Name:sub(1, 5) == "Mouse" then
+			input = "mouse"
+		end
+		set(closeLabel, "Text", if input == "touch" then "Close" elseif input == "gamepad" then "Close [Y]" else "Close [Tab]")
+		dirty = true -- the card's hint names the input
 	end
 	UserInputService.LastInputTypeChanged:Connect(onInputType)
 	onInputType(UserInputService:GetLastInputType())
 
 	-- Buttons hold a HitPad (a transparent button built in Studio) that keeps the touch target at
-	-- least 44 px when the window is scaled down on phones. The pad takes mouse and touch; the button
-	-- itself still takes gamepad selection, so both run fn.
+	-- least 44 px on phones. The pad takes mouse and touch; the button itself still takes gamepad
+	-- selection, so both run fn.
 	local function onPress(button: GuiButton, fn: () -> ())
 		local pad = Hud.find(button, "HitPad") :: GuiButton
 		pressable(pad, (button :: any).Press)
@@ -941,54 +809,12 @@ function Honeycomb.start()
 		setOpen(false)
 	end)
 	onPress(backButton, back)
-
-	-- Buy: the selected link, if it is next and the wallet pays it (the server checks again).
-	onPress(buyButton, function()
-		local now = os.clock()
-		local info = if selectedKey then infos[selectedKey] else nil
-		if not info or info.link.kind == "gate" then
-			Purchase.deny(buyButton)
-			return
-		end
-		expirePending(now)
-		local v = views[viewId]
-		local hex = if v then v.byKey[info.link.key] else nil
-		local landing = hex ~= nil and hex.slots ~= nil and v.landing[hex.slots] == info.link.key
-		if now < guardUntil or pending[info.link.key] or landing then
-			return -- the last buy hasn't landed (or just did): this click must not buy the level after it
-		end
-		local view = readView()
-		local have = Comb.bought(info.link, view)
-		local st = Comb.states(layout, info.catId, view)[info.link.key]
-		if st.state ~= "buy" then
-			Purchase.deny(buyButton)
-			if st.state == "short" then
-				needPulse.Scale = CUE.needPulse
-				TweenService:Create(needPulse, TweenInfo.new(CUE.needSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-			end
-			return
-		end
-		buyRemote:FireServer(info.link.id, have) -- what we saw bought: a teammate's buy first wins
-		pending[info.link.key] = { key = info.link.key, id = info.link.id :: string, have = have, at = now, cost = st.price :: number }
-		guardUntil = now + BUY_GUARD
+	card.assign.Activated:Connect(assign)
+	card.frame.MouseEnter:Connect(function()
+		overCard = true
 	end)
-
-	-- Assign: the selected staff moves to its next allowed post.
-	pressable(assignButton, Hud.find(assignButton, "Press"))
-	assignButton.Activated:Connect(function()
-		local info = if selectedKey then infos[selectedKey] else nil
-		local item = if info and info.link.kind == "item" then Items.get(Config, info.link.id) else nil
-		if not (item and item.kind == "staff" and Items.owned(Hud.items(), item.id)) then
-			return
-		end
-		local now = postOf(item.id)
-		local post = StaffRules.nextPost(postsOf(item), now)
-		if post and post ~= now then
-			Hex.bounce(Hud.find(assignButton, "Press"))
-			staffRemote:FireServer("assign", item.id, post)
-		else
-			Purchase.deny(assignButton)
-		end
+	card.frame.MouseLeave:Connect(function()
+		overCard = false
 	end)
 
 	-- Drag to pan a view bigger than the board (phones), from anywhere on it, hexes included; a
@@ -999,28 +825,27 @@ function Honeycomb.start()
 		local at, size = board.AbsolutePosition, board.AbsoluteSize
 		return position.X >= at.X and position.Y >= at.Y and position.X <= at.X + size.X and position.Y <= at.Y + size.Y
 	end
-	UserInputService.InputBegan:Connect(function(input)
-		local kind = input.UserInputType
-		if open and (kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch) and onBoard(input.Position) then
-			drag, dragFrom, panFrom, dragMoved = input, input.Position, Vector2.new(panX, panY), false
+	UserInputService.InputBegan:Connect(function(inputObject)
+		local kind = inputObject.UserInputType
+		if open and (kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch) and onBoard(inputObject.Position) then
+			drag, dragFrom, panFrom, dragMoved = inputObject, inputObject.Position, Vector2.new(panX, panY), false
 		end
 	end)
-	UserInputService.InputChanged:Connect(function(input)
-		if not drag or not (input.UserInputType == Enum.UserInputType.MouseMovement or input == drag) then
+	UserInputService.InputChanged:Connect(function(inputObject)
+		if not drag or not (inputObject.UserInputType == Enum.UserInputType.MouseMovement or inputObject == drag) then
 			return
 		end
-		local delta = input.Position - dragFrom
+		local delta = inputObject.Position - dragFrom
 		dragMoved = dragMoved or delta.Magnitude > DRAG_SLOP
 		local v = views[viewId]
 		if not (dragMoved and v and v.pans) then
 			return
 		end
-		local perPixel = boardSize.X / math.max(board.AbsoluteSize.X, 1)
-		panX, panY = panFrom.X + delta.X * perPixel, panFrom.Y + delta.Y * perPixel
+		panX, panY = panFrom.X + delta.X, panFrom.Y + delta.Y
 		clampPan(v)
 	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if input == drag or input.UserInputType == Enum.UserInputType.MouseButton1 then
+	UserInputService.InputEnded:Connect(function(inputObject)
+		if inputObject == drag or inputObject.UserInputType == Enum.UserInputType.MouseButton1 then
 			drag = nil
 		end
 	end)
@@ -1048,14 +873,34 @@ function Honeycomb.start()
 			shownWallet = wallet
 			walletAmount.Text = Hud.money(wallet)
 		end
-		-- Hex scales: hover / press / breathing (all "buy" hexes in step) times any animation.
+		-- Hex scales: hover / press / gamepad selection / breathing (all "buy" hexes in step) times
+		-- any animation.
 		local breathe = 1 + (CUE.breatheScale - 1) * (0.5 - 0.5 * math.cos(now * 2 * math.pi / CUE.breatheSeconds))
 		local rate = math.min(1, dt * PRESS_RATE)
+		local hoverHex: Hex.Hex? = nil
 		for _, hex in v.hexes do
-			local target = if hex.down then motion.pressScale elseif hex.hover then motion.hoverScale elseif hex.breathe then breathe else 1
+			local selected = hex.key ~= nil and hex.key == selectedKey
+			local target = if hex.down then motion.pressScale elseif hex.hover or (selected and input == "gamepad") then motion.hoverScale elseif hex.breathe then breathe else 1
 			hex.ease += (target - hex.ease) * rate
 			set(hex.press, "Scale", math.round(hex.base * hex.ease * Hex.animScale(hex, now) * 1000) / 1000)
-			set(hex.select, "Visible", hex.hover or (hex.key ~= nil and hex.key == selectedKey))
+			set(hex.select, "Visible", hex.hover or selected)
+			if hex.hover then
+				hoverHex = hex
+			end
+		end
+		-- The card follows the hovered link (mouse), else the selected one; it stays while the mouse
+		-- is on its Assign button.
+		local key = if hoverHex and input == "mouse" and hoverHex.key and infos[hoverHex.key] then hoverHex.key else selectedKey
+		if overCard and card.assign.Visible then
+			key = cardKey
+		end
+		if key ~= cardKey then
+			cardKey = key
+			paintCard(readView())
+		end
+		local shown = if cardKey then v.byKey[cardKey] else nil
+		if shown and card.frame.Visible then
+			Card.place(card, root, shown.button, hexHeight * zoomScale.Scale / 2)
 		end
 	end)
 end

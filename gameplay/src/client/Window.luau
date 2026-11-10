@@ -3,7 +3,8 @@
 -- one UIScale child, layer by layer (timing in shared/Reveal). Decorations (Reveal 4 and up) also
 -- swing into place and land together with the last item. Closing is one quick shrink.
 -- Don't put Reveal on a child of a UIListLayout/UIGridLayout: its scale moves its siblings; mark
--- what is inside it instead. The window's root UIScale (`fit`) also fits it to the screen.
+-- what is inside it instead. The window's root UIScale (`fit`) also fits it to the screen; a
+-- full-screen cover passes none and has no frame pop (its Reveal parts still pop).
 -- Opening and closing play a whoosh (Cues.window).
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
@@ -38,7 +39,7 @@ local function playWhoosh(volume: number, pitch: number)
 	task.delay(SOUND_SECONDS, sound.Destroy, sound)
 end
 
-function Window.new(root: GuiObject, fit: UIScale): Window
+function Window.new(root: GuiObject, fit: UIScale?): Window
 	local parts: { UIScale } = {}
 	local orders: { number } = {}
 	local spins: { [number]: { gui: GuiObject, rest: number, turn: number } } = {}
@@ -92,8 +93,10 @@ function Window.new(root: GuiObject, fit: UIScale): Window
 		stop()
 		root.Visible = true
 		playWhoosh(Cues.window.openVolume, Cues.window.openPitch)
-		fit.Scale = fitScale * Reveal.FRAME_FROM
-		play(TweenService:Create(fit, frameIn, { Scale = fitScale }))
+		if fit then
+			fit.Scale = fitScale * Reveal.FRAME_FROM
+			play(TweenService:Create(fit, frameIn, { Scale = fitScale }))
+		end
 		for i, scale in parts do
 			scale.Scale = 0
 			local info = TweenInfo.new(durations[i], Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delays[i])
@@ -117,7 +120,9 @@ function Window.new(root: GuiObject, fit: UIScale): Window
 		for _, spin in spins do
 			spin.gui.Rotation = spin.rest
 		end
-		play(TweenService:Create(fit, frameOut, { Scale = fitScale * Reveal.CLOSE_FROM }))
+		if fit then
+			play(TweenService:Create(fit, frameOut, { Scale = fitScale * Reveal.CLOSE_FROM }))
+		end
 		task.delay(Reveal.CLOSE_SECONDS, function()
 			if token == mine then
 				root.Visible = false

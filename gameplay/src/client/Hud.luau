@@ -321,8 +321,9 @@ function Hud.start()
 		set(waiting, "Text", if type(waitText) ~= "string" or waitText == "" then "Get ready..." elseif waitText:match("^%d+/%d+$") then `Waiting for your friends... {waitText}` else waitText)
 
 		-- Run panel: stopwatch (time played on this save), the map's name, how full the ocean is
+		-- (hidden under the honeycomb's full-screen cover)
 		local startedAt = ReplicatedStorage:GetAttribute("RunStartedAt")
-		set(progress, "Visible", type(startedAt) == "number")
+		set(progress, "Visible", type(startedAt) == "number" and not honeycomb.Visible)
 		if type(startedAt) == "number" then
 			-- The server stops counting at the ending, so the clock freezes on the last time played.
 			if phase == "playing" or not finalTime then

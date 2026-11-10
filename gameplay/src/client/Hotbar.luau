@@ -47,6 +47,7 @@ function Hotbar.start()
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local equipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Equip") :: RemoteEvent
 	local bar = Hud.find(gui, "Hotbar")
+	local honeycomb = Hud.find(gui, "Honeycomb") -- its full-screen cover hides the bar
 	local fillBar = Hud.find(bar, "FillBar")
 	local fill = Hud.find(fillBar, "Fill")
 	local fillLabel = Hud.find(fillBar, "Label")
@@ -153,7 +154,7 @@ function Hotbar.start()
 	local shown, from, to, changedAt = 0, 0, 0, -math.huge
 	RunService.RenderStepped:Connect(function()
 		local modelName = player:GetAttribute("ToolModel")
-		set(bar, "Visible", type(modelName) == "string")
+		set(bar, "Visible", type(modelName) == "string" and not honeycomb.Visible)
 		if type(modelName) ~= "string" then
 			return
 		end
