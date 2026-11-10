@@ -404,4 +404,107 @@ function tests.every_category_fits_11_columns_by_7_rows(t)
 	end
 end
 
+function tests.bounds_cover_every_hex(t)
+	local cx, cy, w, h = Honeycomb.bounds({ { q = 0, r = 0 } }, 10)
+	t.expectEq(cx, 0)
+	t.expectEq(cy, 0)
+	t.expectEq(w, 20)
+	t.expectNear(h, 10 * math.sqrt(3), 1e-9)
+	cx, cy, w, h = Honeycomb.bounds({ { q = 0, r = 0 }, { q = 2, r = 0 } }, 10)
+	t.expectNear(cx, 15, 1e-9)
+	t.expectNear(cy, 10 * math.sqrt(3) / 2, 1e-9)
+	t.expectNear(w, 50, 1e-9)
+	t.expectNear(h, 20 * math.sqrt(3), 1e-9)
+end
+
+function tests.zoom_fits_the_board_and_pans_below_the_smallest_hex(t)
+	local zoom, pans = Honeycomb.zoom(200, 100, 400, 400, 96, 64, 1.5)
+	t.expectEq(zoom, 1.5, "a small view grows, up to the cap")
+	t.expectEq(pans, false)
+	zoom, pans = Honeycomb.zoom(500, 400, 400, 400, 96, 64, 1.5)
+	t.expectNear(zoom, 0.8, 1e-9, "shrinks to fit")
+	t.expectEq(pans, false)
+	zoom, pans = Honeycomb.zoom(800, 400, 400, 400, 96, 64, 1.5)
+	t.expectNear(zoom, 64 / 96, 1e-9, "never below the smallest hex")
+	t.expectEq(pans, true)
+end
+
+function tests.clamp_pan_keeps_the_content_over_the_board(t)
+	local x, y = Honeycomb.clampPan(100, -100, 300, 300, 400, 400)
+	t.expectEq(x, 0, "content smaller than the board: no pan")
+	t.expectEq(y, 0)
+	x, y = Honeycomb.clampPan(150, -100, 600, 500, 400, 400)
+	t.expectEq(x, 100)
+	t.expectEq(y, -50)
+	x, y = Honeycomb.clampPan(-20, 20, 600, 500, 400, 400)
+	t.expectEq(x, -20)
+	t.expectEq(y, 20)
+end
+
+function tests.find_names_the_category_and_chain_of_an_id(t)
+	local layout = Honeycomb.layout(Config)
+	local catId, c = Honeycomb.find(layout, "tool")
+	t.expectEq(catId, "tools")
+	t.expectEq((c :: any).id, "tool")
+	catId, c = Honeycomb.find(layout, "quick")
+	t.expectEq(catId, "boosts")
+	t.expectEq((c :: any).id, "quick")
+	catId, c = Honeycomb.find(layout, "bigTank")
+	t.expectEq(catId, "gear")
+	t.expectEq((c :: any).id, "backpacks", "a backpack's links sit in the backpacks chain")
+	t.expectEq((Honeycomb.find(layout, "pump")), "buildings")
+	t.expectEq((Honeycomb.find(layout, "nope")), nil)
+end
+
+function tests.pick_selects_an_ids_next_link_else_the_first_buy_else_short(t)
+	local layout = Honeycomb.layout(Config)
+	local s = Honeycomb.states(layout, "boosts", view({ wallet = 100 }))
+	t.expectEq(Honeycomb.pick(layout, "boosts", s), "track:hold:1", "Pickup (192) is short, Hold (40) buys")
+	t.expectEq(Honeycomb.pick(layout, "boosts", s, "tip"), "track:tip:1")
+	s = Honeycomb.states(layout, "boosts", view({ wallet = 0 }))
+	t.expectEq(Honeycomb.pick(layout, "boosts", s), "track:pickup:1", "nothing buys: the first short")
+	local maxed = { pickup = 4, hold = 1, quick = 7, walk = 7, tip = 4 }
+	s = Honeycomb.states(layout, "boosts", view({ levels = maxed, openAreas = allOpen() }))
+	t.expectEq(Honeycomb.pick(layout, "boosts", s, "pickup"), "track:pickup:4", "a maxed id: its max end")
+	t.expectEq(Honeycomb.pick(layout, "boosts", s), nil, "nothing to buy or save for")
+end
+
+function tests.owned_share_counts_links_not_gates(t)
+	local layout = Honeycomb.layout(Config)
+	local owned, total = Honeycomb.ownedShare(layout, "boosts", view({ levels = { pickup = 2, quick = 1 } }))
+	t.expectEq(owned, 3)
+	t.expectEq(total, 4 + 1 + 7 + 7 + 4)
+end
+
+function tests.bought_is_what_the_buy_remote_compares(t)
+	local layout = Honeycomb.layout(Config)
+	local tool = chain(layout, "tools", "tool").links[1]
+	t.expectEq(Honeycomb.bought(tool, view({ levels = { tool = 3 } })), 3)
+	t.expectEq(Honeycomb.bought(tool, view({})), 0)
+	local gun = chain(layout, "gear", "waterGun").links[2]
+	t.expectEq(Honeycomb.bought(gun, view({})), -1, "not owned")
+	t.expectEq(Honeycomb.bought(gun, view({ items = { waterGun = 1 } })), 0, "just bought")
+	t.expectEq(Honeycomb.bought(gun, view({ items = { waterGun = 3 } })), 2)
+end
+
+function tests.level_text_reads_the_step_a_link_buys(t)
+	local layout = Honeycomb.layout(Config)
+	local tool = chain(layout, "tools", "tool")
+	t.expectEq(Honeycomb.levelText(tool.links[1], "buy"), "Buy")
+	t.expectEq(Honeycomb.levelText(tool.links[3], "short"), "Lv 2 → Lv 3")
+	t.expectEq(Honeycomb.levelText(tool.links[3], "owned"), "Lv 3")
+	t.expectEq(Honeycomb.levelText(tool.links[21], "max"), "MAX")
+	t.expectEq(Honeycomb.levelText(tool.links[5], "gateClosed"), "")
+	local gun = chain(layout, "gear", "waterGun")
+	t.expectEq(Honeycomb.levelText(gun.links[1], "locked"), "Buy")
+	t.expectEq(Honeycomb.levelText(gun.links[2], "future"), "Lv 1 → Lv 2")
+end
+
+function tests.enter_delay_grows_with_distance_and_caps(t)
+	t.expectEq(Honeycomb.enterDelay(0, 0, 0.03, 0.1), 0)
+	t.expectNear(Honeycomb.enterDelay(1, 0, 0.03, 0.1), 0.03, 1e-9)
+	t.expectNear(Honeycomb.enterDelay(2, -1, 0.03, 0.1), 0.06, 1e-9)
+	t.expectEq(Honeycomb.enterDelay(7, 0, 0.03, 0.1), 0.1)
+end
+
 return tests

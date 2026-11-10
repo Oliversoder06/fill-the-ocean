@@ -1,5 +1,5 @@
 --!strict
--- Staff maths (Config.items kind "staff", Config.staff; server/Staff, client/Staff, client/Shop):
+-- Staff maths (Config.items kind "staff", Config.staff; server/Staff, client/Staff, client/Honeycomb):
 -- where each job may work, its output, pay, the work bonus and the Staff attribute. Pure: config is
 -- passed in, so Lune tests and Roblox load it the same way.
 

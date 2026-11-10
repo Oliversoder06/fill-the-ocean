@@ -109,6 +109,51 @@ Cues.purchase = {
 	sparkle = "Sparkle",
 }
 
+-- The honeycomb upgrades (client/Honeycomb), seconds and scales. A buy landing: the Buy button
+-- bounces (bounceLow -> bounceHigh -> 1), coins fly in, the hex's water rises (waterSeconds), the hex
+-- pops (popFrom -> 1) as its check stamps (checkOvershoot), the bridge to the next hex fills, and
+-- the next hex wakes (wakeFrom -> wakeOvershoot -> 1). The sting climbs stingPitchStep a level in a
+-- chain, up to stingPitchMax. Opening a view: the canvas glides from glideZoomFrom and hexes pop in
+-- from enterFrom, enterStagger later per ring out (at most enterCap). A hex you can buy breathes up
+-- to breatheScale and back every breatheSeconds; a gate hex sits at gateScale. Hexes are never
+-- shown under minHexPixels tall (the board pans instead), and a view grows to at most maxZoom.
+Cues.honeycomb = {
+	bounceLow = 0.95,
+	bounceHigh = 1.05,
+	bounceSeconds = 0.2,
+	waterSeconds = 0.35,
+	popFrom = 1.15,
+	popSeconds = 0.2,
+	checkOvershoot = 1.2,
+	checkSeconds = 0.25,
+	bridgeSeconds = 0.25,
+	wakeFrom = 0.8,
+	wakeOvershoot = 1.05,
+	wakeSeconds = 0.3,
+	stingPitchStep = 0.06,
+	stingPitchMax = 1.5,
+	needPulse = 1.15,
+	needSeconds = 0.3,
+	badgeSeconds = 0.2,
+	glideSeconds = 0.25,
+	glideZoomFrom = 0.9,
+	enterFrom = 0.6,
+	enterSeconds = 0.2,
+	enterStagger = 0.03,
+	enterCap = 0.1,
+	breatheScale = 1.04,
+	breatheSeconds = 1.5,
+	gateScale = 0.85,
+	minHexPixels = 64,
+	maxZoom = 1.5,
+}
+
+-- The purchase sting's pitch for the `level`-th link bought in a chain: one step higher each, capped.
+function Cues.stingPitch(level: number): number
+	local cue = Cues.honeycomb
+	return math.min(cue.stingPitchMax, 1 + cue.stingPitchStep * (math.max(level, 1) - 1))
+end
+
 -- Footsteps (client/Footsteps). Surfaces come from shared/Steps. Each surface's variants must come
 -- from one matched set (same recording), or the steps sound like two different people. Carrying
 -- water makes steps heavier: lower and a little louder. Dry floors puff dust (ReplicatedStorage.Vfx)

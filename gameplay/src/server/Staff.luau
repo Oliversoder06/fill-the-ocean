@@ -15,7 +15,7 @@
 -- walk faster (state.nearLifeguard; server/Run applies it with the other walk factors).
 -- Plumbers: the best assigned one sets server/Buildings.setPlumber for the team.
 -- Published: ReplicatedStorage attribute Staff ("helper:2@2,firefighter:1@0", StaffRules.encode:
--- id:hires@post, post 0 = nowhere to work yet), read by client/Staff and client/Shop.
+-- id:hires@post, post 0 = nowhere to work yet), read by client/Staff and client/Honeycomb.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -159,7 +159,7 @@ local function checkLifeguards()
 	end
 end
 
--- Staff("assign", itemId, areaId) from client/Shop's Assign button: one of the team's staff works
+-- Staff("assign", itemId, areaId) from client/Honeycomb's Assign button: one of the team's staff works
 -- at `areaId` from now on, if its job may work there (StaffRules.targets). Any member may move them.
 local function onStaff(player: Player, action: unknown, id: unknown, areaId: unknown)
 	local state = hooks.states[player]

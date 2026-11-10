@@ -64,10 +64,37 @@ function ToolModels.get(name: string, sub: string?): Model
 end
 
 
--- Client UI: puts a copy of the tool model in a ViewportFrame, framed to fit (hotbar, shop).
-function ToolModels.showIn(view: ViewportFrame, template: Model)
+-- Where each item kind's model template lives (Config.Item `model`): a folder of ReplicatedStorage,
+-- then a subfolder.
+local ITEM_FOLDERS = {
+	backpack = { "ToolModels", "Backpacks" },
+	gadget = { "ToolModels", "Gadgets" },
+	vehicle = { "Vehicles" },
+	building = { "Buildings" },
+	staff = { "Staff" },
+}
+
+-- Non-yielding: item `item`'s template (a Model, a backpack's Accessory), nil until it has replicated.
+function ToolModels.itemModel(item): (Model | Accessory)?
+	local node: Instance? = ReplicatedStorage
+	for _, name in ITEM_FOLDERS[item.kind] do
+		node = node and node:FindFirstChild(name)
+	end
+	local model = node and node:FindFirstChild(item.model)
+	return if model and (model:IsA("Model") or model:IsA("Accessory")) then model else nil
+end
+
+-- Client UI: puts a copy of a model (a tool, an item, a backpack's Accessory) in a ViewportFrame,
+-- framed to fit (hotbar, honeycomb).
+function ToolModels.showIn(view: ViewportFrame, template: Model | Accessory)
 	view:ClearAllChildren()
-	local model = template:Clone()
+	local model: Model
+	if template:IsA("Model") then
+		model = template:Clone()
+	else
+		model = Instance.new("Model")
+		template:Clone().Parent = model
+	end
 	model:PivotTo(CFrame.new())
 	model.Parent = view
 	ToolModels.setWater(model, false)

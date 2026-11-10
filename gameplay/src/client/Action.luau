@@ -88,7 +88,7 @@ function Action.start()
 	local vehicleRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Vehicle") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 	local hint = Hud.find(gui, "ActHint")
-	local shop = Hud.find(gui, "Shop")
+	local honeycomb = Hud.find(gui, "Honeycomb")
 
 	local aimParams = RaycastParams.new()
 	aimParams.FilterType = Enum.RaycastFilterType.Include
@@ -296,7 +296,7 @@ function Action.start()
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local camera = workspace.CurrentCamera
 		local ocean = Hud.ocean()
-		local windowOpen = shop.Visible
+		local windowOpen = honeycomb.Visible
 		local gadget = player:GetAttribute("Gadget")
 		local gun = gadget == "waterGun"
 		local ready = ReplicatedStorage:GetAttribute("Phase") == "playing"

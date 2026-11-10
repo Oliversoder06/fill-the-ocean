@@ -1,7 +1,7 @@
 -- The next-goal line under the fill bar (StarterGui.Hud.Progress.Goal, a TextButton built in Studio):
 -- once the first-minute guide (client/Guide, Hud.Guide) is gone, the one most useful thing to do
 -- next (shared/NextGoal), from what is on sale in TAB, at the stands (client/Stands) and on the
--- plots, and the next gate. Clicking it or pressing G opens the shop on that upgrade, or points the
+-- plots, and the next gate. Clicking it or pressing G opens the honeycomb on that upgrade, or points the
 -- way to its stand, gate or plot with the guide's ground chevrons (Guide.pointTo).
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
@@ -15,8 +15,8 @@ local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
 local Guide = require(script.Parent.Guide)
+local Honeycomb = require(script.Parent.Honeycomb)
 local Hud = require(script.Parent.Hud)
-local Shop = require(script.Parent.Shop)
 local Stands = require(script.Parent.Stands)
 
 local REFRESH_SECONDS = 0.25
@@ -52,7 +52,7 @@ local function offers(money: number): { NextGoal.Offer }
 	for _, track in Config.tracks do
 		local level, status, affordable = Hud.offer(levels, track.id, money, snap)
 		if status == "buy" then
-			local name = Shop.levelName(track, levels[track.id] + 1, level)
+			local name = Format.levelName(track, levels[track.id] + 1, level)
 			table.insert(list, { name = name, cost = Hud.price(level.cost), place = "in UPGRADES", affordable = affordable, target = `tab:{track.id}` })
 		end
 	end
@@ -128,7 +128,7 @@ function Goal.start()
 		end
 		local id = target:match("^tab:(.+)$")
 		if id then
-			Shop.show(id)
+			Honeycomb.show(id)
 			return
 		end
 		local at = spotOf(target)

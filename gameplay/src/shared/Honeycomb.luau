@@ -70,6 +70,40 @@ function Honeycomb.toPixel(q: number, r: number, size: number): (number, number)
 	return size * 1.5 * q, size * SQRT3 * (r + q / 2)
 end
 
+-- The box around `hexes` (flat-top, `size` from centre to corner): its centre and size in pixels.
+function Honeycomb.bounds(hexes: { Pos }, size: number): (number, number, number, number)
+	local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+	local halfH = size * SQRT3 / 2
+	for _, pos in hexes do
+		local x, y = Honeycomb.toPixel(pos.q, pos.r, size)
+		minX, maxX = math.min(minX, x - size), math.max(maxX, x + size)
+		minY, maxY = math.min(minY, y - halfH), math.max(maxY, y + halfH)
+	end
+	return (minX + maxX) / 2, (minY + maxY) / 2, maxX - minX, maxY - minY
+end
+
+-- The zoom that fits content (w x h) on a board, at most `maxZoom`, but never so small that a hex
+-- (`hexPixels` tall on screen at zoom 1) drops under `minPixels`; then the board pans (true).
+function Honeycomb.zoom(contentW: number, contentH: number, boardW: number, boardH: number, hexPixels: number, minPixels: number, maxZoom: number): (number, boolean)
+	local fit = math.min(boardW / contentW, boardH / contentH, maxZoom)
+	local least = minPixels / hexPixels
+	if fit >= least then
+		return fit, false
+	end
+	return least, true
+end
+
+-- A pan offset kept so zoomed content (w x h) still covers the board where it is bigger than it.
+function Honeycomb.clampPan(x: number, y: number, contentW: number, contentH: number, boardW: number, boardH: number): (number, number)
+	local maxX, maxY = math.max(0, (contentW - boardW) / 2), math.max(0, (contentH - boardH) / 2)
+	return math.clamp(x, -maxX, maxX), math.clamp(y, -maxY, maxY)
+end
+
+-- When a hex at (q, r) starts popping in as a view opens: rings further out a little later.
+function Honeycomb.enterDelay(q: number, r: number, stagger: number, cap: number): number
+	return math.min(Honeycomb.distance(0, 0, q, r) * stagger, cap)
+end
+
 -- Clockwise from straight up.
 function Honeycomb.neighbours(q: number, r: number): { Pos }
 	local list = {}
@@ -293,6 +327,83 @@ function Honeycomb.states(layout: Layout, catId: string, view: View): { [string]
 		chainStates(chain, view, out)
 	end
 	return out
+end
+
+-- The category and chain holding track or item `id` (a backpack: the backpacks chain), or nil.
+function Honeycomb.find(layout: Layout, id: string): (string?, Chain?)
+	for _, catId in layout.order do
+		for _, chain in layout.categories[catId].chains do
+			for _, link in chain.links do
+				if link.id == id then
+					return catId, chain
+				end
+			end
+		end
+	end
+	return nil, nil
+end
+
+-- The link key to select in category `catId` (`states`: Honeycomb.states): with `id`, its next link
+-- (else its first); without, the first "buy" in chain order, else the first "short", else nil.
+function Honeycomb.pick(layout: Layout, catId: string, states: { [string]: HexState }, id: string?): string?
+	local first, short = nil, nil
+	for _, chain in layout.categories[catId].chains do
+		for _, link in chain.links do
+			local state = states[link.key].state
+			if id then
+				if link.id == id then
+					first = first or link.key
+					if state ~= "owned" then
+						return link.key
+					end
+				end
+			elseif state == "buy" then
+				return link.key
+			elseif state == "short" then
+				short = short or link.key
+			end
+		end
+	end
+	return if id then first else short
+end
+
+-- Links owned in category `catId` and all its links (gates not counted), for its progress.
+function Honeycomb.ownedShare(layout: Layout, catId: string, view: View): (number, number)
+	local owned, total = 0, 0
+	for _, chain in layout.categories[catId].chains do
+		owned += Honeycomb.ownedCount(chain, view)
+		for _, link in chain.links do
+			if link.kind ~= "gate" then
+				total += 1
+			end
+		end
+	end
+	return owned, total
+end
+
+-- What Buy(id, bought) sends as `bought` for a link's id: track levels bought, or an item's
+-- upgrades (-1 while the team doesn't own it).
+function Honeycomb.bought(link: Link, view: View): number
+	if link.kind == "track" then
+		return view.levels[link.id :: string] or 0
+	end
+	return (view.items[link.id :: string] or 0) - 1
+end
+
+-- The detail's level line for a link in `state`: "Buy" for a first level, "Lv 2 → Lv 3", the
+-- level owned, "MAX"; nothing for a gate.
+function Honeycomb.levelText(link: Link, state: StateName): string
+	local level = link.level
+	if link.kind == "gate" or not level then
+		return ""
+	elseif state == "max" then
+		return "MAX"
+	elseif state == "owned" then
+		return `Lv {level}`
+	elseif level == 1 then
+		return "Buy"
+	end
+	return `Lv {level - 1} → Lv {level}`
 end
 
 -- The red balls: "buy" hexes per category id, and `total`.

@@ -5,7 +5,7 @@
 -- over on a pour (poses from shared/ToolView, timing from client/Action) and springs back up after.
 -- The hand wobbles with each step (walk cycle from client/CameraFeel) and trails a little behind
 -- camera turns. Nothing shows while driving (client/Vehicles: the camera is third person then).
--- A newly bought tool waits below the screen while the shop is open, then swings up into the hand.
+-- A newly bought tool waits below the screen while the honeycomb is open, then swings up into the hand.
 -- Runs after CameraFeel, so it follows the camera's bob and tilt.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -135,11 +135,11 @@ local function placeArm(arm: Arm, grip: CFrame, restGrip: CFrame, shoulder: Vect
 	arm.lower.CFrame = CFrame.fromMatrix(wrist + along * (ARM_LENGTH / 2 - 0.05), right.Unit, along)
 end
 
-local function shopOpen(): boolean
+local function honeycombOpen(): boolean
 	local playerGui = player:FindFirstChildOfClass("PlayerGui")
 	local hud = playerGui and playerGui:FindFirstChild("Hud")
-	local shop = hud and hud:FindFirstChild("Shop")
-	return shop ~= nil and shop:IsA("GuiObject") and shop.Visible
+	local honeycomb = hud and hud:FindFirstChild("Honeycomb")
+	return honeycomb ~= nil and honeycomb:IsA("GuiObject") and honeycomb.Visible
 end
 
 -- What is in hand: its model name, its ToolModels subfolder ("Gadgets" or nil) and its tier (a
@@ -227,7 +227,7 @@ function Viewmodel.start()
 		local changed = modelName ~= currentName or sub ~= currentSub or tier ~= currentTier
 		if not sub then
 			if toolTier > 0 and tier > toolTier then
-				revealPending = true -- a bought tool: swing it in once the shop is closed
+				revealPending = true -- a bought tool: swing it in once the honeycomb is closed
 			end
 			toolTier = tier
 		end
@@ -254,7 +254,7 @@ function Viewmodel.start()
 			arm.model.Parent = camera
 		end
 		local now = os.clock()
-		if revealPending and not shopOpen() then
+		if revealPending and not honeycombOpen() then
 			revealPending, revealAt = false, now
 			for _, fn in revealListeners do
 				fn(model)

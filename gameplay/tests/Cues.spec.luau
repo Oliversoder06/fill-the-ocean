@@ -102,6 +102,27 @@ function tests.purchase_cue_is_sane(t)
 	end
 end
 
+function tests.honeycomb_cue_is_sane(t)
+	local cue = Cues.honeycomb
+	t.expectEq(Cues.stingPitch(1), 1)
+	t.expectNear(Cues.stingPitch(2), 1 + cue.stingPitchStep, 1e-9)
+	t.expectEq(Cues.stingPitch(100), cue.stingPitchMax, "the climb caps")
+	t.expectEq(Cues.stingPitch(0), 1)
+	if not (cue.breatheScale > 1 and cue.breatheScale <= 1.05) then
+		error(`breatheScale {cue.breatheScale} must be a gentle swell above 1`)
+	end
+	if cue.enterSeconds + cue.enterCap > 0.3 + 1e-9 then
+		error("hexes must finish entering within 0.3 s")
+	end
+	for _, field in { "glideSeconds", "waterSeconds", "popSeconds", "checkSeconds", "bridgeSeconds", "wakeSeconds", "bounceSeconds", "breatheSeconds" } do
+		local v = cue[field]
+		if not (type(v) == "number" and v > 0 and v <= 1.5) then
+			error(`honeycomb {field} = {tostring(v)} is not in (0, 1.5]`)
+		end
+	end
+	t.expectEq(cue.minHexPixels, 64, "phones: hexes at least 64 px (library shop.md)")
+end
+
 function tests.every_surface_has_step_sounds(t)
 	for _, surface in { "stone", "grass", "sand", "wood" } do
 		local list = Cues.steps.surfaces[surface]

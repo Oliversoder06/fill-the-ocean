@@ -294,10 +294,10 @@ function Hud.start()
 		end)
 	end)
 
-	-- Windows (shop, admin, build picker) free the cursor. First person locks it to the centre every frame, so
+	-- Windows (honeycomb, admin, build picker) free the cursor. First person locks it to the centre every frame, so
 	-- this runs right after the camera and overrides that while a window is showing. In play the
 	-- mouse icon is hidden and the place's cursor image (StarterGui.Cursor) marks where you aim.
-	local windows = { find(gui, "Shop"), find(gui, "Admin"), find(gui, "BuildPicker") }
+	local windows = { find(gui, "Honeycomb"), find(gui, "Admin"), find(gui, "BuildPicker") }
 	local crosshair = find(player:WaitForChild("PlayerGui"):WaitForChild("Cursor"), "Cursor")
 	RunService:BindToRenderStep("HudCursor", Enum.RenderPriority.Camera.Value + 3, function()
 		local windowOpen = false

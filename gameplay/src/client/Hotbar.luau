@@ -141,9 +141,7 @@ function Hotbar.start()
 		if kind == "tank" then
 			local id = player:GetAttribute("Vehicle")
 			local item = if type(id) == "string" then Items.get(Config, id) else nil
-			local folder = ReplicatedStorage:FindFirstChild("Vehicles")
-			local model = item and folder and folder:FindFirstChild(item.model)
-			return if model and model:IsA("Model") then model else nil
+			return if item then ToolModels.itemModel(item) :: Model? else nil
 		end
 		return if gadget then ToolModels.find(gadget.model, "Gadgets") else ToolModels.find(toolModel)
 	end

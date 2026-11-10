@@ -1,7 +1,7 @@
 -- The first-minute guide (StarterGui.Hud.Guide, built in Studio): one goal at a time for a new save,
 -- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
 -- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
--- state (where you stand, Carried, the team's Wallet, the shop), so walking away goes back a step and nothing is
+-- state (where you stand, Carried, the team's Wallet, the honeycomb), so walking away goes back a step and nothing is
 -- saved. The goal says what to do, never where to click: yellow chevrons on the ground (clones of
 -- ReplicatedStorage.Vfx.GuideChevron, placed by shared/GuideTrail) lead to the place, a click hand
 -- (a clone of Hud.Templates.ClickHand) taps the button to press, and Action's ActHint says which
@@ -14,6 +14,7 @@ local TweenService = game:GetService("TweenService")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local GuideTrail = require(ReplicatedStorage.Shared.GuideTrail)
+local Honeycomb = require(script.Parent.Honeycomb)
 local Hud = require(script.Parent.Hud)
 
 local player = Players.LocalPlayer
@@ -91,14 +92,12 @@ function Guide.start()
 	local objective = Hud.find(panel, "Objective")
 	local text = Hud.find(panel, "Text")
 	local skip = Hud.find(panel, "SkipButton")
-	local shop = Hud.find(gui, "Shop")
 	local admin = Hud.find(gui, "Admin")
 	local toolSlot = Hud.find(gui, "Hotbar.Slot")
 	local upgrades = Hud.find(gui, "UpgradesButton")
 	local upgradesRing = Hud.find(upgrades, "GuideRing")
-	local closeButton = Hud.find(shop, "CloseButton")
-	local toolsTab = Hud.find(shop, "Body.Tabs.Tools")
-	local buyButton = Hud.find(shop, "Body.Content.Detail.BuyButton")
+	local closeButton = Hud.find(gui, "Honeycomb.CloseButton")
+	local buyButton = Hud.find(gui, "Honeycomb.Detail.BuyButton")
 	local buyRing = Hud.find(buyButton, "GuideRing")
 	local handTemplate = Hud.find(gui, "Templates.ClickHand")
 	assert(handTemplate:IsA("GuiObject"), "StarterGui.Hud.Templates.ClickHand must be an ImageLabel or TextLabel")
@@ -109,12 +108,6 @@ function Guide.start()
 	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
 	local chevronTemplate = vfx:WaitForChild(CUE.chevron, 10)
 	assert(chevronTemplate and (chevronTemplate:IsA("Model") or chevronTemplate:IsA("BasePart")), `ReplicatedStorage.Vfx is missing {CUE.chevron} (a Model or BasePart)`)
-	local tiles = {}
-	for _, track in Config.tracks do
-		local holder = if track.panel == "tool" then "ToolPanel" else "BoostPanel"
-		local button = Hud.find(gui, `Shop.Body.Content.{holder}.Tiles.{track.id}.Button`)
-		tiles[track.id] = { button = button, ring = Hud.find(button, "Ring") }
-	end
 
 	-- The trail's pool: each chevron sits in the camera while it shows, unparented while it doesn't.
 	local chevrons: { PVInstance } = {}
@@ -164,17 +157,6 @@ function Guide.start()
 		return node == gui
 	end
 
-	-- Whether the shop's selected tile (the one whose Ring shows) is on sale and affordable now.
-	local function canBuySelected(levels: { [string]: number }, money: number): boolean
-		for id, tile in tiles do
-			if tile.ring.Visible then
-				local _, _, canBuy = Hud.offer(levels, id, money)
-				return canBuy
-			end
-		end
-		return false
-	end
-
 	-- The step (1-6), its goal, where the chevrons lead and the button the hand taps, from live state.
 	local function current(levels: { [string]: number }, ocean: Model): (number, string, Vector3?, GuiObject?)
 		local well, shore = target(ocean, "Source"), target(ocean, "PourPoint")
@@ -182,16 +164,14 @@ function Guide.start()
 		local money = Hud.wallet()
 		local track, cost, affordable = cheapest(levels, money)
 		if track and affordable then
-			if not shop.Visible then
+			if not Honeycomb.isOpen() then
 				return 5, "Buy your first upgrade", nil, upgrades
 			end
-			if canBuySelected(levels, money) then
-				return 6, "Buy it!", nil, buyButton
-			end
-			local tile = tiles[track.id].button
-			return 6, `Buy {track.name}`, nil, if onScreen(tile) then tile else toolsTab
+			-- the category hex, then the upgrade's hex, then Buy
+			local click = Honeycomb.guideTarget(track.id)
+			return 6, if click == buyButton then "Buy it!" else `Buy {track.name}`, nil, click
 		end
-		if shop.Visible then
+		if Honeycomb.isOpen() then
 			return 4, `Pour more water: {Hud.money(money)} / {Hud.money(cost)} coins`, nil, closeButton
 		end
 		if player:GetAttribute("Equipped") == false then

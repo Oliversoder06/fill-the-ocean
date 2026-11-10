@@ -1,10 +1,11 @@
--- The purchase moment. When a level is bought (the team's Level_<track> attribute goes up, whoever
--- bought it): a cash
--- register sting, coins fly from your money into the tile, and a "BOUGHT!" stamp slams onto it.
--- A buy you can't make shakes the Buy button with a dull thud (Shop calls Purchase.deny). A new
--- tool swings into your hand when the shop closes (client/Viewmodel) with sparkles and a chime;
--- speed upgrades whoosh and kick the field of view when the shop closes. Sounds and effects are
--- named in shared/Cues; the UI templates live in StarterGui.Hud.Templates.
+-- The purchase moment's sounds and coins, played by client/Honeycomb when your own buy lands
+-- (Purchase.landed): a cash register sting (higher for each level up a chain), coins fly from the
+-- honeycomb's money into the hex, and a first buy also chimes and slams a "NEW!" stamp (a copy of
+-- the BOUGHT stamp) onto it. A buy you can't make shakes the Buy button with a dull thud
+-- (Purchase.deny). A new tool swings into your hand when the honeycomb closes (client/Viewmodel)
+-- with sparkles and a chime; speed upgrades (whoever bought them) whoosh and kick the field of view
+-- when it closes. Sounds and effects are named in shared/Cues; the UI templates live in
+-- StarterGui.Hud.Templates.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -12,7 +13,6 @@ local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
 local CoinBurst = require(ReplicatedStorage.Shared.CoinBurst)
-local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local Hud = require(script.Parent.Hud)
@@ -40,6 +40,7 @@ local denyButton: GuiObject? = nil
 local denyRest = 0
 local denyAt = -math.huge
 local playDeny: (() -> ())? = nil
+local playLanded: ((GuiObject?, number, number, boolean, () -> ()) -> ())? = nil
 
 -- Shakes the Buy button: you can't buy this (not enough money, locked or maxed).
 function Purchase.deny(button: GuiObject)
@@ -53,6 +54,13 @@ function Purchase.deny(button: GuiObject)
 	if playDeny then
 		playDeny()
 	end
+end
+
+-- Your buy landed: the sting at `pitch` (Cues.stingPitch), coins worth `cost` fly into `target`
+-- (nil: none; the window closed) and `arrive` runs as the first lands (at once without coins). A
+-- `first` buy (an upgrade's first level, a new tool) also chimes and stamps "NEW!" on the target.
+function Purchase.landed(target: GuiObject?, cost: number, pitch: number, first: boolean, arrive: () -> ())
+	assert(playLanded, "Purchase.landed before Purchase.start")(target, cost, pitch, first, arrive)
 end
 
 local function asset(folder: Instance, name: string, class: string): any
@@ -81,17 +89,11 @@ function Purchase.start()
 	end
 
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
-	local shop = Hud.find(gui, "Shop") :: GuiObject
-	local content = Hud.find(shop, "Body.Content")
-	local moneyCoin = Hud.find(content, "Detail.MoneyRow.Coin") :: GuiObject
+	local honeycomb = Hud.find(gui, "Honeycomb") :: GuiObject
+	local moneyCoin = Hud.find(honeycomb, "Wallet.Coin") :: GuiObject
 	local flyCoin = Hud.find(gui, "Templates.FlyCoin") :: GuiObject
 	local stampTemplate = Hud.find(gui, "Templates.BoughtStamp") :: TextLabel
 	Hud.find(stampTemplate, "Pop")
-	local buttons: { [string]: GuiObject } = {}
-	for _, track in Config.tracks do
-		local panel = if track.panel == "tool" then "ToolPanel" else "BoostPanel"
-		buttons[track.id] = Hud.find(content, `{panel}.Tiles.{track.id}.Button`)
-	end
 
 	local function play(name: string, volume: number, speed: number)
 		local sound = sounds[name]:Clone()
@@ -113,6 +115,7 @@ function Purchase.start()
 	local function stamp(button: GuiObject)
 		local label = stampTemplate:Clone()
 		local pop = (label :: any).Pop :: UIScale
+		label.Text = "NEW!"
 		label.Visible = true
 		pop.Scale = STAMP_FROM
 		label.Parent = button
@@ -126,10 +129,15 @@ function Purchase.start()
 		task.delay(STAMP_HOLD + STAMP_FADE, label.Destroy, label)
 	end
 
-	-- Coins leave your money and land in the tile; the stamp slams when the last one lands.
-	local function payInto(button: GuiObject, cost: number)
+	-- Coins leave the honeycomb's money and land in the hex: `arrive` runs as the first lands, and a
+	-- first buy's stamp slams when the last one does.
+	local function payInto(button: GuiObject, cost: number, first: boolean, arrive: () -> ())
 		local from, to = centre(moneyCoin), centre(button)
 		local n = math.min(MAX_FLY_COINS, CoinBurst.count(cost))
+		if n == 0 then
+			arrive()
+			return
+		end
 		local rng = Random.new()
 		for i = 1, n do
 			local coin = flyCoin:Clone()
@@ -142,7 +150,10 @@ function Purchase.start()
 			tween.Completed:Once(function()
 				coin:Destroy()
 				play(Cues.coins.tickSound, Cues.coins.tickVolume, CoinBurst.tickPitch(i))
-				if i == n then
+				if i == 1 then
+					arrive()
+				end
+				if i == n and first and button.Parent then
 					stamp(button)
 				end
 			end)
@@ -168,26 +179,26 @@ function Purchase.start()
 		out:Play()
 	end
 
-	local function bought(id: string, level: number)
-		local track = Config.track(id)
-		local cost = track and track.levels[level] and Hud.price(track.levels[level].cost) or 0
-		play(cue.sting, cue.stingVolume, 1)
-		Music.duck(Cues.music.duckSeconds)
-		if shop.Visible then
-			payInto(buttons[id], cost)
+	playLanded = function(target: GuiObject?, cost: number, pitch: number, first: boolean, arrive: () -> ())
+		play(cue.sting, cue.stingVolume, pitch)
+		if first then
+			play(cue.unlock, cue.unlockVolume, 1)
 		end
-		if SPEED_TRACKS[id] then
-			speedPending = true
+		Music.duck(Cues.music.duckSeconds)
+		if target then
+			payInto(target, cost, first, arrive)
+		else
+			arrive()
 		end
 	end
 
-	for _, track in Config.tracks do
-		local attribute = `Level_{track.id}`
+	for id in SPEED_TRACKS do
+		local attribute = `Level_{id}`
 		local last = ReplicatedStorage:GetAttribute(attribute) or 0
 		ReplicatedStorage:GetAttributeChangedSignal(attribute):Connect(function()
 			local level = ReplicatedStorage:GetAttribute(attribute) or 0
 			if level > last then
-				bought(track.id, level)
+				speedPending = true
 			end
 			last = level
 		end)
@@ -211,7 +222,7 @@ function Purchase.start()
 			local t = (os.clock() - denyAt) / SHAKE_SECONDS
 			Hud.set(denyButton, "Rotation", denyRest + Ease.shake(t, SHAKE_CYCLES, SHAKE_DEGREES))
 		end
-		if speedPending and not shop.Visible then
+		if speedPending and not honeycomb.Visible then
 			speedPending = false
 			speedUp()
 		end

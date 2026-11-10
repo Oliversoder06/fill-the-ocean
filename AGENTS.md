@@ -87,24 +87,30 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Payout.luau`: when your `Earned` goes up (your own income; teammates' and staff/building pay
   just raise the wallet), coins burst from the pour, land around you and fly into the
   wallet with rising ticks, plus a "+amount" pop (`Vfx.Coin`, `Vfx.MoneyPop`, `Cues.coins`).
-- `Shop.luau`: the shop window: one tile per upgrade track in the Tool and Boosts panels, and a
-  detail panel with the Buy button. Opens through `Window`. The `UpgradesButton` (right edge)
-  squishes while Tab / gamepad Y / mouse / touch is held; Tab / Y open or close the shop as they go
-  down, the mouse / touch on release. Tiles show what you own and every price (dim while locked),
-  the detail what is next and why it can't be bought here; `Badge`s on the tabs and the Upgrades
-  button mark something affordable, and the shop opens on that tab (else Tools). Buy ignores
-  clicks until the last buy has landed (no double buys). `Shop.show(id)` opens on a tile.
+- `Honeycomb.luau`: the upgrades window (`Hud.Honeycomb`, layout from `shared/Honeycomb`): a main
+  view (the tool at the centre, a ring of category hexes with a red `Badge` count and water for the
+  share owned) and one view per category (its chains of copies of `Hud.Templates.Hex`, joined by
+  `Templates.Bridge`s, in `Board.Canvas`, zoomed to fit with `Canvas.Zoom`, dragged to pan when
+  hexes would drop under 64 px). Opens through `Window`. The `UpgradesButton` (right edge)
+  squishes while Tab / gamepad Y / mouse / touch is held; Tab / Y open or close it as they go down,
+  the mouse / touch on release; its `Badge` shows while anything can be bought. Back (BackButton,
+  Esc, gamepad B) leaves a category, then closes. Selecting a hex fills `Detail` (Buy sends
+  `Buy(id, bought)`; it ignores clicks until the last buy has landed; `AssignButton` posts staff).
+  A landing fills the hex, its bridge and wakes the next hex (`Cues.honeycomb`); your own buy
+  also gets `Purchase.landed`. `Honeycomb.show(id)` opens on an id's next link (Goal);
+  `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide).
 - `Stands.luau`: every stand's prompt texts ("Buy Backpack Tank (1,200)", the reason when a press
   buys nothing) and its price sign (copies of `Hud.Templates.StandSign`, from `Items.standOffer`
   and `shared/Format`, at the team's price); hides the Fire Station's `CallPrompt` until the team owns a vehicle.
 - `Goal.luau`: the next-goal line `Hud.Progress.Goal` once the guide is gone (`shared/NextGoal`);
-  a click or G opens the shop on it or points the way (`Guide.pointTo`, from ux/b1).
+  a click or G opens the honeycomb on it or points the way (`Guide.pointTo`, from ux/b1).
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
   ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote) and
   `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`).
-- `Purchase.luau`: the purchase moment: sting, coins fly from your money into the tile, a "BOUGHT!"
-  stamp (`StarterGui.Hud.Templates`), Buy-button shake when you can't buy, new-tool swing-up
-  sparkles and speed-upgrade whoosh/FOV kick when the shop closes (`Cues.purchase`).
+- `Purchase.luau`: the purchase moment's sounds and coins, `Purchase.landed` (from `Honeycomb`):
+  a sting climbing per level up a chain, coins fly from the honeycomb's money into the hex, a chime
+  and "NEW!" stamp (`Templates.BoughtStamp`) on a first; `Purchase.deny` shakes a button; new-tool
+  swing-up sparkles and speed-upgrade whoosh/FOV kick when the honeycomb closes (`Cues.purchase`).
 - `Footsteps.luau`: your steps on each dip of the camera bob (`CameraFeel.onStep`), others' every
   `Steps.STRIDE` studs; sound by floor (`shared/Steps`), heavier while carrying; dust puffs on dry
   floors (`Footsteps.dust`, `Vfx.StepDust`); mutes Roblox's default "Running" sound (`Cues.steps`).
@@ -166,9 +172,11 @@ Shared (`src/shared/`, pure unless noted):
   texts take an optional `priceOf` (the team's price, `Hud.price` / the server's `price`).
 - `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
   (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
-- `Honeycomb.luau` (pure, tested): the shop honeycomb: flat-top hex maths, `layout(config)` (main
-  ring, each category's chains of track / item / gate links with slots and bridges), `window`,
-  `ownedCount`, `states(layout, catId, view)`, `badges`.
+- `Honeycomb.luau` (pure, tested): the upgrades honeycomb: flat-top hex maths (`toPixel`,
+  `bounds`, `zoom`, `clampPan`, `enterDelay`), `layout(config)` (main ring, each category's chains
+  of track / item / gate links with slots and bridges), `window`, `ownedCount`, `ownedShare`,
+  `states(layout, catId, view)`, `badges`, `find` (an id's category and chain), `pick` (the link to
+  select), `bought` (Buy's `bought`), `levelText`.
 - `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
   `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
@@ -272,8 +280,9 @@ The server publishes state as attributes; the client only reads them.
   server errors "missing remote" until then).
 
 ## UI
-- All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Shop, Card, Waiting, Progress,
-  Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui).
+- All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Honeycomb, Card, Waiting,
+  Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
+  and `Templates.Bridge` the honeycomb's pieces).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.
@@ -307,7 +316,9 @@ The server publishes state as attributes; the client only reads them.
 - The game is locked first person: `MouseBehavior` is forced to `LockCenter` every frame. To free
   the cursor, override it after the camera runs (see `HudCursor` in `Hud.luau`). Setting
   `GuiButton.Modal` left `MouseBehavior` at `LockCenter` in testing, so don't rely on it.
-- Tab opens the shop, so Roblox's player list is disabled in `Shop.luau`.
+- Tab opens the honeycomb, so Roblox's player list is disabled in `Honeycomb.luau`.
+- `Templates.Hex` has a child called `Name`: `hex.Name` is the property, so find it with
+  `Hud.find(hex, "Name")`.
 - Never trust the client: `Equip`, `Buy` and `Act` are all re-checked on the server.
 
 ## Hard rules (never break these)
