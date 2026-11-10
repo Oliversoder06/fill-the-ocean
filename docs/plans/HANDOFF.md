@@ -14,6 +14,9 @@ Read this first in every new session. Then read CLAUDE.md, AGENTS.md and
   pads removed (owner: no teleporting at all), pour basins + channel waves to the ocean, prices and
   real reasons at every stand, a Next goal line (G), clearer shop. **Next: Phase 4** (write its
   step-by-step tasks into the plan first), then 5-9.
+- Team economy + honeycomb (2026-11-10): one team wallet, everything bought is the team's, prices x
+  (1 + 0.6 per extra player), save version 2 (old saves migrate); the TAB shop is now the honeycomb
+  (`client/Honeycomb*.luau`, pure `shared/Honeycomb.luau`, layout in the library's `shop.md`).
 - Restarting `rojo serve` drops Studio's Rojo connection; only the owner can click Connect again.
 - Phase 2 leftovers (do with 3b or later): per-area ambience/music, guide hint toward the next gate, a
   gate-burst VFX.
@@ -52,6 +55,8 @@ Read this first in every new session. Then read CLAUDE.md, AGENTS.md and
 
 ## Checks (each with `timeout 110`; never wait more than 2 minutes on one)
 - gameplay/: `selene src`, `rojo build -o gameplay.rbxlx` (delete output), `lune run tests/run` ("0 failed").
+- gameplay/: syntax check (selene and Lune miss Luau's "ambiguous syntax" errors, which stop a script
+  from compiling): `& "$env:USERPROFILE\.vscode\extensions\johnnymorganz.luau-lsp-1.70.1-win32-x64\bin\server.exe" analyze --platform=standard src 2>&1 | Select-String "SyntaxError|Ambiguous"` prints nothing.
 - lobby/: `selene src`, `rojo build -o lobby.rbxlx`.
 - common/: copy `gameplay/selene.toml` in, `selene .`, delete the copy.
 
@@ -201,4 +206,8 @@ animation runtime's LICENSE needs the owner's written OK for use in this game. U
 screen, New Game, Delete and profile reset are not play tested (lobby Rojo needed a reconnect); the
 place has no water texture, so channel/aqueduct trickles don't scroll; the tutorial doesn't replay
 after an admin reset; the Water Gun sits low-right in first person; the simulator fills the ocean in
-16 minutes (Phase 4).
+16 minutes (Phase 4). Honeycomb: two-player buying and the coin flight on a buy are not play tested;
+hex names/badge counts were fixed after the last play test without a visual re-check; no open-lock
+image (open gates reuse the lock tinted blue); boost hexes have no icons; prices shown at phones'
+smallest scale are about 8 px; `Ladder.offer` repeats `Items.tabOffer`'s track rule; publish only
+after every old server is shut down (an old server would drop the team section of a v2 save).
