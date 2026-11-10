@@ -161,6 +161,13 @@ Client (`src/client/`, all started from `init.client.luau`):
   your truck with water: Action sprays it) and `gauge` (Hotbar shows the tank); names the next vehicle
   in the Fire Station's `CallPrompt` while it shows (local `ActionText`, `Items.nextOwned`).
 - `Mechanics.luau`: steam vent puffs and bursts (vent attributes), the golden spring's glow.
+- `Milestones.luau`: every 5% (`Milestone` attribute, `shared/Milestones`): a 2 s camera swoop up
+  and out over `Ocean.Basin` and back (Scriptable, restored exactly; skipped while driving or with
+  the honeycomb open), `Music.duck` and a fanfare (the toast is the server's card); a sighting puts a
+  copy of `ReplicatedStorage.Story.BaconHair` far out at sea for ~6 s (placeholder rise, sway, sink).
+  Keeps `workspace.Map.Revive.M<n>` hidden (parts, decals, lights and emitters, their place looks
+  remembered; stream-safe) until `Revived` names them; one revived live pops in with a sparkle.
+  Numbers in `Cues.milestone`.
 - `Buildings.luau`: the build picker (`Hud.BuildPicker`, options cloned from
   `Hud.Templates.BuildOption`) opened by a plot's prompt; scrolls flowing aqueducts' water.
 - `Staff.luau`: staff bodies: from the ReplicatedStorage `Staff` attribute (the team's), clones of
@@ -178,10 +185,11 @@ Shared (`src/shared/`, pure unless noted):
   curve `firstPercent`, `growth` and per-area `stretches`, and `teamStep`, how much bigger a team's
   ocean is; `shared/Water`) and the upgrade tracks (`Config.tracks`: tool, pickup, hold,
   quick, walk, tip), each level with its price and the `area` that opens it; `Config.team.priceStep`
-  (every price x (1 + step x (players - 1))). Balance changes go here; check them with
-  `lune run tools/simulate [quiet] [team size]` (timeline) and `lune run tools/simulate targets`
-  (the Phase 4 targets, also run by `tests/Simulator.spec`; the model is `tools/Simulator.luau`).
-  Formulas and reasons: `C:\RobloxDev\library\balance\README.md`.
+  (every price x (1 + step x (players - 1))); `Config.milestones` (20, one every 5%: a `boost` and
+  one extra each, `revive` / `sighting` / `raindrops` / `cosmetic`; 100% is the `ending`). Balance
+  changes go here; check them with `lune run tools/simulate [quiet] [team size]` (timeline) and
+  `lune run tools/simulate targets` (the Phase 4 targets, also run by `tests/Simulator.spec`; the
+  model is `tools/Simulator.luau`). Formulas and reasons: `C:\RobloxDev\library\balance\README.md`.
 - `Ladder.luau`: `stats(config, levels)` (what the team's levels add up to, including `sweeps`),
   `openAreas(config, fill)` (areas open at a fill fraction), `offer(config, levels, trackId,
   openAreas)` (next level and `"buy"` / `"locked"` / `"max"`), `helps` (pickup only while the tool
@@ -202,8 +210,13 @@ Shared (`src/shared/`, pure unless noted):
   wallets that keep them), `find` (an id's view and upgrade), `pick` (the hex to select), `bought`
   (Buy's `bought`), `levelText`, `elsewhere` (bought at a stand or plot), the `LastBuy` attribute's
   `encodeBuy` / `decodeBuy`.
-- `Boosts.luau`: fill-milestone boosts (`Config.boosts`): `crossed(milestones, before, after)` and
-  `apply(config, stats, id)` (stats with the boost on; the server keeps bought stats separate).
+- `Boosts.luau`: milestone boosts (`Config.boosts`): `apply(config, stats, id)` (stats with the
+  boost on; the server keeps bought stats separate); `crossed` only reads `Config.boosts.milestones`
+  (where each kind first plays), the run asks `Milestones`.
+- `Milestones.luau` (pure, tested): the one milestone system (`Config.milestones`): `crossed(config,
+  before, after)` (every one passed, in order), `reach` (adds the new ones to a run's reached list and
+  returns them: once per run), `reachedBy` (an old save's, never granted), `reward`, `revived` (the
+  `Revived` list), `card` (the team's toast), the `Milestone` attribute's `encode` / `decode`.
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
 - `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
@@ -233,7 +246,8 @@ runtime (pure core + `Roblox/` AnimPlayer etc.; `vendor/LICENSE`, `vendor/PROVEN
 Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
 - `RunSave.luau` (pure): a team's saved run (its `team`: `wallet`, track `levels`, `owned` items,
   `itemLevels`, staff `assign` (staff id -> area id); its `buildings` levels and `plots`; per player
-  only `litres`), its key, the exact-team check (`sameTeam`), `blank` / `isBlank` (what erasing a run
+  only `litres`; `milestones` reached (indices, nil in a save from before them: the server marks
+  those below its fill without granting)), its key, the exact-team check (`sameTeam`), `blank` / `isBlank` (what erasing a run
   leaves), and `sanitize`, which turns a save from before the team economy (money, levels and items
   per player) into one team: money added up, the best levels, every item, the first member's posts.
 - `Items.luau` (pure): things bought once at an area's stand (`Config.items`) and levelled in TAB,
@@ -253,7 +267,8 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `erase` (the lobby's New Game / Delete / profile reset) writes a blank save only while holding the lock.
 - `Maps.luau` (pure): the maps, their difficulty numbers and what unlocks them.
 - `Progress.luau` (pure) / `PlayerData.luau`: a player's Raindrops, saved-run keys and cleared maps
-  (`forgetRun`: an erased run leaves the list and its payment; `reset`: an admin's profile reset).
+  (`forgetRun`: an erased run leaves the list and its payments; `reset`: an admin's profile reset;
+  `payMilestones`: a run's milestone Raindrops, each milestone once per run, `paidMilestones`).
 - `RunTicket.luau`: the lobby's ticket for a reserved server (`mapId`, run key, members).
 - `SessionRules.luau` (pure): lobby pad rules (create, join, load only with the same team, and
   `newTeam` / `savedFor`: the save a new party would start over, one per map per team).
@@ -265,7 +280,9 @@ The server publishes state as attributes; the client only reads them.
 - `ReplicatedStorage` attributes: `Phase` (`loading`, `intro`, `playing`, `ending`, `done`),
   `MapId`, `MapName`, `Current`, `Target`, `Fill`, `Waiting`, `RunStartedAt` (server time) and
   `PlaySeconds` (time played on this save before this session), for the stopwatch, `Boost`
-  (running boost id or `""`) and `BoostEndsAt` (server time), `RocksBroken` (`"1,3"`), `Golden`
+  (running boost id or `""`) and `BoostEndsAt` (server time), `Milestone` (`"<index>@<serverTime>"`,
+  the last milestone granted, `shared/Milestones`) and `Revived` (`"1,2,5"`: the `Revive.M<n>`
+  decorations the run's milestones brought back), `RocksBroken` (`"1,3"`), `Golden`
   (area id of the golden spring, 0 for none) and `GoldenEndsAt`, `LastPour`
   (`"<areaId>@<litres>@<serverTime>"`, set on every accepted `Act` pour; `shared/PourFlow`); vent parts carry `VentState`
   (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the

@@ -1,6 +1,7 @@
 --!strict
--- Fill-milestone boosts (Config.boosts): which milestone a pour crossed, and what a boost does to a
--- player's stats. Pure: config is passed in.
+-- Milestone boosts (Config.boosts): what a boost does to a player's stats. Which milestones a fill
+-- change passes is shared/Milestones; `crossed` here only reads Config.boosts.milestones (where each
+-- boost first plays). Pure: config is passed in.
 
 local Boosts = {}
 

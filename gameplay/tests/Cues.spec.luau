@@ -102,6 +102,21 @@ function tests.purchase_cue_is_sane(t)
 	end
 end
 
+function tests.milestone_cue_is_sane(t)
+	local cue = Cues.milestone
+	t.expectEq(cue.swoopSeconds, 2, "the swoop takes 2 s (D9)")
+	t.expectEq(type(cue.sound), "string")
+	if not (cue.soundVolume > 0 and cue.soundVolume <= 1) then
+		error(`milestone soundVolume {cue.soundVolume} is not in (0, 1]`)
+	end
+	if not (cue.reviveFrom > 0 and cue.reviveFrom < 1) then
+		error("a revive pops up from a smaller size (ScaleTo can't take 0)")
+	end
+	if not (cue.sightingRise + cue.sightingSink < cue.sightingSeconds) then
+		error("the bacon-hair must stand on the horizon between rising and sinking")
+	end
+end
+
 function tests.honeycomb_cue_is_sane(t)
 	local cue = Cues.honeycomb
 	t.expectEq(Cues.stingPitch(1), 1)

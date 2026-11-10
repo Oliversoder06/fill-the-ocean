@@ -89,4 +89,12 @@ function PlayerData.clearMap(userId: number, mapId: string, raindrops: number, r
 	end)
 end
 
+-- Run runKey reached milestones worth Raindrops (index -> Raindrops): pays those it hasn't paid this
+-- player for yet (Progress.payMilestones).
+function PlayerData.payMilestones(userId: number, runKey: string, raindrops: { [number]: number }): (Progress.Data?, string?)
+	return update(userId, "pay milestones", function(old)
+		return Progress.payMilestones(old, runKey, raindrops)
+	end)
+end
+
 return PlayerData

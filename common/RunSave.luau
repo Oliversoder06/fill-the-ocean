@@ -33,6 +33,9 @@ export type Save = {
 	buildings: { [string]: number }, -- the team's buildings (D2): upgrades bought per building id
 	plots: { [string]: string }, -- the building id on each built plot, by plot number ("1", "2", ...)
 	rocksBroken: { number }, -- area ids (1-5) whose rock is broken, opening its deeper pool
+	-- Milestones reached (indices into gameplay's Config.milestones), each once; nil for a save from
+	-- before milestones (4c): the gameplay server marks those below its fill as reached on load.
+	milestones: { number }?,
 	finished: boolean,
 	updatedAt: number,
 }
@@ -201,6 +204,7 @@ function RunSave.new(mapId: string, members: { number }): Save
 		buildings = {},
 		plots = {},
 		rocksBroken = {},
+		milestones = {},
 		finished = false,
 		updatedAt = 0,
 	}
@@ -316,6 +320,8 @@ function RunSave.sanitize(raw: any): (Save?, string?)
 		end
 	end
 	save.rocksBroken = areaIds(raw.rocksBroken, 1, 5) -- saves from before 3c have none
+	-- milestone indices are whole ids too; no field: a save from before milestones
+	save.milestones = if type(raw.milestones) == "table" then areaIds(raw.milestones, 1, math.huge) else nil
 	save.finished = raw.finished == true
 	save.updatedAt = amount(raw.updatedAt)
 	return save

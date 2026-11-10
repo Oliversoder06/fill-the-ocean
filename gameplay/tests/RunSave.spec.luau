@@ -128,6 +128,27 @@ function tests.sanitize_gates(t)
 	t.expectEq(table.concat(again.gatesOpen, ","), "2,3")
 end
 
+-- Milestones reached (indices into Config.milestones), each once; a save from before milestones has
+-- none recorded (nil), so the server can mark those below its fill without granting them.
+function tests.sanitize_milestones(t)
+	local save = RunSave.sanitize({ mapId = "map1", members = { 1 }, milestones = { 2, 1, 2, 0, -3, 1.5, "4", 0 / 0, math.huge, 5 } })
+	assert(save, "sanitize returned nil for a repairable save")
+	t.expectEq(table.concat(save.milestones :: { number }, ","), "2,1,5")
+	local old = RunSave.sanitize({ mapId = "map1", members = { 1 }, current = 900 })
+	assert(old, "an old save must load")
+	t.expectEq(old.milestones, nil, "from before milestones")
+	local broken = RunSave.sanitize({ mapId = "map1", members = { 1 }, milestones = "all" })
+	assert(broken, "a bad milestones field must not drop the save")
+	t.expectEq(broken.milestones, nil)
+	local fresh = RunSave.new("map1", { 1 })
+	t.expectEq(#(fresh.milestones :: { number }), 0, "a new run has reached none")
+	fresh.milestones = { 1, 2 }
+	local again = RunSave.sanitize(fresh)
+	assert(again, "a valid save must survive sanitize")
+	t.expectEq(table.concat(again.milestones :: { number }, ","), "1,2")
+	t.expectEq(#(RunSave.blank(fresh, 0).milestones :: { number }), 0, "erasing forgets them")
+end
+
 -- Broken rocks (deeper pools, areas 1-5), each once; a save from before rocks loads with none.
 function tests.sanitize_rocks(t)
 	local save = RunSave.sanitize({ mapId = "ocean1", members = { 1 }, rocksBroken = { 3, 1, 3, 6, 0, 2.5, "4", 0 / 0, 5 } })

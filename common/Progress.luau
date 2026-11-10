@@ -1,13 +1,15 @@
 --!strict
--- A player's saved progress: Raindrops, their saved-run keys (newest first), the maps they cleared
--- and the runs whose ending paid them (each pays once). Pure: Lune-tested. PlayerData does the
--- DataStore calls; this module only decides the data.
+-- A player's saved progress: Raindrops, their saved-run keys (newest first), the maps they cleared,
+-- the runs whose ending paid them (each pays once) and the milestones each run paid them for (by
+-- index, each once). Pure: Lune-tested. PlayerData does the DataStore calls; this module only
+-- decides the data.
 
 export type Data = {
 	raindrops: number,
 	runs: { string },
 	mapsCleared: { [string]: boolean },
 	paidRuns: { [string]: boolean },
+	paidMilestones: { [string]: { number } },
 }
 
 local Progress = {}
@@ -16,7 +18,7 @@ local Progress = {}
 Progress.MAX_RUNS = 10
 
 function Progress.default(): Data
-	return { raindrops = 0, runs = {}, mapsCleared = {}, paidRuns = {} }
+	return { raindrops = 0, runs = {}, mapsCleared = {}, paidRuns = {}, paidMilestones = {} }
 end
 
 -- Fills in missing or broken fields so old or partial saves still load. Unknown fields (such as
@@ -51,6 +53,22 @@ function Progress.sanitize(raw: any): Data
 				end
 			end
 		end
+		if type(raw.paidMilestones) == "table" then
+			for key, list in raw.paidMilestones do
+				if type(key) ~= "string" or key == "" or type(list) ~= "table" then
+					continue
+				end
+				local indices = {}
+				for _, index in list do
+					if type(index) == "number" and index % 1 == 0 and index >= 1 and not table.find(indices, index) then
+						table.insert(indices, index)
+					end
+				end
+				if #indices > 0 then
+					data.paidMilestones[key] = indices
+				end
+			end
+		end
 	end
 	return data
 end
@@ -81,6 +99,7 @@ end
 function Progress.forgetRun(raw: any, key: string): Data
 	local data = Progress.removeRun(raw, key)
 	data.paidRuns[key] = nil
+	data.paidMilestones[key] = nil
 	return data
 end
 
@@ -99,6 +118,24 @@ function Progress.clearMap(raw: any, mapId: string, raindrops: number, runKey: s
 		data.paidRuns[runKey] = true
 	end
 	data.mapsCleared[mapId] = true
+	return data
+end
+
+-- Run runKey reached milestones worth `raindrops` (by index into gameplay's Config.milestones): add
+-- those this run hasn't paid this player for yet and remember them, so a milestone granted again (a
+-- run reloaded from an older save) can't pay twice. Returns a new table.
+function Progress.payMilestones(raw: any, runKey: string, raindrops: { [number]: number }): Data
+	local data = Progress.sanitize(raw)
+	local paid = data.paidMilestones[runKey] or {}
+	for index, amount in raindrops do
+		if not table.find(paid, index) then
+			data.raindrops += math.max(0, math.floor(amount))
+			table.insert(paid, index)
+		end
+	end
+	if #paid > 0 then
+		data.paidMilestones[runKey] = paid
+	end
 	return data
 end
 

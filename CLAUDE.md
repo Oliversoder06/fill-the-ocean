@@ -51,6 +51,9 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     hydrants (`Map.Roads.TruckRefillBay1/2`, `Areas.<Name>.Hydrant`; server/Map),
     `workspace.Map.Beach.Stage_Ocean_LifeguardTower`'s ProximityPrompt `Prompt` (hires staff),
     `ReplicatedStorage.Staff.<Model>` (R15 staff rigs with a PrimaryPart; client/Staff walks copies),
+    `workspace.Map.Revive.M1..M8` (Models: cove decorations shown once their milestone revives
+    them, client/Milestones), `ReplicatedStorage.Story.BaconHair` (a Model, placeholder; the
+    milestone sightings put a copy far out at sea, facing the beach along its pivot's front),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects, `ChannelWave` included) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.

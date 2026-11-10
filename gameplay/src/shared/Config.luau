@@ -121,17 +121,70 @@ Config.start = { capacity = 1, walkSpeed = 16, actSeconds = 0.5, toolName = "Spo
 -- Quick Scoop keeps mattering. Every 3 levels (24 tool levels) so the big tools still feel big.
 Config.sweeps = { toolsPerSweep = 3, maxSweeps = 8 }
 
--- Fill milestones (fractions of the whole ocean): crossing one starts a boost for everyone for
--- `seconds`. Each plays once per save. All are bonuses, never penalties.
+-- Boosts: each fill milestone (Config.milestones below) starts one for everyone for `seconds`. All
+-- are bonuses, never penalties.
 Config.boosts = {
 	seconds = 30,
-	milestones = { 0.25, 0.5, 0.75 },
+	milestones = {} :: { number }, -- Boosts.crossed's list, filled in below from Config.milestones
 	kinds = {
 		{ id = "coins", tag = "2X COINS", card = "The sun dozed off! Double coins!", coins = 2 },
 		{ id = "gusher", tag = "GUSHER", card = "The well is gushing! Fill up in one sweep!", oneSweep = true },
 		{ id = "tailwind", tag = "TAILWIND", card = "A cool breeze! Run faster!", walk = 1.5 },
 	},
 }
+
+-- A milestone (shared/Milestones). Each but the ending starts a `boost` (a Config.boosts kind, for
+-- everyone) and gives one extra: `revive` (the cove decoration workspace.Map.Revive.M<n> comes back
+-- to life), `sighting` (the bacon-hair shows on the horizon), `raindrops` (onto every member's
+-- profile) or `cosmetic` (an id kept for the season pass; nothing uses it yet). `text`: the toast.
+export type Milestone = {
+	fill: number,
+	boost: string?,
+	text: string?,
+	revive: number?,
+	sighting: boolean?,
+	raindrops: number?,
+	cosmetic: string?,
+	ending: boolean?,
+}
+
+-- Milestones every 5% (D9): server/Run grants each once per run (save.milestones). The plan: the
+-- boosts cycle 2X COINS, GUSHER, TAILWIND so neighbours never repeat; every 25% band runs revive,
+-- Raindrops, revive, cosmetic, sighting, so the cove comes back to life about every 10%, a small
+-- Raindrops payday sits between (5 rising to 25 by the final push, 75 a run), and every quarter ends
+-- on the bacon-hair out on the horizon. 100% is the ending (its cutscene and the map's Raindrops).
+Config.milestones = {
+	{ fill = 0.05, boost = "coins", revive = 1, text = "The old rowboat floats again!" },
+	{ fill = 0.1, boost = "gusher", raindrops = 5, text = "The first rain clouds roll in!" },
+	{ fill = 0.15, boost = "tailwind", revive = 2, text = "The beach flags flutter again!" },
+	{ fill = 0.2, boost = "coins", cosmetic = "seafoamSplash", text = "Seafoam splashes unlocked (coming soon)!" },
+	{ fill = 0.25, boost = "gusher", sighting = true, text = "Is that... the bacon-hair? He's watching!" },
+	{ fill = 0.3, boost = "tailwind", revive = 3, text = "The palm trees perk up!" },
+	{ fill = 0.35, boost = "coins", raindrops = 10, text = "A warm summer shower!" },
+	{ fill = 0.4, boost = "gusher", revive = 4, text = "The crabs are back on the rocks!" },
+	{ fill = 0.45, boost = "tailwind", cosmetic = "pearlTrail", text = "Pearl trail unlocked (coming soon)!" },
+	{ fill = 0.5, boost = "coins", sighting = true, text = "Halfway! The bacon-hair burps on the horizon..." },
+	{ fill = 0.55, boost = "gusher", revive = 5, text = "The gulls are back on the pier!" },
+	{ fill = 0.6, boost = "tailwind", raindrops = 15, text = "Rain on the horizon!" },
+	{ fill = 0.65, boost = "coins", revive = 6, text = "The lighthouse shines again!" },
+	{ fill = 0.7, boost = "gusher", cosmetic = "captainTitle", text = "Captain title unlocked (coming soon)!" },
+	{ fill = 0.75, boost = "tailwind", sighting = true, text = "The bacon-hair is back... and he looks thirsty." },
+	{ fill = 0.8, boost = "coins", revive = 7, text = "The pier lanterns glow again!" },
+	{ fill = 0.85, boost = "gusher", raindrops = 20, text = "A downpour of Raindrops!" },
+	{ fill = 0.9, boost = "tailwind", revive = 8, text = "The dolphins are jumping again!" },
+	{ fill = 0.95, boost = "coins", raindrops = 25, text = "The final push! It's pouring!" },
+	{ fill = 1, ending = true },
+} :: { Milestone }
+
+-- Where each boost kind first plays, for Boosts.crossed (the run itself asks Milestones).
+for _, kind in Config.boosts.kinds do
+	for _, m in Config.milestones do
+		if m.boost == kind.id then
+			table.insert(Config.boosts.milestones, m.fill)
+			break
+		end
+	end
+end
 
 -- The one ocean. Pay is flat (it never rises on its own; harder areas pay more).
 -- Fill curve (shared/Water): percent 1 needs firstPercent litres and each next percent `growth`

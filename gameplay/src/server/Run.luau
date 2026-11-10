@@ -34,6 +34,10 @@
 -- itemId, areaId) (saved in the team's `assign`), their water poured on a tick and paid into the
 -- wallet, faster while a member works the same area (state.workArea, set by every accepted scoop and pour).
 -- Ticked pay (buildings, staff) waits in server/Payroll and is paid in batches.
+-- Milestones every 5% of the fill (shared/Milestones, Config.milestones) are granted once per run
+-- (save.milestones): a boost for everyone, the team's toast, revived cove decorations (Revived),
+-- Raindrops onto every member's profile (PlayerData.payMilestones), and Milestone for clients'
+-- swoop and sightings (client/Milestones).
 -- A player's own income (pours, the hose, their vehicle) also counts in their Earned attribute
 -- (client/Payout flies it in as coins); a purchase is announced to the rest of the team.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill, or Admin("reset")
@@ -60,6 +64,7 @@ local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
 local Honeycomb = require(ReplicatedStorage.Shared.Honeycomb)
+local Milestones = require(ReplicatedStorage.Shared.Milestones)
 local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Water = require(ReplicatedStorage.Shared.Water)
@@ -85,6 +90,7 @@ local Vehicles = require(script.Parent.Vehicles)
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
 local PARTY_WAIT = 20 -- party: start when everyone is in, or this long after the first arrival
 local CARD_SECONDS = 3
+local MILESTONE_CARD_SECONDS = 5
 local MAX_BUYS_PER_SECOND = 5
 local MAX_EQUIPS_PER_SECOND = 5 -- each one swaps the model in hand (server/HeldTools)
 local MAX_GADGET_PER_SECOND = 10 -- clip / spray / fly toggles; water and fuel follow server time, not these
@@ -128,7 +134,7 @@ local run = {
 	lockLost = false,
 	playBase = 0, -- seconds played on this save before this session
 	playSince = nil :: number?, -- os.clock() when playing started this session
-	boost = nil :: { id: string, token: number }?, -- the running fill-milestone boost (Config.boosts)
+	boost = nil :: { id: string, token: number }?, -- the running milestone boost (Config.boosts)
 	boostToken = 0,
 }
 local states: { [Player]: any } = {}
@@ -390,7 +396,6 @@ local function startBoost(id: string)
 	run.boost = { id = id, token = token }
 	setGlobal("Boost", id)
 	setGlobal("BoostEndsAt", workspace:GetServerTimeNow() + Config.boosts.seconds)
-	card(kind.card)
 	refreshAll()
 	task.delay(Config.boosts.seconds, function()
 		if run.boost and run.boost.token == token then
@@ -399,23 +404,55 @@ local function startBoost(id: string)
 	end)
 end
 
--- The fill moved from `before` to `after`: crossing a milestone starts a boost this save hasn't
--- played yet (each plays once per save), unless the ocean just filled.
-local function checkBoost(before: number, after: number)
-	local save = run.save :: RunSave.Save
-	if not Boosts.crossed(Config.boosts.milestones, before, after) or after >= 1 then
+-- The cove decorations the run's milestones brought back go out as Revived ("1,2,5").
+local function publishRevived()
+	setGlobal("Revived", table.concat(Milestones.revived(Config, (run.save :: RunSave.Save).milestones :: { number }), ","))
+end
+
+-- Milestone Raindrops (index -> Raindrops) go onto every member's profile; each run pays a member
+-- for a milestone once (Progress.payMilestones). Only a saved run pays, as the ending does.
+local function payRaindrops(raindrops: { [number]: number })
+	local key = run.key
+	if not key then
 		return
 	end
-	local left = {}
-	for _, kind in Config.boosts.kinds do
-		if not table.find(save.boostsPlayed, kind.id) then
-			table.insert(left, kind.id)
+	for _, userId in (run.save :: RunSave.Save).members do
+		task.spawn(function()
+			local paid, err = PlayerData.payMilestones(userId, key, raindrops)
+			if not paid then
+				warn(`[Run] milestone Raindrops not paid to {userId} (run {key}): {err}`)
+			end
+		end)
+	end
+end
+
+-- The fill moved from `before` to `after`: every milestone passed that this run hasn't reached yet
+-- is granted once (save.milestones): the decorations it revives, its Raindrops and, for the last one
+-- (a jump may pass several), the toast, Milestone for clients and its boost. 100% is the ending's.
+local function checkMilestones(before: number, after: number)
+	local save = run.save :: RunSave.Save
+	local new = Milestones.reach(Config, save.milestones :: { number }, before, after)
+	if #new == 0 then
+		return
+	end
+	local raindrops, paying, last = {}, false, nil
+	for _, index in new do
+		local m = Milestones.reward(Config, index)
+		if m.raindrops then
+			raindrops[index], paying = m.raindrops, true
+		end
+		if not m.ending then
+			last = index
 		end
 	end
-	if #left > 0 then
-		local id = left[math.random(#left)]
-		table.insert(save.boostsPlayed, id)
-		startBoost(id)
+	publishRevived()
+	if paying then
+		payRaindrops(raindrops)
+	end
+	if last and after < 1 then
+		setGlobal("Milestone", Milestones.encode(last, workspace:GetServerTimeNow()))
+		remotes.Card:FireAllClients(Milestones.card(Config, last), MILESTONE_CARD_SECONDS)
+		startBoost(Milestones.reward(Config, last).boost)
 	end
 end
 
@@ -476,6 +513,7 @@ local function snapshot(): RunSave.Save
 	copy.buildings = table.clone(save.buildings)
 	copy.plots = table.clone(save.plots)
 	copy.rocksBroken = table.clone(save.rocksBroken)
+	copy.milestones = table.clone(save.milestones :: { number })
 	return copy
 end
 
@@ -699,6 +737,10 @@ local function startRun()
 	run.teamSize = if session.mode == "party" then #save.members else #Players:GetPlayers()
 	run.target = litresAt(1)
 	setWater(math.min(save.current, run.target))
+	if not save.milestones then -- a save from before milestones: those below its fill count as reached, ungranted
+		save.milestones = Milestones.reachedBy(Config, fillOf(run.current))
+	end
+	publishRevived()
 	for player in states do
 		applySaved(player)
 		moveToSpawn(player) -- those who spawned before the load go to the furthest open area
@@ -922,17 +964,17 @@ local function onLook(player: Player, pitch: unknown)
 	player:SetAttribute("Look", math.round(math.clamp(pitch, -LOOK_LIMIT, LOOK_LIMIT)))
 end
 
--- Sets the ocean's fill to `fraction` (admin window, Studio shortcut). As with pours, crossing a
--- milestone starts its boost and 100% ends the run.
+-- Sets the ocean's fill to `fraction` (admin window, Studio shortcut). As with pours, the milestones
+-- passed are granted and 100% ends the run.
 local function jumpFill(fraction: number)
 	local before = fillOf(run.current)
 	setWater(litresAt(fraction))
-	checkBoost(before, fillOf(run.current))
+	checkMilestones(before, fillOf(run.current))
 	checkFull()
 end
 
 -- Admin "Reset run": the run starts over for the same team and map while everyone stays. A blank save
--- (RunSave.blank: no water, wallet, levels, items, staff posts, gates, rocks, buildings or boosts)
+-- (RunSave.blank: no water, wallet, levels, items, staff posts, gates, rocks, buildings or milestones)
 -- replaces it, every player starts fresh, the world is rebuilt from it (gates shut, rocks back, plots
 -- empty), and it is saved. Leaving "playing" for the swap puts vehicles, hoses and jetpacks away and
 -- drops scoops in flight (their state is replaced).
@@ -953,6 +995,7 @@ local function resetRun()
 	Mechanics.load(save)
 	Buildings.load(save)
 	setWater(0)
+	publishRevived()
 	for player in states do
 		states[player] = newState()
 		moveToSpawn(player)
@@ -1073,12 +1116,12 @@ local function worked(state, id: number)
 	state.workArea, state.workedAt = id, os.clock()
 end
 
--- `litres` land in the ocean: the water rises and a crossed milestone starts its boost. Callers
+-- `litres` land in the ocean: the water rises and the milestones passed are granted. Callers
 -- check that the ocean takes them (Water.pourAmount) and then checkFull.
 local function raise(litres: number)
 	local before = fillOf(run.current)
 	setWater(run.current + litres)
-	checkBoost(before, fillOf(run.current))
+	checkMilestones(before, fillOf(run.current))
 end
 
 -- `litres` worth `value` coins (before the tip and boosts) land in the ocean: the team earns them as

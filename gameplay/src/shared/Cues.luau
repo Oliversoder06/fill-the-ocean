@@ -109,6 +109,33 @@ Cues.purchase = {
 	sparkle = "Sparkle",
 }
 
+-- Milestones every 5% (client/Milestones). The camera swoops swoopRise studs up and up to swoopOut
+-- studs out toward the ocean, looking swoopLook studs past that, and back over swoopSeconds; the
+-- music ducks for duckSeconds under `sound`. A revived cove decoration pops from reviveFrom of its
+-- size (reviveOvershoot) over reviveSeconds with purchase's sparkle. A sighting puts the bacon-hair
+-- sightingDistance studs out to sea for sightingSeconds: up out of the water over sightingRise,
+-- swaying sightingRock degrees sightingWaves times a second, back down over sightingSink. A
+-- Milestone older than freshSeconds (a late join) plays nothing.
+Cues.milestone = {
+	swoopSeconds = 2,
+	swoopRise = 45,
+	swoopOut = 70,
+	swoopLook = 140,
+	duckSeconds = 2.5,
+	sound = "ToolUnlock",
+	soundVolume = 0.6,
+	reviveFrom = 0.6,
+	reviveOvershoot = 1.6,
+	reviveSeconds = 0.45,
+	sightingDistance = 900,
+	sightingSeconds = 6,
+	sightingRise = 1.2,
+	sightingSink = 1.5,
+	sightingRock = 8,
+	sightingWaves = 0.8,
+	freshSeconds = 5,
+}
+
 -- The honeycomb upgrades (client/Honeycomb), seconds and scales. Opening blurs the world to blur
 -- and fades the Backdrop in over coverSeconds; closing takes them away over uncoverSeconds. A buy
 -- landing on its hex: coins fly in, the hex's water rises (waterSeconds), the hex pops (popFrom -> 1)

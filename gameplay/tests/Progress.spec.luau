@@ -145,6 +145,33 @@ function tests.clear_map_ignores_bad_raindrops(t)
 	t.expectEq(Progress.clearMap({ raindrops = 10 }, "map1", 2.7, "map1_1").raindrops, 12)
 end
 
+function tests.milestones_pay_each_run_once(t)
+	local raw = { raindrops = 10 }
+	local after = Progress.payMilestones(raw, "map1_1", { [2] = 5, [7] = 10 })
+	t.expectEq(after.raindrops, 25)
+	t.expectEq(raw.raindrops, 10, "a new table")
+	after = Progress.payMilestones(after, "map1_1", { [2] = 5, [12] = 15 })
+	t.expectEq(after.raindrops, 40, "milestone 2 paid already: only 12")
+	after = Progress.payMilestones(after, "map1_2", { [2] = 5 })
+	t.expectEq(after.raindrops, 45, "another run pays its own")
+	t.expectEq(Progress.payMilestones(after, "map1_1", { [3] = -5 }).raindrops, 45, "never takes Raindrops")
+	t.expectEq(Progress.payMilestones(after, "map1_1", { [3] = 2.7 }).raindrops, 47)
+end
+
+function tests.paid_milestones_survive_sanitize_and_forget(t)
+	local paid = Progress.payMilestones(nil, "map1_1", { [2] = 5 })
+	paid = Progress.payMilestones(paid, "map1_2", { [2] = 5 })
+	local again = Progress.sanitize(paid)
+	t.expectEq(Progress.payMilestones(again, "map1_1", { [2] = 5 }).raindrops, 10, "still paid after a load")
+	local bad = Progress.sanitize({ paidMilestones = { map1_1 = { 2, "3", 0, 1.5, 2 }, [""] = { 1 }, map1_2 = "x" } })
+	t.expectEq(table.concat(bad.paidMilestones.map1_1, ","), "2")
+	t.expectEq(bad.paidMilestones[""], nil)
+	t.expectEq(bad.paidMilestones.map1_2, nil)
+	local forgot = Progress.forgetRun(paid, "map1_1")
+	t.expectEq(Progress.payMilestones(forgot, "map1_1", { [2] = 5 }).raindrops, 15, "an erased run pays again")
+	t.expectEq(Progress.payMilestones(forgot, "map1_2", { [2] = 5 }).raindrops, 10, "other runs stay paid")
+end
+
 function tests.changes_return_new_tables(t)
 	local raw = { raindrops = 1, runs = { "map1_1" }, mapsCleared = {} }
 	Progress.addRun(raw, "map1_2")
