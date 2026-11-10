@@ -74,6 +74,32 @@ def main():
 		d.ellipse((x - stroke / 2, y - stroke / 2, x + stroke / 2, y + stroke / 2), fill=255)
 	save(img.resize((cs, cs), Image.LANCZOS), "check", (cs, cs))
 
+	# Back hex: a chunky left arrow with rounded ends.
+	img = Image.new("L", (cs * SS, cs * SS), 0)
+	d = ImageDraw.Draw(img)
+	stroke = 52 * SS
+	tip, head = (50 * SS, 128 * SS), 74 * SS
+	arms = [(tip[0] + head, tip[1] - head), tip, (tip[0] + head, tip[1] + head)]
+	d.line(arms, fill=255, width=stroke, joint="curve")
+	d.line([tip, (212 * SS, 128 * SS)], fill=255, width=stroke)
+	for x, y in (arms[0], arms[2], tip, (212 * SS, 128 * SS)):
+		d.ellipse((x - stroke / 2, y - stroke / 2, x + stroke / 2, y + stroke / 2), fill=255)
+	save(img.resize((cs, cs), Image.LANCZOS), "back_arrow", (cs, cs))
+
+	# Areas hex: a waving flag on a pole.
+	img = Image.new("L", (cs * SS, cs * SS), 0)
+	d = ImageDraw.Draw(img)
+	pole = 24 * SS
+	px = 66 * SS
+	d.rounded_rectangle((px - pole / 2, 28 * SS, px + pole / 2, 236 * SS), radius=pole / 2, fill=255)
+	d.ellipse((px - 22 * SS, 14 * SS, px + 22 * SS, 58 * SS), fill=255)
+	top, bottom, left, right = 50 * SS, 146 * SS, px, 220 * SS
+	wave = 14 * SS
+	upper = [(left + (right - left) * t / 24, top + wave * math.sin(t / 24 * 2 * math.pi)) for t in range(25)]
+	lower = [(left + (right - left) * t / 24, bottom + wave * math.sin(t / 24 * 2 * math.pi)) for t in range(24, -1, -1)]
+	d.polygon(upper + lower, fill=255)
+	save(img.resize((cs, cs), Image.LANCZOS), "area_flag", (cs, cs))
+
 
 if __name__ == "__main__":
 	main()
