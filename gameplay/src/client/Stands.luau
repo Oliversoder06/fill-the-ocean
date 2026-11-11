@@ -55,10 +55,16 @@ function Stands.byKey(key: string): Stand?
 	return nil
 end
 
--- The stand's prompt, or nil while it isn't there (not streamed in, or not built in the place yet).
-function Stands.prompt(stand: Stand): ProximityPrompt?
+-- The stand's model (an area's Stand, a cove shop), or nil while it isn't there (not streamed in,
+-- or not built in the place yet).
+function Stands.holder(stand: Stand): Instance?
 	local ocean = Hud.ocean()
-	local holder = if stand.shop then Zones.shop(stand.shop) elseif ocean then Zones.stand(ocean, stand.area) else nil
+	return if stand.shop then Zones.shop(stand.shop) elseif ocean then Zones.stand(ocean, stand.area) else nil
+end
+
+-- The stand's prompt, or nil while it isn't there.
+function Stands.prompt(stand: Stand): ProximityPrompt?
+	local holder = Stands.holder(stand)
 	return holder and Zones.standPrompt(holder)
 end
 

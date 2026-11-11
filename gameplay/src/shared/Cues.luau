@@ -78,11 +78,26 @@ Cues.coins = {
 	burstVolume = 0.35,
 }
 
--- The guide (client/Guide): `chevron` is a Model or BasePart in ReplicatedStorage.Vfx, cloned along
--- the ground toward the current goal (placement in shared/GuideTrail). The click hand bobs
--- `handBob` pixels, `handSpeed` taps a second, over the GUI element to click.
+-- The guide (client/Guide): a lane on the ground toward the current goal (placement in
+-- shared/GuideTrail). `chevron` (a Model with Decals, tip along its pivot's -Z) sits every `spacing`
+-- studs; `rail` (a thin Neon BasePart, stretched along Z) runs laneHalfWidth studs either side. The
+-- lane runs laneStart..laneLength studs ahead and never within hideNear of the goal. A wave
+-- (pulseSpeed studs a second, pulseLength crest to crest) fades the chevrons up to pulseDim of the
+-- way to clear; the rails stay steady. `highlight` (a Highlight) outlines a pointed-to stand, gate
+-- or plot. All three live in ReplicatedStorage.Vfx. The click hand bobs `handBob` pixels,
+-- `handSpeed` taps a second, over the GUI element to click.
 Cues.guide = {
 	chevron = "GuideChevron",
+	rail = "GuideRail",
+	highlight = "GuideHighlight",
+	spacing = 5,
+	laneHalfWidth = 3,
+	laneStart = 3,
+	laneLength = 40,
+	hideNear = 8,
+	pulseSpeed = 12,
+	pulseLength = 15,
+	pulseDim = 0.35,
 	handBob = 10,
 	handSpeed = 1.6,
 }
@@ -144,8 +159,9 @@ Cues.milestone = {
 -- after the check it wakes into its next level (wakeFrom -> wakeOvershoot -> 1). The sting climbs
 -- stingPitchStep a level bought, up to stingPitchMax. A refused click shakes the hex and pulses the
 -- card's hint (needPulse). Opening a view: the canvas glides from glideZoomFrom and hexes pop in
--- from enterFrom, enterStagger later per ring out (at most enterCap). A hex you can buy breathes up
--- to breatheScale and back every breatheSeconds. Hexes are never shown under minHexPixels tall, and
+-- from enterFrom, enterStagger later per ring out (at most enterCap). No hex breathes any more
+-- (owner, 2026-11-11); breatheScale and breatheSeconds stay because tests/Cues.spec pins them.
+-- Hexes are never shown under minHexPixels tall, and
 -- a view grows to at most maxZoom. Hovers ease over quickSeconds. The Upgrades button squishes to
 -- holdScale while held (holdDownSeconds) and springs back (holdUpSeconds).
 Cues.honeycomb = {

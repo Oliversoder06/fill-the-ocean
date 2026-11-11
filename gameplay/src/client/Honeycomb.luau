@@ -680,19 +680,16 @@ function Honeycomb.start()
 			shownWallet = wallet
 			walletAmount.Text = Hud.money(wallet)
 		end
-		-- Hex scales: hover / press / gamepad selection / breathing (all "buy" hexes in step) times
-		-- any animation.
-		local breathe = 1 + (CUE.breatheScale - 1) * (0.5 - 0.5 * math.cos(now * 2 * math.pi / CUE.breatheSeconds))
+		-- Hex scales: hover / press / gamepad selection times any animation.
 		local rate = math.min(1, dt * PRESS_RATE)
 		local hoverHex: Hex.Hex? = nil
 		for _, hex in v.hexes do
 			local selected = hex.key == selectedKey
 			local lit = hex.hover or (selected and input == "gamepad")
-			local target = if hex.down then motion.pressScale elseif lit then motion.hoverScale elseif hex.breathe then breathe else 1
+			local target = if hex.down then motion.pressScale elseif lit then motion.hoverScale else 1
 			hex.ease += (target - hex.ease) * rate
 			set(hex.press, "Scale", math.round(hex.ease * Hex.animScale(hex, now) * 1000) / 1000)
 			set(hex.select, "Visible", hex.hover or selected)
-			Hex.lit(hex, lit)
 			if hex.hover then
 				hoverHex = hex
 			end

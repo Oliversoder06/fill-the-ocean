@@ -107,8 +107,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   on sale). `Honeycomb.show(id)` opens the view holding an id's hex and selects it (Goal);
   `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide: category hex, then the hex).
 - `HoneycombHex.luau`: the honeycomb's hexes: copies of the template painted from one `PAINT`
-  table per kind (upgrade blue, owned cyan, locked slate, category warm, Back red, empty dark: a
-  `Body.Shade` gradient, a lighter `Outline` rim, a soft `Glow`, lit on hover), each upgrade painted
+  table per kind (upgrade blue, owned cyan, locked slate, category warm, Back red, empty dark: one
+  colour with a subtle `Body.Shade` gradient (top 10% lighter), a lighter `Outline` rim; the
+  template's `Glow` is hidden, no hex breathes; hover 105%, press 95%), each upgrade painted
   in its state (`Name` on top, art, `Level` "2/6" / "MAX", the next level's price at the bottom
   (`short` with a rising fill while short), "Owned" / "Open"; `BackArrow`, `AreaIcon`), dark empty
   hexes completing a category's rings (`Comb.emptySlots`),
@@ -123,7 +124,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   buys nothing) and its price sign (copies of `Hud.Templates.StandSign`, from `Items.standOffer`
   and `shared/Format`, at the team's price); hides the Fire Station's `CallPrompt` until the team owns a vehicle.
 - `Goal.luau`: the next-goal line `Hud.Progress.Goal` once the guide is gone (`shared/NextGoal`);
-  a click or G opens the honeycomb on it or points the way (`Guide.pointTo`, from ux/b1).
+  a click or G opens the honeycomb on it or points the way (`Guide.pointTo` with the stand, gate
+  or plot to outline, from ux/b1); `Stands.holder` is a stand's model.
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
   ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote) and
   `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`).
@@ -153,11 +155,14 @@ Client (`src/client/`, all started from `init.client.luau`):
   Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
   shows `Hotbar.Status` text instead (clipped? flowing L/s).
 - `Guide.luau`: the first-minute tutorial (new saves, until the first purchase): `Hud.Guide`
-  objective at the top centre (theme `guide` yellow), glowing yellow ground chevrons toward the
-  step's place (clones of `Vfx.GuideChevron`, its Decals / ImageLabels pulsing with a wave that runs
-  toward the goal; maths in `shared/GuideTrail`) and a click hand (clone of
-  `Hud.Templates.ClickHand`) tapping the button to press. `Guide.pointTo(position?)` leads the
-  chevrons anywhere once the tutorial isn't showing (nil hides them).
+  objective at the top centre (theme `guide` yellow), a glowing yellow lane on the ground toward
+  the step's place (from ~3 to ~40 studs ahead, never within 8 of the goal: clones of
+  `Vfx.GuideChevron` every 5 studs, counted back from the goal so they stay put, their Decals /
+  ImageLabels fading gently with a wave that runs toward the goal; steady clones of `Vfx.GuideRail`
+  stretched between neighbouring ground points 3 studs either side; maths in `shared/GuideTrail`,
+  numbers in `Cues.guide`) and a click hand (clone of `Hud.Templates.ClickHand`) tapping the button
+  to press. `Guide.pointTo(position?, model?)` leads the lane anywhere once the tutorial isn't
+  showing (nil hides it) and outlines `model` with a clone of `Vfx.GuideHighlight`.
 - `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
 - `Vehicles.luau`: drives your own vehicle while seated (sets its `Drive` / `Turn` constraints from
   the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `driving` (seated in
@@ -229,7 +234,8 @@ Shared (`src/shared/`, pure unless noted):
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check with an
   optional `priceOf`),
-  `GuideTrail.luau` (where the guide's ground chevrons sit, which show and their `pulse`):
+  `GuideTrail.luau` (the guide's lane: its stretch `lane`, `chevrons`, the rails' `stops` and
+  `rails` segments, the pool size `most`, the chevrons' `pulse`):
   maths, all Lune-tested (`Cues` too).
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
@@ -341,7 +347,8 @@ The server publishes state as attributes; the client only reads them.
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Honeycomb, Card, Waiting,
   Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
-  the honeycomb's piece: a transparent ImageButton hit area over `Glow` (1.25x, lowest), `Body`
+  the honeycomb's piece: a transparent ImageButton hit area over `Glow` (1.25x, lowest; hidden by
+  code), `Body`
   (+ UIGradient `Shade`), `Outline` (the rim), `Water.Fill`, `Name`, `View`, `Icon`, `Level`
   (above `PriceRow`), `Lock`, `Check`, `Badge.Count`, `BackArrow` and `AreaIcon` (hidden
   ImageLabels), `Select`, `Press`; `Bottom` is hidden and unused; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
@@ -356,8 +363,8 @@ The server publishes state as attributes; the client only reads them.
   Never hard-code a colour or image id in game code; read it from the theme, by its semantic key
   (`upgradeTop`, `owned`, `short`, `text`, `guide`, ...; the old key names are only aliases).
 - The look: icon-led HUD with no boxes or panels behind HUD numbers (a big icon and a plain
-  number), an icon-only hotbar, hexes with a soft top-to-bottom gradient, a soft glow and a thin
-  lighter rim (no hard outline), one colour per job, Montserrat (Bold names, ExtraBold numbers and
+  number), an icon-only hotbar, flat-coloured hexes with a subtle top-to-bottom gradient and a thin
+  lighter rim (no glow, no hard outline), one colour per job, Montserrat (Bold names, ExtraBold numbers and
   titles), white text with a thin soft stroke (`textStroke`: thickness 1, colour `shadow`, never a
   thick outline). Tintable images are white; colour them with `ImageColor3` from the theme.
 - Windows (anything the player clicks in) must be listed in `Hud.luau`'s `windows` table, so the

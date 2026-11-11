@@ -1,5 +1,6 @@
 -- The honeycomb's hexes (client/Honeycomb): copies of Hud.Templates.Hex, painted by what they are
--- (PAINT: a top-to-bottom gradient on Body, a thin lighter rim, a soft glow) in their upgrade's state
+-- (PAINT: one colour per kind with a subtle top-to-bottom gradient on Body and a thin lighter rim; the
+-- template's Glow is hidden) in their upgrade's state
 -- (shared/Honeycomb.state): a short name on top, art in the middle, Level ("2/6", "MAX") and the
 -- next level's price (or "Owned", "Open") at the bottom. Their animations: popping in, and a landing
 -- on the bought hex (its water rises, it pops as a check flashes and its Level ticks up, then it
@@ -25,26 +26,28 @@ local colors, images, motion = Theme.colors, Theme.images, Theme.motion
 local set = Hud.set
 local CUE = Cues.honeycomb
 
-local RIM_LIGHT = 0.5 -- a rim is its hex's top colour this far toward white
-local DARK = 0.25 -- a flat colour's gradient ends this far toward the shadow
-local GLOW_LIT = 0.25 -- hover and gamepad selection: the glow this much less transparent
+local RIM_LIGHT = 0.5 -- a rim is its hex's colour this far toward white
+local LIGHTEN = 0.1 -- a hex's gradient starts this far toward white at the top and ends at its colour
 local WATER_TRANSPARENCY = 0.2
 
 export type Kind = "upgrade" | "owned" | "locked" | "category" | "back" | "empty"
-type Paint = { shade: ColorSequence, rim: Color3?, glow: Color3, glowRest: number }
+type Paint = { shade: ColorSequence, rim: Color3? }
 
-local function look(top: Color3, bottom: Color3, rim: Color3?, glow: Color3, glowRest: number): Paint
-	return { shade = ColorSequence.new(top, bottom), rim = rim, glow = glow, glowRest = glowRest }
+local function look(color: Color3, rim: Color3?): Paint
+	return { shade = ColorSequence.new(color:Lerp(colors.text, LIGHTEN), color), rim = rim }
 end
 
--- Every hex look, from the theme: one colour per job.
+-- Every hex look, from the theme: one colour per job (upgrades and categories the middle of their
+-- theme pair).
+local UPGRADE = colors.upgradeTop:Lerp(colors.upgradeBottom, 0.5)
+local CATEGORY = colors.categoryTop:Lerp(colors.categoryBottom, 0.5)
 local PAINT: { [Kind]: Paint } = {
-	upgrade = look(colors.upgradeTop, colors.upgradeBottom, colors.upgradeRim, colors.glow, 0.5),
-	owned = look(colors.owned, colors.owned:Lerp(colors.upgradeBottom, DARK), colors.owned:Lerp(colors.text, RIM_LIGHT), colors.owned, 0.35),
-	locked = look(colors.locked, colors.locked:Lerp(colors.shadow, DARK), colors.locked:Lerp(colors.text, RIM_LIGHT), colors.glow, 0.5),
-	category = look(colors.categoryTop, colors.categoryBottom, colors.categoryTop:Lerp(colors.text, RIM_LIGHT), colors.categoryTop, 0.35),
-	back = look(colors.back, colors.back:Lerp(colors.shadow, DARK), colors.back:Lerp(colors.text, RIM_LIGHT), colors.glow, 0.5),
-	empty = look(colors.empty, colors.empty:Lerp(colors.shadow, DARK), nil, colors.glow, 0.5),
+	upgrade = look(UPGRADE, colors.upgradeRim),
+	owned = look(colors.owned, colors.owned:Lerp(colors.text, RIM_LIGHT)),
+	locked = look(colors.locked, colors.locked:Lerp(colors.text, RIM_LIGHT)),
+	category = look(CATEGORY, CATEGORY:Lerp(colors.text, RIM_LIGHT)),
+	back = look(colors.back, colors.back:Lerp(colors.text, RIM_LIGHT)),
+	empty = look(colors.empty, nil),
 }
 local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
 -- On-screen text sizes in pixels at the fitted zoom (never hidden).
@@ -59,7 +62,6 @@ local textScale = 1
 export type Hex = {
 	button: ImageButton,
 	press: UIScale,
-	glow: ImageLabel,
 	shade: UIGradient,
 	water: Frame,
 	fill: ImageLabel,
@@ -89,11 +91,9 @@ export type Hex = {
 	key: string?, -- the upgrade id, "cat:<id>" or "back"
 	art: Instance?,
 	kind: Kind?, -- the look painted
-	glowRest: number, -- its glow's transparency while not hovered
 	hover: boolean,
 	down: boolean,
-	ease: number, -- hover / press / breathing scale, catching up
-	breathe: boolean,
+	ease: number, -- hover / press scale, catching up
 	animKind: string?, -- "enter", "pop" or "wake"
 	animAt: number,
 	holdUntil: number, -- a landing owns the hex's look until then
@@ -107,7 +107,6 @@ local HoneycombHex = {}
 function HoneycombHex.parts(button: ImageButton)
 	return {
 		press = Hud.find(button, "Press"),
-		glow = Hud.find(button, "Glow"),
 		shade = Hud.find(button, "Body.Shade"),
 		water = Hud.find(button, "Water"),
 		fill = Hud.find(button, "Water.Fill"),
@@ -151,8 +150,10 @@ function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number
 		hex.designs[label] = designSize(label)
 	end
 	hex.q, hex.r, hex.x, hex.y = q, r, x, y
-	hex.hover, hex.down, hex.breathe = false, false, false
-	hex.ease, hex.animAt, hex.holdUntil, hex.landing, hex.badgeCount, hex.glowRest = 1, 0, 0, 0, -1, 1
+	hex.hover, hex.down = false, false
+	hex.ease, hex.animAt, hex.holdUntil, hex.landing, hex.badgeCount = 1, 0, 0, 0, -1
+	local glow = Hud.find(button, "Glow") :: GuiObject
+	glow.Visible = false -- flat hexes (owner, 2026-11-11)
 	hex.select.Visible = false
 	hex.badge.Visible = false
 	hex.fill.ImageColor3 = colors.owned
@@ -207,12 +208,7 @@ local function setWater(hex: Hex, level: number)
 	set(hex.water, "Visible", level > 0)
 end
 
--- Hover and gamepad selection light a hex's glow.
-function HoneycombHex.lit(hex: Hex, on: boolean)
-	set(hex.glow, "ImageTransparency", if on then math.max(0, hex.glowRest - GLOW_LIT) else hex.glowRest)
-end
-
--- A hex's body: its look (gradient, rim, glow; written when it changes), its water level and which
+-- A hex's body: its look (gradient, rim; written when it changes), its water level and which
 -- marks show (the check, the lock, Back's arrow, the area flag).
 local function paintBody(hex: Hex, kind: Kind, water: number, check: boolean, lock: boolean, arrow: boolean, area: boolean)
 	if hex.kind ~= kind then
@@ -223,9 +219,6 @@ local function paintBody(hex: Hex, kind: Kind, water: number, check: boolean, lo
 		if style.rim then
 			hex.outline.ImageColor3 = style.rim
 		end
-		hex.glow.ImageColor3 = style.glow
-		hex.glowRest = style.glowRest
-		HoneycombHex.lit(hex, false)
 	end
 	setWater(hex, water)
 	set(hex.check, "Visible", check)
@@ -314,7 +307,6 @@ function HoneycombHex.paintUpgrade(hex: Hex, upgrade: Comb.Upgrade, st: Comb.Hex
 		template, image = HoneycombHex.artOf(link)
 	end
 	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
-	hex.breathe = state == "buy"
 end
 
 -- The red ball: pops in when something becomes buyable, shrinks away at 0.
@@ -356,7 +348,6 @@ function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string
 	end
 	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
 	paintBadge(hex, count)
-	hex.breathe = false
 end
 
 -- A category's centre: Back, with its arrow.
@@ -366,7 +357,6 @@ function HoneycombHex.paintBack(hex: Hex)
 	paintText(hex, hex.level, nil, TEXT.level)
 	paintPrice(hex, nil, false, colors.text)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
-	hex.breathe = false
 end
 
 -- A dark empty hex that completes the honeycomb's shape: nothing on it.
@@ -376,7 +366,6 @@ function HoneycombHex.paintEmpty(hex: Hex)
 	paintText(hex, hex.level, nil, TEXT.level)
 	paintPrice(hex, nil, false, colors.text)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
-	hex.breathe = false
 end
 
 -- The scale an animation adds at `now` (1 when none plays).

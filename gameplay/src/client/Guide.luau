@@ -2,11 +2,12 @@
 -- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
 -- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
 -- state (where you stand, Carried, the team's Wallet, the honeycomb), so walking away goes back a step and nothing is
--- saved. The goal (in guide yellow) says what to do, never where to click: glowing yellow chevrons on
--- the ground (clones of ReplicatedStorage.Vfx.GuideChevron, placed by shared/GuideTrail, a
--- brightness wave running along them) lead to the place, a click hand
--- (a clone of Hud.Templates.ClickHand) taps the button to press, and Action's ActHint says which
--- key. Skip hides it for the session. Once it is done, Guide.pointTo leads the chevrons anywhere.
+-- saved. The goal (in guide yellow) says what to do, never where to click: a glowing yellow lane on
+-- the ground leads to the place (shared/GuideTrail: clones of ReplicatedStorage.Vfx.GuideChevron
+-- every few studs with a gentle brightness wave, between two steady clones of Vfx.GuideRail along
+-- its edges), a click hand (a clone of Hud.Templates.ClickHand) taps the button to press, and
+-- Action's ActHint says which key. Skip hides it for the session. Once it is done, Guide.pointTo
+-- leads the lane anywhere and outlines the stand, gate or plot there (a clone of Vfx.GuideHighlight).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -26,23 +27,24 @@ local CUE = Cues.guide
 local STEPS = 6
 local DONE_SECONDS = 3
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local RAY_UP, RAY_DOWN = 8, 40 -- studs above the trail line a chevron's ground ray starts, and its length
-local LIFT = 0.05 -- studs a chevron floats over the ground, so it never flickers into it
-local RAY_EVERY = 0.1 -- seconds between a chevron's ground rays; between them it slides along the last ground hit
-local RAY_DRIFT = 2 -- studs a chevron may slide from its last ray before it casts again (it also loops back)
+local RAY_UP, RAY_DOWN = 8, 40 -- studs above the lane's line a ground ray starts, and its length
+local LIFT = 0.05 -- studs the lane floats over the ground, so it never flickers into it
+local RAY_EVERY = 0.1 -- seconds between a stop's ground rays; between them it slides along the last ground hit
+local RAY_DRIFT = 2 -- studs a stop may slide from its last ray before it casts again
 local FILTER_EVERY = 0.5 -- seconds between rebuilds of what the ground rays skip (bodies and vehicles come and go)
-local PULSE_DIM = 0.6 -- between the wave's crests a chevron's images fade this share of the way to clear
 local PULSE_STEP = 0.05 -- the fade moves in steps, so most frames write nothing
 
 local Guide = {}
 
--- Where another module wants the chevrons to lead while the first-minute guide isn't showing.
+-- Where another module wants the lane to lead while the first-minute guide isn't showing, and what
+-- to outline there.
 local pointed: Vector3? = nil
+local pointedModel: Instance? = nil
 
--- Lead the ground chevrons to `position` (nil hides them). The first-minute guide's own goals win
--- while it shows.
-function Guide.pointTo(position: Vector3?)
-	pointed = position
+-- Lead the ground lane to `position` (nil hides it) and outline `model` there (a stand, gate or
+-- plot; optional). The first-minute guide's own goals win while it shows.
+function Guide.pointTo(position: Vector3?, model: Instance?)
+	pointed, pointedModel = position, if position then model else nil
 end
 
 local function boughtAny(levels: { [string]: number }): boolean
@@ -78,7 +80,7 @@ local function target(ocean: Model, name: string): Attachment?
 	return found
 end
 
--- Chevrons only show and never block: no collisions, rays, touches or shadows.
+-- The lane only shows and never blocks: no collisions, rays, touches or shadows.
 local function quiet(instance: Instance)
 	if instance:IsA("BasePart") then
 		instance.Anchored = true
@@ -113,12 +115,19 @@ function Guide.start()
 	local chevronTemplate = vfx:WaitForChild(CUE.chevron, 10)
 	assert(chevronTemplate and (chevronTemplate:IsA("Model") or chevronTemplate:IsA("BasePart")), `ReplicatedStorage.Vfx is missing {CUE.chevron} (a Model or BasePart)`)
 
-	-- The trail's pool: each chevron sits in the camera while it shows, unparented while it doesn't.
-	-- Each one's images (Decals, ImageLabels) fade with the pulse from their template transparency.
+	local railTemplate = vfx:WaitForChild(CUE.rail, 10)
+	assert(railTemplate and railTemplate:IsA("BasePart"), `ReplicatedStorage.Vfx is missing {CUE.rail} (a thin BasePart)`)
+	local highlightTemplate = vfx:WaitForChild(CUE.highlight, 10)
+	assert(highlightTemplate and highlightTemplate:IsA("Highlight"), `ReplicatedStorage.Vfx is missing {CUE.highlight} (a Highlight)`)
+	local highlight = highlightTemplate:Clone()
+
+	-- The lane's pools: each piece sits in the camera while it shows, unparented while it doesn't.
+	-- Each chevron's images (Decals, ImageLabels) fade with the pulse from their template transparency.
+	local most = GuideTrail.most(CUE)
 	local chevrons: { PVInstance } = {}
 	local placed: { [number]: CFrame } = {}
 	local glows: { [number]: { { image: Instance, prop: string, rest: number } } } = {}
-	for i = 1, GuideTrail.COUNT do
+	for i = 1, most do
 		local chevron = chevronTemplate:Clone() :: PVInstance
 		quiet(chevron)
 		local images = {}
@@ -133,15 +142,26 @@ function Guide.start()
 		assert(#images > 0, `ReplicatedStorage.Vfx.{CUE.chevron} needs a Decal or ImageLabel (the chevron image) for its pulse`)
 		chevrons[i], glows[i] = chevron, images
 	end
+	-- Rails: one segment between each pair of neighbouring stops, on both sides.
+	local railWidth, railHeight = railTemplate.Size.X, railTemplate.Size.Y
+	local rails: { BasePart } = {}
+	for i = 1, 2 * (most + 1) do
+		local rail = railTemplate:Clone()
+		quiet(rail)
+		rails[i] = rail
+	end
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	rayParams.RespectCanCollide = true -- the ground, not invisible zones (as shared/Zones.ground)
 	local filterAt = -math.huge
-	-- Each chevron's last ground ray: the point it was cast over, when, and the ground it hit (nil: none).
+	-- Each stop's last ground ray: the point it was cast over, when, and the ground it hit (nil: none);
+	-- and this frame's ground under it.
 	local castFrom: { [number]: Vector3? } = {}
 	local castAt: { [number]: number } = {}
 	local hitAt: { [number]: Vector3? } = {}
 	local hitUp: { [number]: Vector3? } = {}
+	local groundOf: { [number]: Vector3? } = {}
+	local upOf: { [number]: Vector3? } = {}
 
 	-- nil until the save's levels are published; then whether this save is new.
 	local isNew: boolean? = nil
@@ -210,31 +230,24 @@ function Guide.start()
 		return 3, "Carry it to the shore", shore.WorldPosition, nil
 	end
 
-	-- Chevron `i`'s ground spot `ahead` studs along the flat line `along` from `from` toward `goal`,
-	-- turned to point at the goal; nil over a gap or a wall.
-	local function groundAt(i: number, now: number, from: Vector3, goal: Vector3, along: Vector3, ahead: number, distance: number): CFrame?
-		local point = from + along * ahead + Vector3.yAxis * ((goal.Y - from.Y) * ahead / distance)
-		local castPoint = castFrom[i]
-		if not castPoint or now - castAt[i] >= RAY_EVERY or (point - castPoint).Magnitude > RAY_DRIFT then
+	-- Stop `s`'s ground under `point` and the ground's up; nil over a gap.
+	local function groundAt(s: number, now: number, point: Vector3): (Vector3?, Vector3?)
+		local castPoint = castFrom[s]
+		if not castPoint or now - castAt[s] >= RAY_EVERY or (point - castPoint).Magnitude > RAY_DRIFT then
 			local hit = workspace:Raycast(point + Vector3.yAxis * RAY_UP, Vector3.yAxis * -RAY_DOWN, rayParams)
 			castPoint = point
-			castFrom[i], castAt[i] = point, now
-			hitAt[i], hitUp[i] = if hit then hit.Position else nil, if hit then hit.Normal else nil
+			castFrom[s], castAt[s] = point, now
+			hitAt[s], hitUp[s] = if hit then hit.Position else nil, if hit then hit.Normal else nil
 		end
-		local ground, up = hitAt[i], hitUp[i]
+		local ground, up = hitAt[s], hitUp[s]
 		if not (ground and up) then
-			return nil
-		end
-		local look = along - up * along:Dot(up)
-		if look.Magnitude < 1e-3 then
-			return nil
+			return nil, nil
 		end
 		local moved = point - (castPoint :: Vector3)
-		local at = ground + (moved - up * moved:Dot(up)) + up * LIFT
-		return CFrame.lookAt(at, at + look.Unit, up)
+		return ground + (moved - up * moved:Dot(up)) + up * LIFT, up
 	end
 
-	-- Lays the chevrons from the player toward `goal` (nil hides them).
+	-- Lays the lane from the player toward `goal` (nil hides it).
 	local function placeTrail(goal: Vector3?)
 		local camera = workspace.CurrentCamera
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -242,7 +255,8 @@ function Guide.start()
 		local flat = if goal and from then Vector3.new(goal.X - from.X, 0, goal.Z - from.Z) else Vector3.zero
 		local distance = flat.Magnitude
 		local seconds = os.clock()
-		if distance > GuideTrail.HIDE_NEAR and seconds - filterAt >= FILTER_EVERY then
+		local stops = if goal and from then GuideTrail.stops(CUE, distance) else {}
+		if #stops > 0 and seconds - filterAt >= FILTER_EVERY then
 			filterAt = seconds
 			local ignore: { Instance } = { camera }
 			for _, other in Players:GetPlayers() do
@@ -260,20 +274,60 @@ function Guide.start()
 			end
 			rayParams.FilterDescendantsInstances = ignore
 		end
+		local along = if #stops > 0 then flat / distance else Vector3.zero
+		local points: { GuideTrail.Point | false } = {}
+		for s, ahead in stops do
+			local point = (from :: Vector3) + along * ahead + Vector3.yAxis * (((goal :: Vector3).Y - (from :: Vector3).Y) * ahead / distance)
+			local ground, up = groundAt(s, seconds, point)
+			groundOf[s], upOf[s] = ground, up
+			points[s] = if ground then { X = ground.X, Y = ground.Y, Z = ground.Z } else false
+		end
+
+		-- Chevron i sits on stop i + 1 (the first and last stops are the lane's ends), tip toward the goal.
 		for i, chevron in chevrons do
-			local ahead = GuideTrail.ahead(i, seconds)
-			local at = if GuideTrail.shows(ahead, distance) then groundAt(i, seconds, from :: Vector3, goal :: Vector3, flat / distance, ahead, distance) else nil
+			local s = i + 1
+			local ground, up = nil, nil
+			if s < #stops then
+				ground, up = groundOf[s], upOf[s]
+			end
+			local at: CFrame? = nil
+			if ground and up then
+				local look = along - up * along:Dot(up)
+				if look.Magnitude > 1e-3 then
+					at = CFrame.lookAt(ground, ground + look.Unit, up)
+				end
+			end
 			if at and at ~= placed[i] then
 				placed[i] = at
 				chevron:PivotTo(at)
 			end
 			if at then
-				local fade = math.round(PULSE_DIM * (1 - GuideTrail.pulse(ahead, seconds)) / PULSE_STEP) * PULSE_STEP
+				local fade = math.round(CUE.pulseDim * (1 - GuideTrail.pulse(CUE, stops[s], seconds)) / PULSE_STEP) * PULSE_STEP
 				for _, glow in glows[i] do
 					set(glow.image, glow.prop, glow.rest + (1 - glow.rest) * fade)
 				end
 			end
 			set(chevron, "Parent", if at then camera else nil)
+		end
+
+		-- The rails: steady, resting on the ground along both edges.
+		local right = along:Cross(Vector3.yAxis)
+		local left, rightSide = GuideTrail.rails(points, { X = right.X, Y = right.Y, Z = right.Z }, CUE.laneHalfWidth)
+		local lift = Vector3.yAxis * (railHeight / 2)
+		local used = 0
+		for _, side in { left, rightSide } do
+			for _, segment in side do
+				used += 1
+				local rail = rails[used]
+				local a = Vector3.new(segment.from.X, segment.from.Y, segment.from.Z) + lift
+				local b = Vector3.new(segment.to.X, segment.to.Y, segment.to.Z) + lift
+				set(rail, "Size", Vector3.new(railWidth, railHeight, (b - a).Magnitude))
+				set(rail, "CFrame", CFrame.lookAt((a + b) / 2, b))
+				set(rail, "Parent", camera)
+			end
+		end
+		for i = used + 1, #rails do
+			set(rails[i], "Parent", nil)
 		end
 	end
 
@@ -317,6 +371,9 @@ function Guide.start()
 		set(skip, "Visible", active and not thanks)
 		set(upgradesRing, "Visible", click == upgrades)
 		placeTrail(if active then goal else pointed)
+		local outline = if not active and pointedModel and pointedModel:IsDescendantOf(workspace) then pointedModel else nil
+		set(highlight, "Adornee", outline)
+		set(highlight, "Parent", if outline then workspace.CurrentCamera else nil)
 		pointHand(click)
 		if not active then
 			return

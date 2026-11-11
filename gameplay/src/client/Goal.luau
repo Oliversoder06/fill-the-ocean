@@ -2,7 +2,7 @@
 -- once the first-minute guide (client/Guide, Hud.Guide) is gone, the one most useful thing to do
 -- next (shared/NextGoal), from what is on sale in TAB, at the stands (client/Stands) and on the
 -- plots, and the next gate. Clicking it or pressing G opens the honeycomb on that upgrade, or points the
--- way to its stand, gate or plot with the guide's ground chevrons (Guide.pointTo).
+-- way to its stand, gate or plot with the guide's ground lane, outlining it (Guide.pointTo).
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -88,31 +88,34 @@ local function nextGate(money: number, fill: number): NextGoal.Gate?
 	return { name = area.name, fill = area.gate.fill, price = price, onSale = onSale, affordable = Items.affords(money, price), target = `gate:{area.id}` }
 end
 
--- Where a world target is, or nil while it isn't streamed in.
-local function spotOf(target: string): Vector3?
+-- Where a world target is and its stand, gate or plot to outline, or nil while it isn't streamed in.
+local function spotOf(target: string): (Vector3?, Instance?)
 	local kind, key = target:match("^(%a+):?(.*)$")
 	local spot: Instance? = nil
+	local outline: Instance? = nil
 	if kind == "stand" then
 		local stand = Stands.byKey(key)
-		local prompt = stand and Stands.prompt(stand)
+		outline = stand and Stands.holder(stand)
+		local prompt = outline and Zones.standPrompt(outline)
 		spot = prompt and prompt.Parent
 	elseif kind == "gate" then
 		local ocean = Hud.ocean()
 		local area = Areas.byId(Config, tonumber(key))
 		local model = ocean and area and Zones.areaModel(ocean, area)
-		local gate = model and model:FindFirstChild("Gate")
-		spot = gate and gate:FindFirstChild("Prompt")
+		outline = model and model:FindFirstChild("Gate")
+		spot = outline and outline:FindFirstChild("Prompt")
 	elseif kind == "plots" then
 		spot = emptyPlot()
+		outline = spot
 	end
 	if spot and spot:IsA("BasePart") then
-		return spot.Position
+		return spot.Position, outline
 	elseif spot and spot:IsA("Attachment") then
-		return spot.WorldPosition
+		return spot.WorldPosition, outline
 	elseif spot and spot:IsA("PVInstance") then
-		return spot:GetPivot().Position
+		return spot:GetPivot().Position, outline
 	end
-	return nil
+	return nil, nil
 end
 
 function Goal.start()
@@ -131,10 +134,10 @@ function Goal.start()
 			Honeycomb.show(id)
 			return
 		end
-		local at = spotOf(target)
+		local at, outline = spotOf(target)
 		if at then
 			pointed = target
-			Guide.pointTo(at)
+			Guide.pointTo(at, outline)
 		end
 	end
 	line.Activated:Connect(go)
