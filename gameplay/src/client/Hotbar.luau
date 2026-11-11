@@ -96,12 +96,13 @@ function Hotbar.start()
 		end
 	end
 	assert(#gadgets <= #GADGET_KEYS, "Hotbar: more hotbar gadgets than keys")
-	-- The place sizes the Wave line under every gadget slot; it shortens to the owned ones.
-	local wave = Hud.find(bar, "Wave")
-	local waveFull = wave.Size
-	local slotStep = if gadgets[1]
-		then gadgets[1].slot.Size.X.Offset + Hud.find(bar, "Gadgets.UIListLayout").Padding.Offset
-		else 0
+	-- The place puts the tool slot at the centre and every gadget slot where the first owned one goes,
+	-- one step right of it. Owned ones line up a step apart (not a UIListLayout: it would space them
+	-- by their idle shrink) and the row slides left half a step per owned gadget to stay centred.
+	local gadgetRow = Hud.find(bar, "Gadgets")
+	local slotAt, rowAt = slot.Position, gadgetRow.Position
+	local gadgetAt = if gadgets[1] then gadgets[1].slot.Position else UDim2.new()
+	local slotStep = rowAt.X.Offset + gadgetAt.X.Offset - slotAt.X.Offset
 
 	local function bump(entry: Held)
 		entry.press.Scale = restScale(entry) * motion.pressScale
@@ -197,12 +198,13 @@ function Hotbar.start()
 		local equipped = player:GetAttribute("Equipped") ~= false
 		local out = player:GetAttribute("Gadget")
 		local itemState = Hud.items()
-		local hidden = 0
+		local shownGadgets = 0
 		for _, entry in gadgets do
 			local id = entry.item.id
 			set(entry.slot, "Visible", Items.owned(itemState, id))
-			if not entry.slot.Visible then
-				hidden += 1
+			if entry.slot.Visible then
+				set(entry.slot, "Position", gadgetAt + UDim2.fromOffset(shownGadgets * slotStep, 0))
+				shownGadgets += 1
 			end
 			hold(entry, out == id)
 			if not entry.shown and entry.slot.Visible then
@@ -213,11 +215,9 @@ function Hotbar.start()
 				end
 			end
 		end
-		set(
-			wave,
-			"Size",
-			UDim2.new(waveFull.X.Scale, waveFull.X.Offset - hidden * slotStep, waveFull.Y.Scale, waveFull.Y.Offset)
-		)
+		local shift = UDim2.fromOffset(-shownGadgets * slotStep / 2, 0)
+		set(slot, "Position", slotAt + shift)
+		set(gadgetRow, "Position", rowAt + shift)
 
 		-- What the bar measures: the vehicle's tank, else the gadget out, else the tool while it is out.
 		local gadget = if type(out) == "string" and out ~= "" then Items.get(Config, out) else nil
