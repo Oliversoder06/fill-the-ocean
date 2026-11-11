@@ -51,10 +51,6 @@ local AREA_PARTS = { "Source", "Pour", "Spawn", "Tap" }
 local Map = {}
 
 local baseTransparency: { [BasePart]: number } = {} -- each Water part's look in the place
--- Shallow water fades in: a thin sheet at the place's look would hide the whole seabed and read as a
--- full ocean, so it starts nearly clear (a damp seabed) and reaches its look SHALLOW_STUDS deep.
-local SHALLOW_STUDS = 3
-local SHALLOW_TRANSPARENCY = 0.9
 -- How each part clear() hid looked and collided in the place, so show() can put it back.
 local hidden: { [BasePart]: { transparency: number, canCollide: boolean, canQuery: boolean, canTouch: boolean } } = {}
 
@@ -65,7 +61,6 @@ function Map.setFill(ocean: Model, fraction: number)
 	local basin = Zones.part(ocean, "Basin")
 	local height = math.max(0.05, (water:GetAttribute("Depth") :: number) * math.clamp(fraction, 0, 1))
 	local y = basin.Position.Y + 0.5 + height / 2
-	local deep = math.clamp(height / SHALLOW_STUDS, 0, 1)
 	local tiles: { BasePart } = { water }
 	for _, child in water:GetChildren() do
 		if child:IsA("BasePart") then
@@ -78,8 +73,7 @@ function Map.setFill(ocean: Model, fraction: number)
 		end
 		tile.Size = Vector3.new(tile.Size.X, height, tile.Size.Z)
 		tile.Position = Vector3.new(tile.Position.X, y, tile.Position.Z)
-		local look = SHALLOW_TRANSPARENCY + (baseTransparency[tile] - SHALLOW_TRANSPARENCY) * deep
-		tile.Transparency = if fraction <= 0 then 1 else look
+		tile.Transparency = if fraction <= 0 then 1 else baseTransparency[tile]
 	end
 end
 
