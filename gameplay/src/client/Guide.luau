@@ -2,10 +2,10 @@
 -- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
 -- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
 -- state (where you stand, Carried, the team's Wallet, the honeycomb), so walking away goes back a step and nothing is
--- saved. The goal (in guide yellow) says what to do, never where to click: a flat yellow lane just
--- below the camera leads to the place (shared/GuideTrail: clones of ReplicatedStorage.Vfx.GuideChevron
--- every few studs sliding forward, between two clones of Vfx.GuideRail along
--- its edges), a click hand (a clone of Hud.Templates.ClickHand) taps the button to press, and
+-- saved. The goal (in guide yellow) says what to do, never where to click: a flat yellow lane from
+-- inside the player, just below the camera, leads to the place (a clone of ReplicatedStorage.Vfx.GuideLane:
+-- a textured Beam whose texture carries the rails and the sliding chevrons, cut cleanly at both
+-- ends; shared/GuideTrail), a click hand (a clone of Hud.Templates.ClickHand) taps the button to press, and
 -- Action's ActHint says which key. Skip hides it for the session. Once it is done, Guide.pointTo
 -- leads the lane anywhere and outlines the stand, gate or plot there (a clone of Vfx.GuideHighlight).
 local Players = game:GetService("Players")
@@ -27,7 +27,6 @@ local CUE = Cues.guide
 local STEPS = 6
 local DONE_SECONDS = 3
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local FADE_STEP = 0.05 -- the end fades move in steps, so most frames write nothing
 
 local Guide = {}
 
@@ -107,44 +106,18 @@ function Guide.start()
 	hand.Parent = gui
 	local vfx = ReplicatedStorage:WaitForChild("Vfx", 10)
 	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
-	local chevronTemplate = vfx:WaitForChild(CUE.chevron, 10)
-	assert(chevronTemplate and (chevronTemplate:IsA("Model") or chevronTemplate:IsA("BasePart")), `ReplicatedStorage.Vfx is missing {CUE.chevron} (a Model or BasePart)`)
-
-	local railTemplate = vfx:WaitForChild(CUE.rail, 10)
-	assert(railTemplate and railTemplate:IsA("BasePart"), `ReplicatedStorage.Vfx is missing {CUE.rail} (a thin BasePart)`)
+	local laneTemplate = vfx:WaitForChild(CUE.lane, 10)
+	assert(laneTemplate and laneTemplate:IsA("BasePart"), `ReplicatedStorage.Vfx is missing {CUE.lane} (a Part holding Start, End and a Beam)`)
 	local highlightTemplate = vfx:WaitForChild(CUE.highlight, 10)
 	assert(highlightTemplate and highlightTemplate:IsA("Highlight"), `ReplicatedStorage.Vfx is missing {CUE.highlight} (a Highlight)`)
 	local highlight = highlightTemplate:Clone()
 
-	-- The lane's pools: each piece sits in the camera while it shows, unparented while it doesn't.
-	-- Each chevron's images (Decals, ImageLabels) fade in and out at the lane's ends from their
-	-- template transparency.
-	local most = GuideTrail.most(CUE)
-	local chevrons: { PVInstance } = {}
-	local glows: { [number]: { { image: Instance, prop: string, rest: number } } } = {}
-	for i = 1, most do
-		local chevron = chevronTemplate:Clone() :: PVInstance
-		quiet(chevron)
-		local images = {}
-		for _, d in chevron:GetDescendants() do
-			quiet(d)
-			if d:IsA("Decal") then
-				table.insert(images, { image = d, prop = "Transparency", rest = d.Transparency })
-			elseif d:IsA("ImageLabel") then
-				table.insert(images, { image = d, prop = "ImageTransparency", rest = d.ImageTransparency })
-			end
-		end
-		assert(#images > 0, `ReplicatedStorage.Vfx.{CUE.chevron} needs a Decal or ImageLabel (the chevron image)`)
-		chevrons[i], glows[i] = chevron, images
-	end
-	-- Rails: one straight piece along each edge.
-	local railWidth, railHeight = railTemplate.Size.X, railTemplate.Size.Y
-	local rails: { BasePart } = {}
-	for i = 1, 2 do
-		local rail = railTemplate:Clone()
-		quiet(rail)
-		rails[i] = rail
-	end
+	-- The lane sits in the camera while it shows, unparented while it doesn't.
+	local lane = laneTemplate:Clone()
+	quiet(lane)
+	local laneStart = lane:FindFirstChild("Start")
+	local laneEnd = lane:FindFirstChild("End")
+	assert(laneStart and laneStart:IsA("Attachment") and laneEnd and laneEnd:IsA("Attachment"), `Vfx.{CUE.lane} needs Attachments Start and End`)
 
 	-- nil until the save's levels are published; then whether this save is new.
 	local isNew: boolean? = nil
@@ -225,36 +198,16 @@ function Guide.start()
 		if goal and from then
 			laneFrom, laneTo = GuideTrail.lane(CUE, distance)
 		end
-		local ahead = if laneFrom then GuideTrail.chevrons(CUE, distance, os.clock()) else {}
 		local along = if laneFrom then flat / distance else Vector3.zero
 		local origin = if from then Vector3.new(from.X, camera.CFrame.Position.Y - CUE.belowCamera, from.Z) else Vector3.zero
 
-		for i, chevron in chevrons do
-			local at = ahead[i]
-			if at then
-				local point = origin + along * at
-				chevron:PivotTo(CFrame.lookAt(point, point + along))
-				local hidden = 1 - GuideTrail.fade(CUE, at, laneFrom :: number, laneTo :: number)
-				hidden = math.round(hidden / FADE_STEP) * FADE_STEP
-				for _, glow in glows[i] do
-					set(glow.image, glow.prop, glow.rest + (1 - glow.rest) * hidden)
-				end
-			end
-			set(chevron, "Parent", if at then camera else nil)
+		-- A Beam's width runs along its attachments' Y axis: Y across the lane keeps it flat.
+		if laneFrom and laneTo then
+			local across = along:Cross(Vector3.yAxis)
+			set(laneStart, "WorldCFrame", CFrame.fromMatrix(origin + along * laneFrom, Vector3.yAxis, across))
+			set(laneEnd, "WorldCFrame", CFrame.fromMatrix(origin + along * laneTo, Vector3.yAxis, across))
 		end
-
-		-- The rails: one straight piece along each edge, the whole lane long.
-		local right = along:Cross(Vector3.yAxis)
-		for i, rail in rails do
-			if laneFrom and laneTo then
-				local side = right * CUE.laneHalfWidth * (if i == 1 then -1 else 1) - Vector3.yAxis * (railHeight / 2)
-				local a = origin + along * laneFrom + side
-				local b = origin + along * laneTo + side
-				set(rail, "Size", Vector3.new(railWidth, railHeight, (b - a).Magnitude))
-				set(rail, "CFrame", CFrame.lookAt((a + b) / 2, b))
-			end
-			set(rail, "Parent", if laneFrom then camera else nil)
-		end
+		set(lane, "Parent", if laneFrom then camera else nil)
 	end
 
 	-- The hand taps the middle of `button` while it shows (nil hides the hand).

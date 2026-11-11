@@ -155,11 +155,11 @@ Client (`src/client/`, all started from `init.client.luau`):
   Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
   shows `Hotbar.Status` text instead (clipped? flowing L/s).
 - `Guide.luau`: the first-minute tutorial (new saves, until the first purchase): `Hud.Guide`
-  objective at the top centre (theme `guide` yellow), a flat yellow lane toward the step's place,
-  `Cues.guide.belowCamera` studs under the camera whatever the ground does (from ~3 to ~40 studs
-  ahead, never within 8 of the goal: clones of `Vfx.GuideChevron` every 5 studs sliding forward,
-  fading in and out at the lane's ends; two clones of `Vfx.GuideRail` along its edges 3 studs
-  either side; maths in `shared/GuideTrail`,
+  objective at the top centre (theme `guide` yellow), a flat yellow lane from inside the player
+  toward the step's place, `Cues.guide.belowCamera` studs under the camera whatever the ground does
+  (up to ~40 studs, never within 8 of the goal: a clone of `Vfx.GuideLane`, a Part with Attachments
+  `Start`/`End` and a textured Beam whose texture carries the rails and the sliding chevrons, cut
+  cleanly at both ends; maths in `shared/GuideTrail`,
   numbers in `Cues.guide`) and a click hand (clone of `Hud.Templates.ClickHand`) tapping the button
   to press. `Guide.pointTo(position?, model?)` leads the lane anywhere once the tutorial isn't
   showing (nil hides it) and outlines `model` with a clone of `Vfx.GuideHighlight`.
@@ -234,8 +234,7 @@ Shared (`src/shared/`, pure unless noted):
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check with an
   optional `priceOf`),
-  `GuideTrail.luau` (the guide's lane: its stretch `lane`, the sliding `chevrons`, the pool size
-  `most`, the end `fade`):
+  `GuideTrail.luau` (the guide's lane: its stretch `lane`):
   maths, all Lune-tested (`Cues` too).
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the

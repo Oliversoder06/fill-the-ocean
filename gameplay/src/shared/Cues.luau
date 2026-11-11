@@ -78,26 +78,20 @@ Cues.coins = {
 	burstVolume = 0.35,
 }
 
--- The guide (client/Guide): a flat lane toward the current goal, belowCamera studs under the camera
--- (placement in shared/GuideTrail). `chevron` (a Model with Decals, tip along its pivot's -Z) sits
--- every `spacing` studs and slides forward at scrollSpeed studs a second, fading in and out over
--- edgeFade studs at the lane's ends; `rail` (a thin BasePart, stretched along Z) runs laneHalfWidth
--- studs either side. The lane runs laneStart..laneLength studs ahead and never within hideNear of
--- the goal. `highlight` (a Highlight) outlines a pointed-to stand, gate or plot. All three live in
+-- The guide (client/Guide): `lane` (a Part holding Attachments Start and End and a textured Beam
+-- whose texture carries the rails and the sliding chevrons; speed, width and look are set on it in
+-- Studio) runs flat belowCamera studs under the camera from inside the player toward the current
+-- goal (placement in shared/GuideTrail): laneStart..laneLength studs ahead, never within hideNear
+-- of the goal. `highlight` (a Highlight) outlines a pointed-to stand, gate or plot. Both live in
 -- ReplicatedStorage.Vfx. The click hand bobs `handBob` pixels, `handSpeed` taps a second, over the
 -- GUI element to click.
 Cues.guide = {
-	chevron = "GuideChevron",
-	rail = "GuideRail",
+	lane = "GuideLane",
 	highlight = "GuideHighlight",
-	spacing = 5,
-	laneHalfWidth = 3,
-	laneStart = 3,
+	laneStart = 0,
 	laneLength = 40,
 	hideNear = 8,
 	belowCamera = 2.5,
-	scrollSpeed = 4,
-	edgeFade = 3,
 	handBob = 10,
 	handSpeed = 1.6,
 }

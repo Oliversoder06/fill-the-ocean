@@ -287,6 +287,62 @@ def clear_tide_lane():
 	out.save(os.path.join(CT_OUT, "ct_chevronWide.png"))
 
 
+CT_LANE_GLOW = (0xFF, 0xE4, 0x5C)
+CT_LANE_CORE = (0xFF, 0xFA, 0xD8)
+
+
+# ct_laneTile: the guide lane Beam's tile, drawn with U (x) along the lane, V (y) across. Rails on the
+# top and bottom edges run off both sides so the tile repeats along U; one filled chevron points to +U.
+def clear_tide_lane_tile():
+	from PIL import ImageChops, ImageFilter
+
+	os.makedirs(CT_OUT, exist_ok=True)
+	size = 512
+	rail_y, rail_core = 36, 26
+	chev_top, chev_bottom, chev_depth, chev_thick = 64, 448, 185, 135  # thick: horizontal, ~100 px across the arm
+	apex = size / 2 + (chev_depth + chev_thick) / 2
+
+	# Three tiles wide so the rails' blur wraps cleanly; the middle one is kept.
+	def canvas():
+		return Image.new("L", (size * 3 * SS, size * SS), 0)
+
+	def rails(grow):
+		img = canvas()
+		d = ImageDraw.Draw(img)
+		for y in (rail_y, size - rail_y):
+			d.rectangle((0, (y - rail_core / 2 - grow) * SS, size * 3 * SS, (y + rail_core / 2 + grow) * SS), fill=255)
+		return img
+
+	def chevron(grow):
+		img = canvas()
+		x0 = size + apex - chev_depth
+		points = [
+			(x0, chev_top),
+			(size + apex, size / 2),
+			(x0, chev_bottom),
+			(x0 - chev_thick, chev_bottom),
+			(size + apex - chev_thick, size / 2),
+			(x0 - chev_thick, chev_top),
+		]
+		ImageDraw.Draw(img).polygon([(x * SS, y * SS) for x, y in points], fill=255, outline=255, width=grow * 2 * SS)
+		return img
+
+	def finish(img, blur):
+		small = img.resize((size * 3, size), Image.LANCZOS).filter(ImageFilter.GaussianBlur(blur))
+		return small.crop((size, 0, size * 2, size))
+
+	core = finish(ImageChops.lighter(rails(0), chevron(0)), 7)
+	glow = finish(ImageChops.lighter(rails(12), chevron(14)), 26)
+
+	out = Image.new("RGBA", (size, size), CT_LANE_GLOW + (0,))
+	out.putalpha(glow.point(lambda v: min(255, round(v * 1.3))))
+	top = Image.new("RGBA", (size, size), CT_LANE_CORE + (0,))
+	top.putalpha(core)
+	# Drawn with U along x; a Beam lays an image's y along its length (top at Start), so it is turned.
+	tile = Image.alpha_composite(out, top).transpose(Image.Transpose.ROTATE_270)
+	tile.save(os.path.join(CT_OUT, "ct_laneTile.png"))
+
+
 if __name__ == "__main__":
 	import sys
 
@@ -296,5 +352,7 @@ if __name__ == "__main__":
 		clear_tide_icons()
 	elif sys.argv[1:] == ["clear-tide-lane"]:
 		clear_tide_lane()
+	elif sys.argv[1:] == ["clear-tide-lane-tile"]:
+		clear_tide_lane_tile()
 	else:
 		main()
