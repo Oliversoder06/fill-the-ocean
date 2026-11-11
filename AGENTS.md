@@ -154,7 +154,7 @@ Client (`src/client/`, all started from `init.client.luau`):
   `Cues.hotbar.idleScale` on their `Press` UIScale with their `View` faded): the
   tool slot (1 / gamepad X / click to equip or unequip), one slot per owned
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
-  with `Ease.pop`) for only what is in hand, its model at the left end: the tool's water, the Water
+  with `Ease.pop`) for only what is in hand, its icon at the left end: the tool's water, the Water
   Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
   shows `Hotbar.Status` text instead (clipped? flowing L/s). Each slot has a `Back` (a soft vertical
   wave, light cyan, behind its `View`). The row stays centred: the place puts every gadget slot
@@ -248,6 +248,8 @@ Shared (`src/shared/`, pure unless noted):
 - `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). `Zones.channelPath` reads
   an area's `Channel.Path` (server/Map checks it, client/Channels follows it). `Zones.stand`,
   `Zones.shop` and `Zones.standPrompt` find stands for the server (`Map`) and the client (`Stands`).
+- `Icons.luau` (pure, tested): each model's UI image by model name (`Icons.of`); `tests/Icons.spec`
+  fails if a tool or item model has none.
 - `PourFlow.luau` (pure, tested): the `LastPour` attribute's `encode` / `decode`, a wave's place
   `along` a channel path, the fill bar's `pulse` and the seabed marker's fade.
 - `StaffRules.luau` (pure, tested): staff `targets` / `post` / `nextPost` (where each job may work),
@@ -354,7 +356,7 @@ The server publishes state as attributes; the client only reads them.
   Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
   the honeycomb's piece: a transparent ImageButton hit area over `Glow` (1.25x, lowest; hidden by
   code), `Body`
-  (+ UIGradient `Shade`), `Outline` (the rim), `Water.Fill`, `Name`, `View`, `Icon`, `Level`
+  (+ UIGradient `Shade`), `Outline` (the rim), `Water.Fill`, `Name`, `Icon`, `Level`
   (above `PriceRow`), `Lock`, `Check`, `Badge.Count`, `BackArrow` and `AreaIcon` (hidden
   ImageLabels), `Select`, `Press`; `Bottom` is hidden and unused; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
   cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton` (hidden by code),
@@ -381,7 +383,10 @@ The server publishes state as attributes; the client only reads them.
   place in the layer; equal values appear together) and exactly one UIScale child. Decorations
   (4 and up) also swing in by `Reveal.SPIN` degrees and finish with the last item. Never mark a
   child of a UIListLayout/UIGridLayout (its scale moves its siblings); mark what is inside it.
-- Tool icons are not drawn yet; slots use the `unknown` image or the tool's 3D model.
+- Models show as images, not 3D: `art/ui/renders` holds 256 px renders (made with
+  `art/source/cut_icon_sheet.py` and `snap_studio.ps1` from a temporary magenta sheet of
+  ViewportFrames in Studio), `art/ui/icons` the owner's outlined versions, uploaded and listed in
+  `shared/Icons.luau`. A new model needs a render, an outlined icon and its id there.
 
 ## Gotchas (each one has cost time)
 - After changing anything in Studio (StarterGui, the map), the owner must **save the place**, or the
@@ -421,7 +426,7 @@ needs a Studio play test).
 - Rojo owns code only. The map, terrain and scenery live in the Studio place; the owner saves and
   publishes it in Studio.
 - `gameplay/src/shared/` and `common/` modules that tests cover (Config, Ladder, Water, ToolView,
-  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal, Honeycomb, Cues, Items) must stay
+  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal, Honeycomb, Cues, Items, Icons) must stay
   **pure**: no `require` of other modules, no `game`, no Roblox types, so Lune can run them.
   Lune tests live in `gameplay/tests/*.spec.luau` and are listed in `gameplay/tests/run.luau`.
 - Server-authoritative: the server owns money, water, purchases. Validate every remote argument

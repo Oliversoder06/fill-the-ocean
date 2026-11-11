@@ -4,7 +4,7 @@
 -- shown once owned; press 2, 3, 4 (in config order), gamepad DPadRight (next one) or click a slot to
 -- take that gadget out instead of the tool, again to put it away. The server decides (Equip remote).
 -- The thing in hand shows at full size; the rest sit smaller and fainter (Cues.hotbar).
--- The fill bar above the slots shows only what the thing in hand uses, its model at the left end:
+-- The fill bar above the slots shows only what the thing in hand uses, its icon at the left end:
 -- the tool's "carried / capacity" litres, the Water Gun's water, the Jetpack Tank's fuel, or, while
 -- the player drives their vehicle or stands by its hose (client/Vehicles.gauge), its tank. The Garden
 -- Hose has no bar: Hotbar.Status says whether it is clipped and how fast it flows. Nothing in hand:
@@ -20,12 +20,12 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Items = require(ReplicatedStorage.Common.Items)
 local Ease = require(ReplicatedStorage.Shared.Ease)
-local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
+local Icons = require(ReplicatedStorage.Shared.Icons)
 local Hud = require(script.Parent.Hud)
 local Vehicles = require(script.Parent.Vehicles)
 
 local player = Players.LocalPlayer
-local colors, motion = Theme.colors, Theme.motion
+local colors, images, motion = Theme.colors, Theme.images, Theme.motion
 local set = Hud.set
 
 local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -39,7 +39,7 @@ local GADGET_KEYS = { Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four }
 local Hotbar = {}
 
 -- `press`: the slot's one UIScale, carrying both its rest size and hover / press.
-type Held = { press: UIScale, view: ViewportFrame, held: boolean? }
+type Held = { press: UIScale, view: ImageLabel, held: boolean? }
 
 local function restScale(entry: Held): number
 	return if entry.held then 1 else IDLE.idleScale
@@ -73,7 +73,7 @@ function Hotbar.start()
 	local fill = Hud.find(fillBar, "Fill")
 	local fillLabel = Hud.find(fillBar, "Label")
 	local fillPop = Hud.find(fillBar, "Pop")
-	local fillTool = Hud.find(fillBar, "Tool") -- the model of what the bar measures, at its left end
+	local fillTool = Hud.find(fillBar, "Tool") -- the icon of what the bar measures, at its left end
 	local status = Hud.find(bar, "Status") -- the Garden Hose's line instead of the bar
 	local slot = Hud.find(bar, "Slot")
 	local view = Hud.find(slot, "View")
@@ -86,12 +86,13 @@ function Hotbar.start()
 	for _, item in Config.items do
 		if item.kind == "gadget" and item.use then
 			local gadgetSlot = Hud.find(bar, `Gadgets.{item.id}`)
+			local gadgetView = Hud.find(gadgetSlot, "View")
+			gadgetView.Image = Icons.of(item.model) or images.unknown
 			table.insert(gadgets, {
 				item = item,
 				slot = gadgetSlot,
-				view = Hud.find(gadgetSlot, "View"),
+				view = gadgetView,
 				press = Hud.find(gadgetSlot, "Press"),
-				shown = false,
 			})
 		end
 	end
@@ -166,18 +167,16 @@ function Hotbar.start()
 		TweenService:Create(press, QUICK, { Scale = restScale(toolHeld) }):Play()
 	end)
 
-	-- The template for the bar's icon: the vehicle's, a gadget's or the tool's; nil until replicated.
-	local function iconOf(kind: string, gadget: Config.Item?, toolModel: string): Model?
+	-- The bar's icon: the vehicle's, a gadget's or the tool's.
+	local function iconOf(kind: string, gadget: Config.Item?, toolModel: string): string
 		if kind == "tank" then
 			local id = player:GetAttribute("Vehicle")
 			local item = if type(id) == "string" then Items.get(Config, id) else nil
-			return if item then ToolModels.itemModel(item) :: Model? else nil
+			return item and Icons.of(item.model) or images.unknown
 		end
-		return if gadget then ToolModels.find(gadget.model, "Gadgets") else ToolModels.find(toolModel)
+		return Icons.of(if gadget then gadget.model else toolModel) or images.unknown
 	end
 
-	local shownModel: string? = nil
-	local shownIcon: Model? = nil
 	local shownKind: string? = nil
 	-- The bar springs to each new fill (Ease.pop) instead of jumping.
 	local shown, from, to, changedAt = 0, 0, 0, -math.huge
@@ -187,13 +186,7 @@ function Hotbar.start()
 		if type(modelName) ~= "string" then
 			return
 		end
-		if modelName ~= shownModel then
-			local template = ToolModels.find(modelName)
-			if template then -- nil until replicated; try again next frame
-				ToolModels.showIn(view, template)
-				shownModel = modelName
-			end
-		end
+		set(view, "Image", Icons.of(modelName) or images.unknown)
 
 		local equipped = player:GetAttribute("Equipped") ~= false
 		local out = player:GetAttribute("Gadget")
@@ -207,13 +200,6 @@ function Hotbar.start()
 				shownGadgets += 1
 			end
 			hold(entry, out == id)
-			if not entry.shown and entry.slot.Visible then
-				local template = ToolModels.find(entry.item.model, "Gadgets")
-				if template then -- nil until replicated; try again next frame
-					ToolModels.showIn(entry.view, template)
-					entry.shown = true
-				end
-			end
 		end
 		local shift = UDim2.fromOffset(-shownGadgets * slotStep / 2, 0)
 		set(slot, "Position", slotAt + shift)
@@ -235,14 +221,7 @@ function Hotbar.start()
 			shownKind = nil
 			return
 		end
-		local icon = iconOf(kind :: string, gadget, modelName)
-		if icon and icon ~= shownIcon then
-			ToolModels.showIn(fillTool, icon)
-			shownIcon = icon
-		elseif not icon and kind ~= shownKind and shownIcon then -- not the last thing's icon while this one's replicates
-			fillTool:ClearAllChildren()
-			shownIcon = nil
-		end
+		set(fillTool, "Image", iconOf(kind :: string, gadget, modelName))
 		local jetpack = kind == "jetpackTank"
 		local carried = player:GetAttribute("Carried") or 0
 		local capacity = player:GetAttribute("Capacity") or 0

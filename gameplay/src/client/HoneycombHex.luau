@@ -14,8 +14,8 @@ local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local Format = require(ReplicatedStorage.Shared.Format)
 local Comb = require(ReplicatedStorage.Shared.Honeycomb)
+local Icons = require(ReplicatedStorage.Shared.Icons)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
-local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
@@ -54,7 +54,7 @@ local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
 -- hex in a view shows the same sizes.
 local TEXT = { name = Theme.type.label, level = Theme.type.small, price = Theme.type.label }
 
--- Art for the tracks that have an icon (the tool shows its 3D model; the rest none until drawn).
+-- Art for the tracks that have an icon (the tool and items show their model's, shared/Icons).
 local ICONS = { pickup = "pipFull", tip = "coin" }
 
 export type Hex = {
@@ -65,7 +65,6 @@ export type Hex = {
 	fill: ImageLabel,
 	outline: ImageLabel,
 	select: GuiObject,
-	view: ViewportFrame,
 	icon: ImageLabel,
 	name: TextLabel,
 	level: TextLabel,
@@ -86,7 +85,6 @@ export type Hex = {
 	x: number, -- offset from the canvas centre, before zoom
 	y: number,
 	key: string?, -- the upgrade id, "cat:<id>" or "back"
-	art: Instance?,
 	kind: Kind?, -- the look painted
 	hover: boolean,
 	down: boolean,
@@ -109,7 +107,6 @@ function HoneycombHex.parts(button: ImageButton)
 		fill = Hud.find(button, "Water.Fill"),
 		outline = Hud.find(button, "Outline"),
 		select = Hud.find(button, "Select"),
-		view = Hud.find(button, "View"),
 		icon = Hud.find(button, "Icon"),
 		name = Hud.find(button, "Name"), -- not button.Name: the child's name clashes with the property
 		level = Hud.find(button, "Level"),
@@ -203,37 +200,29 @@ local function paintBody(hex: Hex, kind: Kind, water: number, check: boolean, lo
 	set(hex.areaIcon, "Visible", area)
 end
 
--- The template (a Model or a backpack's Accessory) and image a level shows; nil, nil for none (a
--- gate shows AreaIcon; the tool its model in hand, see paintUpgrade).
-function HoneycombHex.artOf(link: Comb.Link): (Instance?, string?)
+-- The image a level shows; nil for none (a gate shows AreaIcon; the tool its model in hand, see
+-- paintUpgrade).
+function HoneycombHex.artOf(link: Comb.Link): string?
 	if link.kind == "gate" then
-		return nil, nil
+		return nil
 	elseif link.kind == "track" then
 		local icon = ICONS[link.id]
-		return nil, if icon then images[icon] else nil
+		return if icon then images[icon] else nil
 	end
-	local template = ToolModels.itemModel(Items.get(Config, link.id))
-	return template, if template then nil else images.unknown -- nil until replicated
+	return Icons.of(Items.get(Config, link.id).model) or images.unknown
 end
 
--- A hex's art slot: `template` in its ViewportFrame (copied once per template), else `image` in its
--- Icon, else nothing.
-function HoneycombHex.showArt(record: { art: Instance? }, view: ViewportFrame, icon: ImageLabel, template: Instance?, image: string?)
-	if template and record.art ~= template then
-		ToolModels.showIn(view, template :: any)
-		record.art = template
-	end
-	set(view, "Visible", template ~= nil)
-	set(icon, "Visible", template == nil and image ~= nil)
+-- A hex's art: `image` in its Icon, nil for nothing.
+function HoneycombHex.showArt(icon: ImageLabel, image: string?)
+	set(icon, "Visible", image ~= nil)
 	if image then
 		set(icon, "Image", image)
 	end
 end
 
--- The tool in hand's model.
-local function toolArt(stats: Ladder.Stats): (Instance?, string?)
-	local template = ToolModels.find(stats.toolModel)
-	return template, if template then nil else images.unknown
+-- The tool in hand's image.
+local function toolArt(stats: Ladder.Stats): string
+	return Icons.of(stats.toolModel) or images.unknown
 end
 
 -- An upgrade hex's Level: owned of all levels ("2/6"), "MAX" when done; none for a gate.
@@ -276,13 +265,13 @@ function HoneycombHex.paintUpgrade(hex: Hex, upgrade: Comb.Upgrade, st: Comb.Hex
 	paintText(hex.name, if tool then Format.toolName(stats.toolName) else Text.short(link))
 	paintText(hex.level, HoneycombHex.levelText(upgrade, st))
 	paintPrice(hex, priceText, coin, priceColor)
-	local template, image = nil, nil
+	local image = nil
 	if art and tool then
-		template, image = toolArt(stats)
+		image = toolArt(stats)
 	elseif art then
-		template, image = HoneycombHex.artOf(link)
+		image = HoneycombHex.artOf(link)
 	end
-	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
+	HoneycombHex.showArt(hex.icon, image)
 end
 
 -- The red ball: pops in when something becomes buyable, shrinks away at 0.
@@ -316,13 +305,13 @@ function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string
 	paintText(hex.name, Text.category(catId):upper())
 	paintText(hex.level, `{owned}/{total}`)
 	paintPrice(hex, "Open", false, colors.text)
-	local template, image = nil, nil
+	local image = nil
 	if catId == "boosts" then
 		image = images.pipFull
 	elseif catId ~= "areas" then
-		template, image = HoneycombHex.artOf(layout.categories[catId].upgrades[1].links[1])
+		image = HoneycombHex.artOf(layout.categories[catId].upgrades[1].links[1])
 	end
-	HoneycombHex.showArt(hex, hex.view, hex.icon, template, image)
+	HoneycombHex.showArt(hex.icon, image)
 	paintBadge(hex, count)
 end
 
@@ -332,7 +321,7 @@ function HoneycombHex.paintBack(hex: Hex)
 	paintText(hex.name, "Back")
 	paintText(hex.level, nil)
 	paintPrice(hex, nil, false, colors.text)
-	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
+	HoneycombHex.showArt(hex.icon, nil)
 end
 
 -- A dark empty hex that completes the honeycomb's shape: nothing on it.
@@ -341,7 +330,7 @@ function HoneycombHex.paintEmpty(hex: Hex)
 	paintText(hex.name, nil)
 	paintText(hex.level, nil)
 	paintPrice(hex, nil, false, colors.text)
-	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
+	HoneycombHex.showArt(hex.icon, nil)
 end
 
 -- The scale an animation adds at `now` (1 when none plays).
