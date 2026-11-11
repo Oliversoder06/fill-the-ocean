@@ -200,6 +200,12 @@ Cues.honeycomb = {
 	breatheSeconds = 1.5,
 	minHexPixels = 64,
 	maxZoom = 1.6,
+	-- The canvas: the mouse wheel zooms toward the pointer (x zoomStep a notch, zoomMin..zoomMax of
+	-- the fitted zoom); a press that moves dragPixels drags it instead of clicking.
+	zoomStep = 1.12,
+	zoomMin = 0.6,
+	zoomMax = 2.5,
+	dragPixels = 6,
 }
 
 -- The purchase sting's pitch for the `level`-th level bought of an upgrade: one step higher each, capped.

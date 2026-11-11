@@ -16,7 +16,9 @@
 -- hired staff's card shows Tooltip.AssignButton, which moves it to its next post (Staff("assign",
 -- itemId, areaId), StaffRules.nextPost). A landing plays on the bought hex; your own buy also gets
 -- coins, a sting and, for a first, a NEW! stamp (client/Purchase). Back (the Back hex, Backspace,
--- gamepad B) glides out, then closes; Roblox's menu closes it.
+-- gamepad B) glides out, then closes; Roblox's menu closes it, and so does a click or tap that
+-- isn't on a hex, the card or a button. The canvas is a board: the mouse wheel zooms toward the
+-- pointer, holding and dragging (mouse or finger, from anywhere) pans it; a drag never clicks.
 local ContextActionService = game:GetService("ContextActionService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
@@ -53,6 +55,7 @@ local REFRESH_OPEN = 0.1 -- seconds between state refreshes (after an attribute 
 local REFRESH_CLOSED = 0.25 -- only the badges while closed
 local PRESS_RATE = 25 -- per second: hover and press scales catch up in about 0.08 s
 local STICK = 0.6 -- thumbstick push that steps the selection (let go under it to step again)
+local DRAG_CLICK_GUARD = 0.1 -- seconds after a drag ends in which a hex's click is the drag's release
 local PAD_STEPS = {
 	[Enum.KeyCode.DPadUp] = Vector2.new(0, -1),
 	[Enum.KeyCode.DPadDown] = Vector2.new(0, 1),
@@ -111,6 +114,10 @@ type ViewData = {
 }
 
 type Input = Card.Input
+
+-- A mouse button or finger held down while open: where it went down, where it is, whether it has
+-- become a drag.
+type Press = { input: InputObject, from: Vector2, last: Vector2, dragging: boolean }
 
 -- A buy sent for upgrade `id` (Buy(buyId, have)) with `owned` of its levels owned, until its
 -- LastBuy lands or PENDING_SECONDS pass.
@@ -171,6 +178,11 @@ function Honeycomb.start()
 	local input: Input = "mouse"
 	local cardKey: string? = nil -- the upgrade the card shows
 	local overCard = false -- the mouse is on the card
+	local canvasAt = canvas.Position -- Studio's: the canvas centre before any pan
+	local pan, userZoom = Vector2.zero, 1 -- the player's drag and wheel zoom (x the fitted zoom)
+	local glide: Tween? = nil -- a view's zoom-in, cancelled by the wheel
+	local press: Press? = nil
+	local dragEndedAt = -math.huge
 
 	local function inRun(): boolean
 		return ReplicatedStorage:GetAttribute("Phase") == "playing"
@@ -214,11 +226,39 @@ function Honeycomb.start()
 		v.zoom = (Comb.zoom(v.w, v.h, size.X, size.Y, hexHeight, CUE.minHexPixels, CUE.maxZoom))
 	end
 
+	-- The canvas at its pan, kept so some of the view always covers the board's centre.
+	local function placeCanvas()
+		local v = views[viewId]
+		if v then
+			pan = Vector2.new(Comb.clampPan(pan.X, pan.Y, v.w, v.h, v.zoom * userZoom))
+		end
+		canvas.Position = canvasAt + UDim2.fromOffset(pan.X, pan.Y)
+	end
+
+	-- The wheel: zoom by `factor`, keeping the canvas point under `point` (screen) where it is.
+	local function zoomAt(point: Vector2, factor: number)
+		local v = views[viewId]
+		local was = userZoom
+		userZoom = math.clamp(userZoom * factor, CUE.zoomMin, CUE.zoomMax)
+		if not v or userZoom == was then
+			return
+		end
+		if glide then
+			glide:Cancel()
+		end
+		-- The canvas is a zero-size frame anchored at its centre: it scales around AbsolutePosition.
+		local off = point - canvas.AbsolutePosition
+		pan = Vector2.new(Comb.zoomPan(pan.X, pan.Y, off.X, off.Y, was, userZoom))
+		zoomScale.Scale = v.zoom * userZoom
+		placeCanvas()
+	end
+
 	board:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 		local v = views[viewId]
 		if v then
 			fitView(v)
-			zoomScale.Scale = v.zoom
+			zoomScale.Scale = v.zoom * userZoom
+			placeCanvas()
 		end
 	end)
 
@@ -249,7 +289,8 @@ function Honeycomb.start()
 			if kind == Enum.UserInputType.Touch then
 				hex.hover = false -- a finger leaves no hover behind
 			end
-			if open then
+			local dragging = (press and press.dragging) or os.clock() - dragEndedAt < DRAG_CLICK_GUARD
+			if open and not dragging then
 				onClick(if kind == Enum.UserInputType.Touch then "touch" elseif kind == Enum.UserInputType.MouseButton1 then "mouse" else "gamepad")
 			end
 		end)
@@ -517,8 +558,12 @@ function Honeycomb.start()
 		pickId, cardKey = pick, nil
 		table.clear(lastOwned)
 		fitView(v)
+		pan, userZoom = Vector2.zero, 1
+		placeCanvas()
 		zoomScale.Scale = v.zoom * CUE.glideZoomFrom
-		TweenService:Create(zoomScale, TweenInfo.new(CUE.glideSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = v.zoom }):Play()
+		local tween = TweenService:Create(zoomScale, TweenInfo.new(CUE.glideSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = v.zoom })
+		glide = tween
+		tween:Play()
 		local now = os.clock()
 		for _, list in { v.hexes, v.empties } do
 			for _, hex in list do
@@ -588,7 +633,7 @@ function Honeycomb.start()
 		elseif open then
 			open, isOpen = false, false
 			animToken += 1
-			cardKey = nil
+			cardKey, press = nil, nil
 			ContextActionService:UnbindAction("HoneycombBack")
 			ContextActionService:UnbindAction("HoneycombPad")
 			TweenService:Create(backdrop, uncover, { BackgroundTransparency = 1 }):Play()
@@ -653,6 +698,71 @@ function Honeycomb.start()
 	end)
 	card.frame.MouseLeave:Connect(function()
 		overCard = false
+	end)
+
+	-- Whether screen `point` is on something to click: a hex, a button or the card.
+	local function onItem(point: Vector2): boolean
+		for _, object in (gui.Parent :: PlayerGui):GetGuiObjectsAtPosition(point.X, point.Y) do
+			if object:IsA("GuiButton") or object == card.frame or object:IsDescendantOf(card.frame) then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function pointer(inputObject: InputObject): Vector2
+		return Vector2.new(inputObject.Position.X, inputObject.Position.Y)
+	end
+
+	-- Drag to pan, wheel to zoom, click off the honeycomb to close.
+	UserInputService.InputBegan:Connect(function(inputObject: InputObject)
+		local kind = inputObject.UserInputType
+		if open and not press and (kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch) then
+			local at = pointer(inputObject)
+			press = { input = inputObject, from = at, last = at, dragging = false }
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(inputObject: InputObject)
+		local kind = inputObject.UserInputType
+		if not open then
+			return
+		elseif kind == Enum.UserInputType.MouseWheel then
+			zoomAt(pointer(inputObject), CUE.zoomStep ^ inputObject.Position.Z)
+			return
+		end
+		local held = press
+		local moves = if kind == Enum.UserInputType.Touch
+			then held and inputObject == held.input
+			else held and kind == Enum.UserInputType.MouseMovement and held.input.UserInputType == Enum.UserInputType.MouseButton1
+		if not (held and moves) then
+			return
+		end
+		local at = pointer(inputObject)
+		if not held.dragging and (at - held.from).Magnitude >= CUE.dragPixels then
+			held.dragging = true
+			for _, hex in views[viewId].hexes do
+				hex.down = false
+			end
+		end
+		if held.dragging then
+			pan += at - held.last
+			placeCanvas()
+		end
+		held.last = at
+	end)
+	UserInputService.InputEnded:Connect(function(inputObject: InputObject)
+		local held = press
+		if not held or held.input.UserInputType ~= inputObject.UserInputType then
+			return
+		elseif inputObject.UserInputType == Enum.UserInputType.Touch and inputObject ~= held.input then
+			return -- another finger
+		end
+		press = nil
+		if held.dragging then
+			dragEndedAt = os.clock()
+		elseif open and not onItem(held.from) then
+			setOpen(false)
+		end
 	end)
 
 	local shownWallet = -1

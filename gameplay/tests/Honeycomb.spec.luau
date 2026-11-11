@@ -524,6 +524,28 @@ function tests.zoom_fits_the_board_and_pans_below_the_smallest_hex(t)
 	t.expectEq(pans, true)
 end
 
+-- The wheel zooms around the pointer: the canvas point under it stays put.
+function tests.zoom_pan_keeps_the_point_under_the_pointer(t)
+	local panX, panY, dx, dy, was, now = 30, -10, 100, 50, 1, 2
+	local x, y = Honeycomb.zoomPan(panX, panY, dx, dy, was, now)
+	-- A canvas point at local (lx, ly) sits at pan + l * zoom; the pointer's must not move.
+	local lx, ly = dx / was, dy / was
+	t.expectNear(x + lx * now, panX + lx * was, 1e-9, "x")
+	t.expectNear(y + ly * now, panY + ly * was, 1e-9, "y")
+	local sx, sy = Honeycomb.zoomPan(panX, panY, 0, 0, 1, 2)
+	t.expectEq(sx, panX, "zooming at the centre doesn't pan")
+	t.expectEq(sy, panY)
+end
+
+function tests.clamp_pan_keeps_the_view_over_the_centre(t)
+	local x, y = Honeycomb.clampPan(500, -500, 400, 200, 1.5)
+	t.expectEq(x, 300, "half the zoomed width")
+	t.expectEq(y, -150, "half the zoomed height")
+	x, y = Honeycomb.clampPan(20, -30, 400, 200, 1)
+	t.expectEq(x, 20, "inside: unchanged")
+	t.expectEq(y, -30)
+end
+
 function tests.find_names_the_view_and_upgrade_of_an_id(t)
 	local layout = Honeycomb.layout(Config)
 	local viewId, u = Honeycomb.find(layout, "tool")

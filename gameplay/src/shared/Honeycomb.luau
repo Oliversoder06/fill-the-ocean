@@ -89,6 +89,20 @@ function Honeycomb.zoom(contentW: number, contentH: number, boardW: number, boar
 	return least, true
 end
 
+-- The pan after zooming from `was` to `now` around a pointer (dx, dy) screen pixels from the
+-- canvas centre: the canvas point under the pointer stays under it.
+function Honeycomb.zoomPan(panX: number, panY: number, dx: number, dy: number, was: number, now: number): (number, number)
+	local k = 1 - now / was
+	return panX + dx * k, panY + dy * k
+end
+
+-- A pan kept within half the content (w x h at `zoom`) each way, so the view always covers the
+-- board's centre.
+function Honeycomb.clampPan(panX: number, panY: number, w: number, h: number, zoom: number): (number, number)
+	local limitX, limitY = w * zoom / 2, h * zoom / 2
+	return math.clamp(panX, -limitX, limitX), math.clamp(panY, -limitY, limitY)
+end
+
 -- When a hex at (q, r) starts popping in as a view opens: rings further out a little later.
 function Honeycomb.enterDelay(q: number, r: number, stagger: number, cap: number): number
 	return math.min(Honeycomb.distance(0, 0, q, r) * stagger, cap)

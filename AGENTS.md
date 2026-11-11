@@ -92,12 +92,14 @@ Client (`src/client/`, all started from `init.client.luau`):
   full-screen cover: opening blurs the world (`Lighting.HoneycombBlur`) and fades in `Backdrop`; the
   hotbar, wallet, run panel and guide strip hide. One hex per upgrade (copies of
   `Hud.Templates.Hex` in `Board.Canvas`, `Comb.SPACING` apart so a small even gap shows, the view
-  fitted to the board with `Canvas.Zoom`, no pan). The main view: the tool hex at the centre (a
+  fitted to the board with `Canvas.Zoom`; the mouse wheel zooms toward the pointer and holding and
+  dragging (mouse or finger) pans `Canvas.Position`, numbers in `Cues.honeycomb`, maths
+  `Comb.zoomPan` / `clampPan`; a drag never clicks a hex). The main view: the tool hex at the centre (a
   click buys its next tool level) and a ring of six category hexes (Boosts, Gear, Vehicles,
   Buildings, Staff, Areas) with a red `Badge` count; a category view: its Back hex at the centre
   (click, Backspace, gamepad B: back to main, then close; the old `BackButton` is hidden) and its
-  upgrades around it (`Comb.ringSlots`). Opens through `Window` (no frame pop); `CloseButton` and
-  Roblox's menu (Esc) close it. The `Tooltip` card sits by the hovered hex, else the selected one
+  upgrades around it (`Comb.ringSlots`). Opens through `Window` (no frame pop); `CloseButton`,
+  Roblox's menu (Esc) and a click or tap off every hex, button and the card close it. The `Tooltip` card sits by the hovered hex, else the selected one
   (`HoneycombCard`). A mouse click on an affordable hex buys its next level (`Buy(id, bought)`; a
   gate: `Buy("gate:<areaId>", 0)`; clicks are ignored until the last buy has landed); a tap or
   gamepad A selects first, then buys; the D-pad / stick steps between hexes
@@ -216,7 +218,7 @@ Shared (`src/shared/`, pure unless noted):
 - `NextGoal.luau`: `pick(offers, gate, money, fill, formatters)`: the next-goal line's one thing
   (the dearest affordable buy, the gate on sale, the cheapest next buy, the next gate's fill).
 - `Honeycomb.luau` (pure, tested): the upgrades honeycomb: flat-top hex maths (`toPixel`,
-  `bounds` (with `SPACING`, the gap), `zoom`, `enterDelay`, `step` for gamepad moves), `ringSlots`
+  `bounds` (with `SPACING`, the gap), `zoom`, `zoomPan`, `clampPan`, `enterDelay`, `step` for gamepad moves), `ringSlots`
   (up to 18 cells around a centre, ring 1 then ring 2, mirror-symmetric, read top to bottom),
   `emptySlots` (the dark cells completing the rings reached),
   `layout(config)` (`tool`; the `ring` of categories; each category's upgrades, earlier areas
