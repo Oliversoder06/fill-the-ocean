@@ -78,14 +78,14 @@ Cues.coins = {
 	burstVolume = 0.35,
 }
 
--- The guide (client/Guide): a lane on the ground toward the current goal (placement in
--- shared/GuideTrail). `chevron` (a Model with Decals, tip along its pivot's -Z) sits every `spacing`
--- studs; `rail` (a thin Neon BasePart, stretched along Z) runs laneHalfWidth studs either side. The
--- lane runs laneStart..laneLength studs ahead and never within hideNear of the goal. A wave
--- (pulseSpeed studs a second, pulseLength crest to crest) fades the chevrons up to pulseDim of the
--- way to clear; the rails stay steady. `highlight` (a Highlight) outlines a pointed-to stand, gate
--- or plot. All three live in ReplicatedStorage.Vfx. The click hand bobs `handBob` pixels,
--- `handSpeed` taps a second, over the GUI element to click.
+-- The guide (client/Guide): a flat lane toward the current goal, belowCamera studs under the camera
+-- (placement in shared/GuideTrail). `chevron` (a Model with Decals, tip along its pivot's -Z) sits
+-- every `spacing` studs and slides forward at scrollSpeed studs a second, fading in and out over
+-- edgeFade studs at the lane's ends; `rail` (a thin BasePart, stretched along Z) runs laneHalfWidth
+-- studs either side. The lane runs laneStart..laneLength studs ahead and never within hideNear of
+-- the goal. `highlight` (a Highlight) outlines a pointed-to stand, gate or plot. All three live in
+-- ReplicatedStorage.Vfx. The click hand bobs `handBob` pixels, `handSpeed` taps a second, over the
+-- GUI element to click.
 Cues.guide = {
 	chevron = "GuideChevron",
 	rail = "GuideRail",
@@ -95,9 +95,9 @@ Cues.guide = {
 	laneStart = 3,
 	laneLength = 40,
 	hideNear = 8,
-	pulseSpeed = 12,
-	pulseLength = 15,
-	pulseDim = 0.35,
+	belowCamera = 2.5,
+	scrollSpeed = 4,
+	edgeFade = 3,
 	handBob = 10,
 	handSpeed = 1.6,
 }

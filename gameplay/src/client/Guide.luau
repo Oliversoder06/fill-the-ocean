@@ -2,9 +2,9 @@
 -- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
 -- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
 -- state (where you stand, Carried, the team's Wallet, the honeycomb), so walking away goes back a step and nothing is
--- saved. The goal (in guide yellow) says what to do, never where to click: a glowing yellow lane on
--- the ground leads to the place (shared/GuideTrail: clones of ReplicatedStorage.Vfx.GuideChevron
--- every few studs with a gentle brightness wave, between two steady clones of Vfx.GuideRail along
+-- saved. The goal (in guide yellow) says what to do, never where to click: a flat yellow lane just
+-- below the camera leads to the place (shared/GuideTrail: clones of ReplicatedStorage.Vfx.GuideChevron
+-- every few studs sliding forward, between two clones of Vfx.GuideRail along
 -- its edges), a click hand (a clone of Hud.Templates.ClickHand) taps the button to press, and
 -- Action's ActHint says which key. Skip hides it for the session. Once it is done, Guide.pointTo
 -- leads the lane anywhere and outlines the stand, gate or plot there (a clone of Vfx.GuideHighlight).
@@ -27,12 +27,7 @@ local CUE = Cues.guide
 local STEPS = 6
 local DONE_SECONDS = 3
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local RAY_UP, RAY_DOWN = 8, 40 -- studs above the lane's line a ground ray starts, and its length
-local LIFT = 0.5 -- studs over the ray's hit: smooth terrain sand draws above where rays hit it
-local RAY_EVERY = 0.1 -- seconds between a stop's ground rays; between them it slides along the last ground hit
-local RAY_DRIFT = 2 -- studs a stop may slide from its last ray before it casts again
-local FILTER_EVERY = 0.5 -- seconds between rebuilds of what the ground rays skip (bodies and vehicles come and go)
-local PULSE_STEP = 0.05 -- the fade moves in steps, so most frames write nothing
+local FADE_STEP = 0.05 -- the end fades move in steps, so most frames write nothing
 
 local Guide = {}
 
@@ -122,10 +117,10 @@ function Guide.start()
 	local highlight = highlightTemplate:Clone()
 
 	-- The lane's pools: each piece sits in the camera while it shows, unparented while it doesn't.
-	-- Each chevron's images (Decals, ImageLabels) fade with the pulse from their template transparency.
+	-- Each chevron's images (Decals, ImageLabels) fade in and out at the lane's ends from their
+	-- template transparency.
 	local most = GuideTrail.most(CUE)
 	local chevrons: { PVInstance } = {}
-	local placed: { [number]: CFrame } = {}
 	local glows: { [number]: { { image: Instance, prop: string, rest: number } } } = {}
 	for i = 1, most do
 		local chevron = chevronTemplate:Clone() :: PVInstance
@@ -139,29 +134,17 @@ function Guide.start()
 				table.insert(images, { image = d, prop = "ImageTransparency", rest = d.ImageTransparency })
 			end
 		end
-		assert(#images > 0, `ReplicatedStorage.Vfx.{CUE.chevron} needs a Decal or ImageLabel (the chevron image) for its pulse`)
+		assert(#images > 0, `ReplicatedStorage.Vfx.{CUE.chevron} needs a Decal or ImageLabel (the chevron image)`)
 		chevrons[i], glows[i] = chevron, images
 	end
-	-- Rails: one segment between each pair of neighbouring stops, on both sides.
+	-- Rails: one straight piece along each edge.
 	local railWidth, railHeight = railTemplate.Size.X, railTemplate.Size.Y
 	local rails: { BasePart } = {}
-	for i = 1, 2 * (most + 1) do
+	for i = 1, 2 do
 		local rail = railTemplate:Clone()
 		quiet(rail)
 		rails[i] = rail
 	end
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.RespectCanCollide = true -- the ground, not invisible zones (as shared/Zones.ground)
-	local filterAt = -math.huge
-	-- Each stop's last ground ray: the point it was cast over, when, and the ground it hit (nil: none);
-	-- and this frame's ground under it.
-	local castFrom: { [number]: Vector3? } = {}
-	local castAt: { [number]: number } = {}
-	local hitAt: { [number]: Vector3? } = {}
-	local hitUp: { [number]: Vector3? } = {}
-	local groundOf: { [number]: Vector3? } = {}
-	local upOf: { [number]: Vector3? } = {}
 
 	-- nil until the save's levels are published; then whether this save is new.
 	local isNew: boolean? = nil
@@ -230,104 +213,47 @@ function Guide.start()
 		return 3, "Carry it to the shore", shore.WorldPosition, nil
 	end
 
-	-- Stop `s`'s ground under `point` and the ground's up; nil over a gap.
-	local function groundAt(s: number, now: number, point: Vector3): (Vector3?, Vector3?)
-		local castPoint = castFrom[s]
-		if not castPoint or now - castAt[s] >= RAY_EVERY or (point - castPoint).Magnitude > RAY_DRIFT then
-			local hit = workspace:Raycast(point + Vector3.yAxis * RAY_UP, Vector3.yAxis * -RAY_DOWN, rayParams)
-			castPoint = point
-			castFrom[s], castAt[s] = point, now
-			hitAt[s], hitUp[s] = if hit then hit.Position else nil, if hit then hit.Normal else nil
-		end
-		local ground, up = hitAt[s], hitUp[s]
-		if not (ground and up) then
-			return nil, nil
-		end
-		local moved = point - (castPoint :: Vector3)
-		return ground + (moved - up * moved:Dot(up)) + up * LIFT, up
-	end
-
-	-- Lays the lane from the player toward `goal` (nil hides it).
+	-- Lays the lane from the player toward `goal` (nil hides it): flat, belowCamera studs under the
+	-- camera, whatever the ground does.
 	local function placeTrail(goal: Vector3?)
 		local camera = workspace.CurrentCamera
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 		local from = if root and root:IsA("BasePart") then root.Position else nil
 		local flat = if goal and from then Vector3.new(goal.X - from.X, 0, goal.Z - from.Z) else Vector3.zero
 		local distance = flat.Magnitude
-		local seconds = os.clock()
-		local stops = if goal and from then GuideTrail.stops(CUE, distance) else {}
-		if #stops > 0 and seconds - filterAt >= FILTER_EVERY then
-			filterAt = seconds
-			local ignore: { Instance } = { camera }
-			for _, other in Players:GetPlayers() do
-				if other.Character then
-					table.insert(ignore, other.Character)
-				end
-				local vehicle = workspace:FindFirstChild(`Vehicle_{other.UserId}`)
-				if vehicle then
-					table.insert(ignore, vehicle)
-				end
-			end
-			local staff = workspace:FindFirstChild("StaffBodies")
-			if staff then
-				table.insert(ignore, staff)
-			end
-			rayParams.FilterDescendantsInstances = ignore
+		local laneFrom, laneTo = nil, nil
+		if goal and from then
+			laneFrom, laneTo = GuideTrail.lane(CUE, distance)
 		end
-		local along = if #stops > 0 then flat / distance else Vector3.zero
-		local points: { GuideTrail.Point | false } = {}
-		for s, ahead in stops do
-			local point = (from :: Vector3) + along * ahead + Vector3.yAxis * (((goal :: Vector3).Y - (from :: Vector3).Y) * ahead / distance)
-			local ground, up = groundAt(s, seconds, point)
-			groundOf[s], upOf[s] = ground, up
-			points[s] = if ground then { X = ground.X, Y = ground.Y, Z = ground.Z } else false
-		end
+		local ahead = if laneFrom then GuideTrail.chevrons(CUE, distance, os.clock()) else {}
+		local along = if laneFrom then flat / distance else Vector3.zero
+		local origin = if from then Vector3.new(from.X, camera.CFrame.Position.Y - CUE.belowCamera, from.Z) else Vector3.zero
 
-		-- Chevron i sits on stop i + 1 (the first and last stops are the lane's ends), tip toward the goal.
 		for i, chevron in chevrons do
-			local s = i + 1
-			local ground, up = nil, nil
-			if s < #stops then
-				ground, up = groundOf[s], upOf[s]
-			end
-			local at: CFrame? = nil
-			if ground and up then
-				local look = along - up * along:Dot(up)
-				if look.Magnitude > 1e-3 then
-					at = CFrame.lookAt(ground, ground + look.Unit, up)
-				end
-			end
-			if at and at ~= placed[i] then
-				placed[i] = at
-				chevron:PivotTo(at)
-			end
+			local at = ahead[i]
 			if at then
-				local fade = math.round(CUE.pulseDim * (1 - GuideTrail.pulse(CUE, stops[s], seconds)) / PULSE_STEP) * PULSE_STEP
+				local point = origin + along * at
+				chevron:PivotTo(CFrame.lookAt(point, point + along))
+				local hidden = 1 - GuideTrail.fade(CUE, at, laneFrom :: number, laneTo :: number)
+				hidden = math.round(hidden / FADE_STEP) * FADE_STEP
 				for _, glow in glows[i] do
-					set(glow.image, glow.prop, glow.rest + (1 - glow.rest) * fade)
+					set(glow.image, glow.prop, glow.rest + (1 - glow.rest) * hidden)
 				end
 			end
 			set(chevron, "Parent", if at then camera else nil)
 		end
 
-		-- The rails: steady, resting on the ground along both edges.
+		-- The rails: one straight piece along each edge, the whole lane long.
 		local right = along:Cross(Vector3.yAxis)
-		local left, rightSide = GuideTrail.rails(points, { X = right.X, Y = right.Y, Z = right.Z }, CUE.laneHalfWidth)
-		local lift = Vector3.yAxis * (railHeight / 2)
-		local used = 0
-		for _, side in { left, rightSide } do
-			for _, segment in side do
-				used += 1
-				local rail = rails[used]
-				local a = Vector3.new(segment.from.X, segment.from.Y, segment.from.Z) + lift
-				local b = Vector3.new(segment.to.X, segment.to.Y, segment.to.Z) + lift
+		for i, rail in rails do
+			if laneFrom and laneTo then
+				local side = right * CUE.laneHalfWidth * (if i == 1 then -1 else 1) - Vector3.yAxis * (railHeight / 2)
+				local a = origin + along * laneFrom + side
+				local b = origin + along * laneTo + side
 				set(rail, "Size", Vector3.new(railWidth, railHeight, (b - a).Magnitude))
 				set(rail, "CFrame", CFrame.lookAt((a + b) / 2, b))
-				set(rail, "Parent", camera)
 			end
-		end
-		for i = used + 1, #rails do
-			set(rails[i], "Parent", nil)
+			set(rail, "Parent", if laneFrom then camera else nil)
 		end
 	end
 
