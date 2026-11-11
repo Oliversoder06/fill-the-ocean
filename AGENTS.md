@@ -382,8 +382,6 @@ The server publishes state as attributes; the client only reads them.
   (4 and up) also swing in by `Reveal.SPIN` degrees and finish with the last item. Never mark a
   child of a UIListLayout/UIGridLayout (its scale moves its siblings); mark what is inside it.
 - Tool icons are not drawn yet; slots use the `unknown` image or the tool's 3D model.
-  `ToolModels.showIn` gives every 3D icon a dark outline (`OUTLINE`): a fattened, flat dark copy
-  of each part pushed back along the camera's rays, so it projects just around the model.
 
 ## Gotchas (each one has cost time)
 - After changing anything in Studio (StarterGui, the map), the owner must **save the place**, or the
