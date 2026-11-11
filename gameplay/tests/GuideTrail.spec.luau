@@ -57,4 +57,36 @@ function tests.a_long_way_off_most_chevrons_show(t)
 	end
 end
 
+-- Impossible to miss (style clear-tide): a dense trail.
+function tests.the_trail_is_dense(t)
+	if GuideTrail.COUNT < 10 or GuideTrail.SPACING > 3 then
+		error(`{GuideTrail.COUNT} chevrons {GuideTrail.SPACING} studs apart: too sparse to read as a trail`)
+	end
+end
+
+function tests.the_pulse_is_a_brightness_from_0_to_1(t)
+	local low, high = math.huge, -math.huge
+	for ahead = 0, 40, 0.25 do
+		local p = GuideTrail.pulse(ahead, 1.3)
+		if not (p >= 0 and p <= 1) then
+			error(`pulse {p} at {ahead} studs is outside 0..1`)
+		end
+		low, high = math.min(low, p), math.max(high, p)
+	end
+	t.expectNear(low, 0, 0.01, "its trough")
+	t.expectNear(high, 1, 0.01, "its crest")
+end
+
+function tests.the_pulse_travels_toward_the_goal(t)
+	for _, ahead in { 3, 7.5, 20 } do
+		for _, seconds in { 0, 0.4, 5.1 } do
+			local later = GuideTrail.pulse(ahead + GuideTrail.PULSE_SPEED * 0.5, seconds + 0.5)
+			t.expectNear(later, GuideTrail.pulse(ahead, seconds), 1e-9, "the crest moves forward at PULSE_SPEED")
+		end
+	end
+	if GuideTrail.PULSE_SPEED <= GuideTrail.SPEED then
+		error("the pulse must outrun the chevrons, or it reads as standing still")
+	end
+end
+
 return tests

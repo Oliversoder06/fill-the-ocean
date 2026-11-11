@@ -1,6 +1,6 @@
 # Fill the Ocean
 
-UI style: sunbaked-sea
+UI style: clear-tide
 Balance: follow C:\RobloxDev\library\balance\README.md; formulas come from C:\RobloxDev\shared\Lib.
 Design: check C:\RobloxDev\library\design\README.md before planning features.
 

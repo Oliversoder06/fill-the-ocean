@@ -106,10 +106,12 @@ Client (`src/client/`, all started from `init.client.luau`):
   badges, a wallet change only when it crosses a badge's price, the fill only when it puts a gate
   on sale). `Honeycomb.show(id)` opens the view holding an id's hex and selects it (Goal);
   `Honeycomb.guideTarget(id)` is the next thing to tap for it (Guide: category hex, then the hex).
-- `HoneycombHex.luau`: the honeycomb's hexes: copies of the template coloured from one `PAINT`
-  table (categories orange, upgrades shallow-water blue, Back teal, locked slate, a white outline
-  on all), each upgrade painted in its state (`Name` on top, art, `Level` "2/6" / "MAX", the next
-  level's price at the bottom, coral with a rising fill while short; `BackArrow`, `AreaIcon`),
+- `HoneycombHex.luau`: the honeycomb's hexes: copies of the template painted from one `PAINT`
+  table per kind (upgrade blue, owned cyan, locked slate, category warm, Back red, empty dark: a
+  `Body.Shade` gradient, a lighter `Outline` rim, a soft `Glow`, lit on hover), each upgrade painted
+  in its state (`Name` on top, art, `Level` "2/6" / "MAX", the next level's price at the bottom
+  (`short` with a rising fill while short), "Owned" / "Open"; `BackArrow`, `AreaIcon`), dark empty
+  hexes completing a category's rings (`Comb.emptySlots`),
   text kept 14-18 / 12-14 / 14-16 px on screen, the landing (`celebrate`), enter / pop / wake
   scales. `HoneycombText.luau`: its words (names, effects, reasons, gate texts, staff posts).
   `HoneycombCard.luau`: the `Tooltip` card (words, placement, the staff `AssignButton`).
@@ -144,14 +146,16 @@ Client (`src/client/`, all started from `init.client.luau`):
   (`Music.duck`), plays through `SoundService.Music`.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
-- `Hotbar.luau`: the tool slot (1 / gamepad X / click to equip or unequip), one slot per owned
+- `Hotbar.luau`: icon-only slots (no boxes; the one in hand lifts 6 px and shows its `Glow`): the
+  tool slot (1 / gamepad X / click to equip or unequip), one slot per owned
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
   with `Ease.pop`) for only what is in hand, its model at the left end: the tool's water, the Water
   Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
   shows `Hotbar.Status` text instead (clipped? flowing L/s).
 - `Guide.luau`: the first-minute tutorial (new saves, until the first purchase): `Hud.Guide`
-  objective at the top centre, yellow ground chevrons toward the step's place (clones of
-  `Vfx.GuideChevron`, maths in `shared/GuideTrail`) and a click hand (clone of
+  objective at the top centre (theme `guide` yellow), glowing yellow ground chevrons toward the
+  step's place (clones of `Vfx.GuideChevron`, its Decals / ImageLabels pulsing with a wave that runs
+  toward the goal; maths in `shared/GuideTrail`) and a click hand (clone of
   `Hud.Templates.ClickHand`) tapping the button to press. `Guide.pointTo(position?)` leads the
   chevrons anywhere once the tutorial isn't showing (nil hides them).
 - `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
@@ -203,6 +207,7 @@ Shared (`src/shared/`, pure unless noted):
 - `Honeycomb.luau` (pure, tested): the upgrades honeycomb: flat-top hex maths (`toPixel`,
   `bounds` (with `SPACING`, the gap), `zoom`, `enterDelay`, `step` for gamepad moves), `ringSlots`
   (up to 18 cells around a centre, ring 1 then ring 2, mirror-symmetric, read top to bottom),
+  `emptySlots` (the dark cells completing the rings reached),
   `layout(config)` (`tool`; the `ring` of categories; each category's upgrades, earlier areas
   first, in `ringSlots`: one hex per track, item, the backpacks, and per gate in Areas), `upgrades`,
   `ownedCount`, `link` (the level a hex sells), `state` / `states(layout, viewId, view)` (buy /
@@ -224,7 +229,7 @@ Shared (`src/shared/`, pure unless noted):
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check with an
   optional `priceOf`),
-  `GuideTrail.luau` (where the guide's ground chevrons sit and which show):
+  `GuideTrail.luau` (where the guide's ground chevrons sit, which show and their `pulse`):
   maths, all Lune-tested (`Cues` too).
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
@@ -336,22 +341,25 @@ The server publishes state as attributes; the client only reads them.
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Honeycomb, Card, Waiting,
   Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
-  the honeycomb's piece: `Name`, `Level` (above `PriceRow`), `BackArrow` and `AreaIcon` (hidden
-  ImageLabels); `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
+  the honeycomb's piece: a transparent ImageButton hit area over `Glow` (1.25x, lowest), `Body`
+  (+ UIGradient `Shade`), `Outline` (the rim), `Water.Fill`, `Name`, `View`, `Icon`, `Level`
+  (above `PriceRow`), `Lock`, `Check`, `Badge.Count`, `BackArrow` and `AreaIcon` (hidden
+  ImageLabels), `Select`, `Press`; `Bottom` is hidden and unused; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
   cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton` (hidden by code),
   `CloseButton`, `Wallet`, `Tooltip`; with `Lighting.HoneycombBlur` (a BlurEffect at Size 0).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.
-- Look: style `sunbaked-sea` (`C:\RobloxDev\library\ui\styles\sunbaked-sea\style.md`). Colours,
-  fonts, image ids, 9-slice settings and motion come from the theme module
-  `ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"]` (`C:\RobloxDev\shared\UI\Themes\sunbaked-sea.luau`).
-  Never hard-code a colour or image id in game code; read it from the theme.
-- The look: a dry cracked-sand frame, quiet flat dark-sea panels (built in Studio, not images),
-  tiles coloured by category (Tool orange, Boosts teal, locked slate), navy outlines,
-  Montserrat Heavy titles, Nunito Heavy body text, white text with a navy outline (thin on small
-  text). No corner stickers or sparkles. Tintable images
-  (tile, tag, tab, big button) are white; colour them with `ImageColor3` from the theme.
+- Look: style `clear-tide` (`C:\RobloxDev\library\ui\styles\clear-tide\style.md`). Colours,
+  fonts, image ids, 9-slice settings, text stroke and motion come from the theme module
+  `ReplicatedStorage.Kit.UI.Themes["clear-tide"]` (`C:\RobloxDev\shared\UI\Themes\clear-tide.luau`).
+  Never hard-code a colour or image id in game code; read it from the theme, by its semantic key
+  (`upgradeTop`, `owned`, `short`, `text`, `guide`, ...; the old key names are only aliases).
+- The look: icon-led HUD with no boxes or panels behind HUD numbers (a big icon and a plain
+  number), an icon-only hotbar, hexes with a soft top-to-bottom gradient, a soft glow and a thin
+  lighter rim (no hard outline), one colour per job, Montserrat (Bold names, ExtraBold numbers and
+  titles), white text with a thin soft stroke (`textStroke`: thickness 1, colour `shadow`, never a
+  thick outline). Tintable images are white; colour them with `ImageColor3` from the theme.
 - Windows (anything the player clicks in) must be listed in `Hud.luau`'s `windows` table, so the
   first-person cursor is freed while they are open. While no window is open the mouse icon is
   hidden and `StarterGui.Cursor` (its own ScreenGui, IgnoreGuiInset so it sits on the true

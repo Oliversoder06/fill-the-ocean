@@ -2,7 +2,7 @@
 -- (server/Run onStand). The stands: each area's own (Zones.stand, the cove's first) and each cove
 -- shop (Config.stands, Zones.shop). Each gets a copy of StarterGui.Hud.Templates.StandSign (a
 -- BillboardGui with TextLabels Title and Line, built in Studio) over its prompt: the item a press
--- buys or saves up for and its price for the team (teal when the wallet affords it), where a locked one opens, or
+-- buys or saves up for and its price for the team (gold when the wallet affords it), where a locked one opens, or
 -- "Owned". The prompt names the stand and says what a press does (Items.standOffer, shared/Format).
 -- The Fire Station's CallPrompt shows only once the team owns a vehicle. Stands not streamed in yet are
 -- picked up when they arrive.
@@ -15,7 +15,7 @@ local Format = require(ReplicatedStorage.Shared.Format)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Hud = require(script.Parent.Hud)
 
 local REFRESH_SECONDS = 0.25
@@ -72,7 +72,7 @@ function Stands.reachable(stand: Stand, items: Items.State): boolean
 	return Items.reachable(Config, items, { stand.area.id })[1] ~= nil
 end
 
-local LINE_COLORS = { buy = colors.speedTag, money = colors.buyCoral, locked = colors.drySand, owned = colors.foam }
+local LINE_COLORS = { buy = colors.coin, money = colors.short, locked = colors.text, owned = colors.owned }
 
 function Stands.start()
 	local gui = player:WaitForChild("PlayerGui")

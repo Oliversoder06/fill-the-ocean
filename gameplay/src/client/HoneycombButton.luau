@@ -9,7 +9,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Cues = require(ReplicatedStorage.Shared.Cues)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Hud = require(script.Parent.Hud)
 
 local motion = Theme.motion

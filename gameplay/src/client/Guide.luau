@@ -2,8 +2,9 @@
 -- until the first purchase, at the top centre ("Objective 2/6" over the goal). Walk to the well,
 -- scoop until full, carry it to the shore, pour, buy your first upgrade. Each step comes from live
 -- state (where you stand, Carried, the team's Wallet, the honeycomb), so walking away goes back a step and nothing is
--- saved. The goal says what to do, never where to click: yellow chevrons on the ground (clones of
--- ReplicatedStorage.Vfx.GuideChevron, placed by shared/GuideTrail) lead to the place, a click hand
+-- saved. The goal (in guide yellow) says what to do, never where to click: glowing yellow chevrons on
+-- the ground (clones of ReplicatedStorage.Vfx.GuideChevron, placed by shared/GuideTrail, a
+-- brightness wave running along them) lead to the place, a click hand
 -- (a clone of Hud.Templates.ClickHand) taps the button to press, and Action's ActHint says which
 -- key. Skip hides it for the session. Once it is done, Guide.pointTo leads the chevrons anywhere.
 local Players = game:GetService("Players")
@@ -14,6 +15,7 @@ local TweenService = game:GetService("TweenService")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local GuideTrail = require(ReplicatedStorage.Shared.GuideTrail)
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Honeycomb = require(script.Parent.Honeycomb)
 local Hud = require(script.Parent.Hud)
 
@@ -29,6 +31,8 @@ local LIFT = 0.05 -- studs a chevron floats over the ground, so it never flicker
 local RAY_EVERY = 0.1 -- seconds between a chevron's ground rays; between them it slides along the last ground hit
 local RAY_DRIFT = 2 -- studs a chevron may slide from its last ray before it casts again (it also loops back)
 local FILTER_EVERY = 0.5 -- seconds between rebuilds of what the ground rays skip (bodies and vehicles come and go)
+local PULSE_DIM = 0.6 -- between the wave's crests a chevron's images fade this share of the way to clear
+local PULSE_STEP = 0.05 -- the fade moves in steps, so most frames write nothing
 
 local Guide = {}
 
@@ -91,6 +95,8 @@ function Guide.start()
 	local pop = Hud.find(panel, "Pop") :: UIScale
 	local objective = Hud.find(panel, "Objective")
 	local text = Hud.find(panel, "Text")
+	objective.TextColor3 = Theme.colors.guide
+	text.TextColor3 = Theme.colors.guide
 	local skip = Hud.find(panel, "SkipButton")
 	local admin = Hud.find(gui, "Admin")
 	local toolSlot = Hud.find(gui, "Hotbar.Slot")
@@ -108,15 +114,24 @@ function Guide.start()
 	assert(chevronTemplate and (chevronTemplate:IsA("Model") or chevronTemplate:IsA("BasePart")), `ReplicatedStorage.Vfx is missing {CUE.chevron} (a Model or BasePart)`)
 
 	-- The trail's pool: each chevron sits in the camera while it shows, unparented while it doesn't.
+	-- Each one's images (Decals, ImageLabels) fade with the pulse from their template transparency.
 	local chevrons: { PVInstance } = {}
 	local placed: { [number]: CFrame } = {}
+	local glows: { [number]: { { image: Instance, prop: string, rest: number } } } = {}
 	for i = 1, GuideTrail.COUNT do
 		local chevron = chevronTemplate:Clone() :: PVInstance
 		quiet(chevron)
+		local images = {}
 		for _, d in chevron:GetDescendants() do
 			quiet(d)
+			if d:IsA("Decal") then
+				table.insert(images, { image = d, prop = "Transparency", rest = d.Transparency })
+			elseif d:IsA("ImageLabel") then
+				table.insert(images, { image = d, prop = "ImageTransparency", rest = d.ImageTransparency })
+			end
 		end
-		chevrons[i] = chevron
+		assert(#images > 0, `ReplicatedStorage.Vfx.{CUE.chevron} needs a Decal or ImageLabel (the chevron image) for its pulse`)
+		chevrons[i], glows[i] = chevron, images
 	end
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -251,6 +266,12 @@ function Guide.start()
 			if at and at ~= placed[i] then
 				placed[i] = at
 				chevron:PivotTo(at)
+			end
+			if at then
+				local fade = math.round(PULSE_DIM * (1 - GuideTrail.pulse(ahead, seconds)) / PULSE_STEP) * PULSE_STEP
+				for _, glow in glows[i] do
+					set(glow.image, glow.prop, glow.rest + (1 - glow.rest) * fade)
+				end
 			end
 			set(chevron, "Parent", if at then camera else nil)
 		end

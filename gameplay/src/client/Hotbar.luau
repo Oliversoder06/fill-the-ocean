@@ -1,8 +1,9 @@
--- The hotbar (StarterGui.Hud.Hotbar, built in Studio): one slot showing the current tool. Press 1,
--- gamepad X or click the slot to put the tool away or take it out (the server decides).
+-- The hotbar (StarterGui.Hud.Hotbar, built in Studio): icon-only slots, no boxes. The tool's slot:
+-- press 1, gamepad X or click it to put the tool away or take it out (the server decides).
 -- Gadget slots (Hotbar.Gadgets.<itemId>, one per hotbar gadget in Config.items, built like Slot):
 -- shown once owned; press 2, 3, 4 (in config order), gamepad DPadRight (next one) or click a slot to
 -- take that gadget out instead of the tool, again to put it away. The server decides (Equip remote).
+-- The thing in hand lifts a little and shows its Glow.
 -- The fill bar above the slots shows only what the thing in hand uses, its model at the left end:
 -- the tool's "carried / capacity" litres, the Water Gun's water, the Jetpack Tank's fuel, or, while
 -- the player drives their vehicle or stands by its hose (client/Vehicles.gauge), its tank. The Garden
@@ -14,7 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Config = require(ReplicatedStorage.Shared.Config)
 local Items = require(ReplicatedStorage.Common.Items)
 local Ease = require(ReplicatedStorage.Shared.Ease)
@@ -30,9 +31,23 @@ local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Ou
 local POP = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local FILL_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local FILL_POP_SCALE = 1.08 -- the bar swells a little each time water lands (shows even at 100%)
+local LIFT = 6 -- pixels the thing in hand rises
+local LIFT_TWEEN = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local GADGET_KEYS = { Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four }
 
 local Hotbar = {}
+
+type Held = { slot: GuiObject, glow: GuiObject, rest: UDim2, held: boolean? }
+
+-- A slot in hand lifts and glows; one put away settles back.
+local function hold(entry: Held, held: boolean)
+	if entry.held == held then
+		return
+	end
+	entry.held = held
+	entry.glow.Visible = held
+	TweenService:Create(entry.slot, LIFT_TWEEN, { Position = if held then entry.rest - UDim2.fromOffset(0, LIFT) else entry.rest }):Play()
+end
 
 -- Litres for the fill label: whole numbers when whole (sweeps can leave thirds), 1.2K above 1000.
 local function litres(n: number): string
@@ -55,9 +70,11 @@ function Hotbar.start()
 	local fillTool = Hud.find(fillBar, "Tool") -- the model of what the bar measures, at its left end
 	local status = Hud.find(bar, "Status") -- the Garden Hose's line instead of the bar
 	local slot = Hud.find(bar, "Slot")
-	local ring = Hud.find(slot, "Ring")
 	local view = Hud.find(slot, "View")
 	local press = Hud.find(slot, "Press")
+	local toolHeld: Held = { slot = slot, glow = Hud.find(slot, "Glow"), rest = slot.Position }
+	fill.BackgroundColor3 = colors.owned
+	fillBar.BackgroundColor3 = colors.shadow
 	-- Hotbar gadgets (a `use`), in config order: each one's slot and key.
 	local gadgets = {}
 	for _, item in Config.items do
@@ -66,7 +83,8 @@ function Hotbar.start()
 			table.insert(gadgets, {
 				item = item,
 				slot = gadgetSlot,
-				ring = Hud.find(gadgetSlot, "Ring"),
+				glow = Hud.find(gadgetSlot, "Glow"),
+				rest = gadgetSlot.Position,
 				view = Hud.find(gadgetSlot, "View"),
 				press = Hud.find(gadgetSlot, "Press"),
 				shown = false,
@@ -172,8 +190,7 @@ function Hotbar.start()
 		for _, entry in gadgets do
 			local id = entry.item.id
 			set(entry.slot, "Visible", Items.owned(itemState, id))
-			set(entry.slot, "ImageColor3", if out == id then colors.toolTag else colors.locked)
-			set(entry.ring, "Visible", out == id)
+			hold(entry, out == id)
 			if not entry.shown and entry.slot.Visible then
 				local template = ToolModels.find(entry.item.model, "Gadgets")
 				if template then -- nil until replicated; try again next frame
@@ -182,11 +199,10 @@ function Hotbar.start()
 				end
 			end
 		end
-		set(slot, "ImageColor3", if equipped then colors.toolTag else colors.locked)
-		set(ring, "Visible", equipped)
 
 		-- What the bar measures: the vehicle's tank, else the gadget out, else the tool while it is out.
 		local gadget = if type(out) == "string" and out ~= "" then Items.get(Config, out) else nil
+		hold(toolHeld, equipped and not gadget)
 		local tank, tankMax = Vehicles.gauge()
 		local kind = if tank then "tank" elseif gadget then gadget.id elseif equipped then "tool" else nil
 		local hose = kind == "gardenHose"

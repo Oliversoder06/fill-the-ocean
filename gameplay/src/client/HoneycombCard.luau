@@ -12,7 +12,7 @@ local Comb = require(ReplicatedStorage.Shared.Honeycomb)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Hud = require(script.Parent.Hud)
 local Hex = require(script.Parent.HoneycombHex)
 local Text = require(script.Parent.HoneycombText)
@@ -101,13 +101,13 @@ function HoneycombCard.paint(card: Card, link: Comb.Link?, st: Comb.HexState?, v
 	set(card.priceRow, "Visible", priced)
 	if priced then
 		set(card.price, "Text", Hud.money(st.price :: number))
-		set(card.price, "TextColor3", if state == "short" then colors.buyCoral else colors.foam)
+		set(card.price, "TextColor3", if state == "short" then colors.short else colors.text)
 	end
 	local words = if state == "buy" then BUY_HINT[input] else Text.reason(link, st, view)
 	set(card.hint, "Visible", words ~= nil)
 	if words then
 		set(card.hint, "Text", words)
-		set(card.hint, "TextColor3", if state == "short" then colors.buyCoral else colors.foam)
+		set(card.hint, "TextColor3", if state == "short" then colors.short else colors.text)
 	end
 	local staff = HoneycombCard.hiredStaff(link, view)
 	set(card.assign, "Visible", staff ~= nil)

@@ -138,7 +138,8 @@ Cues.milestone = {
 
 -- The honeycomb upgrades (client/Honeycomb), seconds and scales. Opening blurs the world to blur
 -- and fades the Backdrop in over coverSeconds; closing takes them away over uncoverSeconds. A buy
--- landing on its hex: coins fly in, the hex's water rises (waterSeconds), the hex pops (popFrom -> 1)
+-- landing on its hex: coins fly in, the hex's water rises (waterSeconds), the hex pops (the theme's
+-- motion.buyPop -> 1 over popSeconds)
 -- as its check stamps (checkOvershoot over checkSeconds) and its Level ticks up, and bridgeSeconds
 -- after the check it wakes into its next level (wakeFrom -> wakeOvershoot -> 1). The sting climbs
 -- stingPitchStep a level bought, up to stingPitchMax. A refused click shakes the hex and pulses the
@@ -159,7 +160,6 @@ Cues.honeycomb = {
 	bounceHigh = 1.05,
 	bounceSeconds = 0.2,
 	waterSeconds = 0.35,
-	popFrom = 1.15,
 	popSeconds = 0.2,
 	checkOvershoot = 1.2,
 	checkSeconds = 0.25,

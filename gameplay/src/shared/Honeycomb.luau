@@ -6,7 +6,8 @@
 -- One hex per upgrade: a track, an item, the backpacks (every pack, each the next level) or an
 -- area's gate; a click buys its next level. The main view: the tool at (0, 0) and a ring of
 -- categories. A category view: its Back hex at (0, 0) and its upgrades, earlier areas first, in
--- Honeycomb.ringSlots, SPACING apart so a small even gap shows between them.
+-- Honeycomb.ringSlots, SPACING apart so a small even gap shows between them; dark empty hexes
+-- (Honeycomb.emptySlots) complete the rings they reach.
 
 export type Pos = { q: number, r: number }
 -- A level an upgrade's hex sells: a track level, an item link (level 1 = the buy, then its
@@ -18,7 +19,7 @@ export type Upgrade = {
 	areaId: number, -- its first level's area
 	links: { Link },
 }
-export type Category = { id: string, upgrades: { Upgrade }, slots: { Pos } }
+export type Category = { id: string, upgrades: { Upgrade }, slots: { Pos }, empty: { Pos } }
 export type Layout = {
 	tool: Upgrade, -- the main view's centre
 	ring: { { id: string, q: number, r: number } },
@@ -159,6 +160,22 @@ function Honeycomb.ringSlots(count: number): { Pos }
 	return slots
 end
 
+-- The cells of the rings `count` upgrades reach that ringSlots leaves free: dark empty hexes that
+-- complete the honeycomb's shape.
+function Honeycomb.emptySlots(count: number): { Pos }
+	local used = {}
+	for _, pos in Honeycomb.ringSlots(count) do
+		used[`{pos.q},{pos.r}`] = true
+	end
+	local empty: { Pos } = {}
+	for _, pos in Honeycomb.ringSlots(if count <= 6 then 6 else 18) do
+		if not used[`{pos.q},{pos.r}`] then
+			table.insert(empty, pos)
+		end
+	end
+	return empty
+end
+
 local function trackUpgrade(track): Upgrade
 	local links = {}
 	for level, data in track.levels do
@@ -219,7 +236,7 @@ function Honeycomb.layout(config): Layout
 	for i, catId in CATEGORIES do
 		table.insert(layout.ring, { id = catId, q = STEPS[i][1], r = STEPS[i][2] })
 		local upgrades = upgradesOf(config, catId)
-		layout.categories[catId] = { id = catId, upgrades = upgrades, slots = Honeycomb.ringSlots(#upgrades) }
+		layout.categories[catId] = { id = catId, upgrades = upgrades, slots = Honeycomb.ringSlots(#upgrades), empty = Honeycomb.emptySlots(#upgrades) }
 	end
 	return layout
 end

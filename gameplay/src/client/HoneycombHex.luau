@@ -1,9 +1,10 @@
--- The honeycomb's hexes (client/Honeycomb): copies of Hud.Templates.Hex, coloured by what they are
--- (PAINT) with a thick white outline, painted in their upgrade's state (shared/Honeycomb.state): a
--- short name on top, art in the middle, Level ("2/6", "MAX") and the next level's price at the
--- bottom. Their animations: popping in, and a landing on the bought hex (its water rises, it pops as
--- a check flashes and its Level ticks up, then it wakes into its next level). Numbers in
--- Cues.honeycomb, colours and images from the sunbaked-sea theme.
+-- The honeycomb's hexes (client/Honeycomb): copies of Hud.Templates.Hex, painted by what they are
+-- (PAINT: a top-to-bottom gradient on Body, a thin lighter rim, a soft glow) in their upgrade's state
+-- (shared/Honeycomb.state): a short name on top, art in the middle, Level ("2/6", "MAX") and the
+-- next level's price (or "Owned", "Open") at the bottom. Their animations: popping in, and a landing
+-- on the bought hex (its water rises, it pops as a check flashes and its Level ticks up, then it
+-- wakes into its next level). Numbers in Cues.honeycomb, colours, images and motion from the
+-- clear-tide theme.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
@@ -16,28 +17,35 @@ local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Hud = require(script.Parent.Hud)
 local Text = require(script.Parent.HoneycombText)
 
-local colors, images = Theme.colors, Theme.images
+local colors, images, motion = Theme.colors, Theme.images, Theme.motion
 local set = Hud.set
 local CUE = Cues.honeycomb
 
--- Every hex colour, from the theme.
-local PAINT = {
-	category = colors.toolTag, -- a group you open: sunny orange
-	item = colors.shallowWater, -- what a click buys: shallow water blue
-	stand = colors.shallowWater:Lerp(colors.outline, 0.35), -- bought at its stand first: a darker blue
-	back = colors.speedTag, -- the Back hex: teal, apart from both
-	locked = colors.locked, -- behind a closed gate or out of reach: slate
-	outline = colors.foam, -- the thick ring on every hex
-	rim = colors.outline, -- the bottom rim: the hex's colour RIM_SHADE toward navy
-	water = colors.shallowWater:Lerp(colors.foam, 0.45), -- a short hex's progress, a landing's water
-	price = colors.foam,
-	short = colors.buyCoral,
+local RIM_LIGHT = 0.5 -- a rim is its hex's top colour this far toward white
+local DARK = 0.25 -- a flat colour's gradient ends this far toward the shadow
+local GLOW_LIT = 0.25 -- hover and gamepad selection: the glow this much less transparent
+local WATER_TRANSPARENCY = 0.2
+
+export type Kind = "upgrade" | "owned" | "locked" | "category" | "back" | "empty"
+type Paint = { shade: ColorSequence, rim: Color3?, glow: Color3, glowRest: number }
+
+local function look(top: Color3, bottom: Color3, rim: Color3?, glow: Color3, glowRest: number): Paint
+	return { shade = ColorSequence.new(top, bottom), rim = rim, glow = glow, glowRest = glowRest }
+end
+
+-- Every hex look, from the theme: one colour per job.
+local PAINT: { [Kind]: Paint } = {
+	upgrade = look(colors.upgradeTop, colors.upgradeBottom, colors.upgradeRim, colors.glow, 0.5),
+	owned = look(colors.owned, colors.owned:Lerp(colors.upgradeBottom, DARK), colors.owned:Lerp(colors.text, RIM_LIGHT), colors.owned, 0.35),
+	locked = look(colors.locked, colors.locked:Lerp(colors.shadow, DARK), colors.locked:Lerp(colors.text, RIM_LIGHT), colors.glow, 0.5),
+	category = look(colors.categoryTop, colors.categoryBottom, colors.categoryTop:Lerp(colors.text, RIM_LIGHT), colors.categoryTop, 0.35),
+	back = look(colors.back, colors.back:Lerp(colors.shadow, DARK), colors.back:Lerp(colors.text, RIM_LIGHT), colors.glow, 0.5),
+	empty = look(colors.empty, colors.empty:Lerp(colors.shadow, DARK), nil, colors.glow, 0.5),
 }
-local RIM_SHADE = 0.4
 local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
 -- On-screen text sizes in pixels at the fitted zoom (never hidden).
 local TEXT = { name = { 14, 18 }, level = { 12, 14 }, price = { 14, 16 } }
@@ -51,7 +59,8 @@ local textScale = 1
 export type Hex = {
 	button: ImageButton,
 	press: UIScale,
-	bottom: ImageLabel,
+	glow: ImageLabel,
+	shade: UIGradient,
 	water: Frame,
 	fill: ImageLabel,
 	outline: ImageLabel,
@@ -79,6 +88,8 @@ export type Hex = {
 	y: number,
 	key: string?, -- the upgrade id, "cat:<id>" or "back"
 	art: Instance?,
+	kind: Kind?, -- the look painted
+	glowRest: number, -- its glow's transparency while not hovered
 	hover: boolean,
 	down: boolean,
 	ease: number, -- hover / press / breathing scale, catching up
@@ -96,7 +107,8 @@ local HoneycombHex = {}
 function HoneycombHex.parts(button: ImageButton)
 	return {
 		press = Hud.find(button, "Press"),
-		bottom = Hud.find(button, "Bottom"),
+		glow = Hud.find(button, "Glow"),
+		shade = Hud.find(button, "Body.Shade"),
 		water = Hud.find(button, "Water"),
 		fill = Hud.find(button, "Water.Fill"),
 		outline = Hud.find(button, "Outline"),
@@ -140,10 +152,11 @@ function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number
 	end
 	hex.q, hex.r, hex.x, hex.y = q, r, x, y
 	hex.hover, hex.down, hex.breathe = false, false, false
-	hex.ease, hex.animAt, hex.holdUntil, hex.landing, hex.badgeCount = 1, 0, 0, 0, -1
+	hex.ease, hex.animAt, hex.holdUntil, hex.landing, hex.badgeCount, hex.glowRest = 1, 0, 0, 0, -1, 1
 	hex.select.Visible = false
 	hex.badge.Visible = false
-	hex.fill.ImageColor3 = PAINT.water
+	hex.fill.ImageColor3 = colors.owned
+	hex.fill.ImageTransparency = WATER_TRANSPARENCY
 	button.AutoButtonColor = false -- hover and press scale it instead
 	button.Position = UDim2.fromOffset(x, y)
 	button.Visible = false
@@ -194,12 +207,26 @@ local function setWater(hex: Hex, level: number)
 	set(hex.water, "Visible", level > 0)
 end
 
--- A hex's body: its colour, the rim a darker shade, the white outline, its water level and which
+-- Hover and gamepad selection light a hex's glow.
+function HoneycombHex.lit(hex: Hex, on: boolean)
+	set(hex.glow, "ImageTransparency", if on then math.max(0, hex.glowRest - GLOW_LIT) else hex.glowRest)
+end
+
+-- A hex's body: its look (gradient, rim, glow; written when it changes), its water level and which
 -- marks show (the check, the lock, Back's arrow, the area flag).
-local function paintBody(hex: Hex, base: Color3, water: number, check: boolean, lock: boolean, arrow: boolean, area: boolean)
-	set(hex.button, "ImageColor3", base)
-	set(hex.bottom, "ImageColor3", base:Lerp(PAINT.rim, RIM_SHADE))
-	set(hex.outline, "ImageColor3", PAINT.outline)
+local function paintBody(hex: Hex, kind: Kind, water: number, check: boolean, lock: boolean, arrow: boolean, area: boolean)
+	if hex.kind ~= kind then
+		hex.kind = kind
+		local style = PAINT[kind]
+		hex.shade.Color = style.shade
+		hex.outline.Visible = style.rim ~= nil
+		if style.rim then
+			hex.outline.ImageColor3 = style.rim
+		end
+		hex.glow.ImageColor3 = style.glow
+		hex.glowRest = style.glowRest
+		HoneycombHex.lit(hex, false)
+	end
 	setWater(hex, water)
 	set(hex.check, "Visible", check)
 	set(hex.lock, "Visible", lock)
@@ -254,28 +281,28 @@ local function listedCost(link: Comb.Link): number
 	return if link.level == 1 then item.price else item.levels[link.level - 1].cost
 end
 
--- An upgrade's hex in state `st`: item blue (slate while locked, darker while bought at its stand
--- first); its name, art, Level and at the bottom the next level's price (coral and a rising fill
--- while short), the stand price, what a closed gate waits for, or "Open"; a check once maxed.
+-- An upgrade's hex in state `st`: upgrade blue (cyan once owned, slate while locked); its name,
+-- art, Level and at the bottom the next level's price (short and a rising fill while short), the
+-- stand price, what a closed gate waits for, "Owned" or "Open"; a check once maxed.
 function HoneycombHex.paintUpgrade(hex: Hex, upgrade: Comb.Upgrade, st: Comb.HexState, view: Comb.View, stats: Ladder.Stats)
 	local state = st.state
 	local link = Comb.link(upgrade, st.owned)
 	local gate = upgrade.kind == "gate"
-	local base, water, art = PAINT.item, 0, true
-	local priceText, coin, priceColor = nil, false, PAINT.price
+	local kind: Kind, water, art = "upgrade", 0, true
+	local priceText, coin, priceColor = nil, false, colors.text
 	if state == "max" then
-		priceText = if gate then "Open" else nil
+		kind, priceText = "owned", if gate then "Open" else "Owned"
 	elseif state == "buy" then
 		priceText, coin = Hud.money(st.price :: number), true
 	elseif state == "short" then
-		water, priceText, coin, priceColor = st.progress :: number, Hud.money(st.price :: number), true, PAINT.short
+		water, priceText, coin, priceColor = st.progress :: number, Hud.money(st.price :: number), true, colors.short
 	elseif Comb.elsewhere(link, st, view) then
-		base, priceText, coin = PAINT.stand, Hud.money(Hud.price(listedCost(link))), true
+		priceText, coin = Hud.money(Hud.price(listedCost(link))), true
 	else
-		base, art = PAINT.locked, false
+		kind, art = "locked", false
 		priceText = if gate then Text.gateWait(Areas.byId(Config, link.areaId)) else nil
 	end
-	paintBody(hex, base, water, state == "max", not art, false, gate and art)
+	paintBody(hex, kind, water, state == "max", not art, false, gate and art)
 	local tool = upgrade.id == "tool"
 	paintText(hex, hex.name, if tool then Format.toolName(stats.toolName) else Text.short(link), TEXT.name)
 	paintText(hex, hex.level, HoneycombHex.levelText(upgrade, st), TEXT.level)
@@ -314,13 +341,13 @@ local function paintBadge(hex: Hex, count: number)
 	end
 end
 
--- A category hex: orange, its name, art, "3/12" levels owned, "Open" and its badge.
+-- A category hex: warm, its name, art, "3/12" levels owned, "Open" and its badge.
 function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string, view: Comb.View, count: number)
 	local owned, total = Comb.ownedShare(layout, catId, view)
-	paintBody(hex, PAINT.category, 0, false, false, false, catId == "areas")
+	paintBody(hex, "category", 0, false, false, false, catId == "areas")
 	paintText(hex, hex.name, Text.category(catId):upper(), TEXT.name)
 	paintText(hex, hex.level, `{owned}/{total}`, TEXT.level)
-	paintPrice(hex, "Open", false, PAINT.price)
+	paintPrice(hex, "Open", false, colors.text)
 	local template, image = nil, nil
 	if catId == "boosts" then
 		image = images.pipFull
@@ -334,10 +361,20 @@ end
 
 -- A category's centre: Back, with its arrow.
 function HoneycombHex.paintBack(hex: Hex)
-	paintBody(hex, PAINT.back, 0, false, false, true, false)
+	paintBody(hex, "back", 0, false, false, true, false)
 	paintText(hex, hex.name, "Back", TEXT.name)
 	paintText(hex, hex.level, nil, TEXT.level)
-	paintPrice(hex, nil, false, PAINT.price)
+	paintPrice(hex, nil, false, colors.text)
+	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
+	hex.breathe = false
+end
+
+-- A dark empty hex that completes the honeycomb's shape: nothing on it.
+function HoneycombHex.paintEmpty(hex: Hex)
+	paintBody(hex, "empty", 0, false, false, false, false)
+	paintText(hex, hex.name, nil, TEXT.name)
+	paintText(hex, hex.level, nil, TEXT.level)
+	paintPrice(hex, nil, false, colors.text)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
 	hex.breathe = false
 end
@@ -361,7 +398,7 @@ function HoneycombHex.animScale(hex: Hex, now: number): number
 			hex.animKind = nil
 			return 1
 		end
-		return CUE.popFrom + (1 - CUE.popFrom) * Ease.backOut(t, BACK_OVERSHOOT)
+		return motion.buyPop + (1 - motion.buyPop) * Ease.backOut(t, BACK_OVERSHOOT)
 	end
 	-- wake: up past full size, then settle
 	local t = (now - hex.animAt) / CUE.wakeSeconds

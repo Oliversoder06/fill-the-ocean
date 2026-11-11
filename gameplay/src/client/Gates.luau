@@ -11,7 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Format = require(ReplicatedStorage.Shared.Format)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Hud = require(script.Parent.Hud)
 
 local colors = Theme.colors
@@ -19,19 +19,19 @@ local Gates = {}
 
 -- The sign text of an area's gate, its colour and whether the gate is on sale now: the area's name
 -- over its fill and price until then, "<price> · hold E" once it is the next gate on sale, then
--- "Open". White, teal and orange on the navy outline read from a distance (Theme colours).
+-- "Open". Owned cyan, coin gold and white text with a thin soft stroke (Theme colours).
 local function signOf(area, gatesOpen: { number }, fill: number): (string, Color3, boolean)
 	local status = Areas.gateOffer(Config, gatesOpen, fill, area.id)
 	local title = area.name:upper()
 	if status == "open" then
-		return `{title}\nOpen`, colors.speedTag, false
+		return `{title}\nOpen`, colors.owned, false
 	elseif status == "buy" then
-		return `{title}\n{Hud.money(Hud.price(area.gate.price))} · hold E`, colors.toolTag, true
+		return `{title}\n{Hud.money(Hud.price(area.gate.price))} · hold E`, colors.coin, true
 	elseif status == "order" then
 		local nextId = Areas.nextGate(Config, gatesOpen, fill)
-		return `{title}\nOpen {Areas.byId(Config, nextId).name} first`, colors.foam, false
+		return `{title}\nOpen {Areas.byId(Config, nextId).name} first`, colors.text, false
 	end
-	return `{title}\nFill to {Format.percent(area.gate.fill)} · {Hud.money(Hud.price(area.gate.price))}`, colors.foam, false
+	return `{title}\nFill to {Format.percent(area.gate.fill)} · {Hud.money(Hud.price(area.gate.price))}`, colors.text, false
 end
 
 -- An area's Gate model, or nil while it hasn't streamed in.
@@ -61,8 +61,8 @@ function Gates.start()
 					labels[area] = label
 					if label then
 						label.FontFace = Theme.fonts.title
-						label.TextStrokeColor3 = colors.outline
-						label.TextStrokeTransparency = 0
+						label.TextStrokeColor3 = colors.shadow
+						label.TextStrokeTransparency = Theme.textStroke.transparency
 					end
 				end
 				local text, color, onSale = signOf(area, gatesOpen, fill)

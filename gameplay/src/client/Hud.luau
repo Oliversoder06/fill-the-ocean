@@ -17,7 +17,7 @@ local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 
 local player = Players.LocalPlayer
 local Hud = {}

@@ -142,6 +142,32 @@ function tests.ring_slots_are_mirror_symmetric(t)
 	end
 end
 
+-- Empty hexes complete every ring the upgrades reach (style clear-tide), never on an upgrade's cell.
+function tests.empty_slots_complete_the_rings_the_upgrades_reach(t)
+	for count = 0, 18 do
+		local used = {}
+		for _, pos in Honeycomb.ringSlots(count) do
+			used[key(pos)] = true
+		end
+		local empty = Honeycomb.emptySlots(count)
+		for _, pos in empty do
+			if used[key(pos)] then
+				error(`{count}: empty {key(pos)} sits on an upgrade`)
+			end
+			used[key(pos)] = true
+		end
+		t.expectEq(count + #empty, if count <= 6 then 6 else 18, `{count}: the rings reached are full`)
+		for _, pos in empty do
+			t.expectEq(used[key(mirror(pos))], true, `{count}: the mirror of empty {key(pos)}`)
+		end
+	end
+	local layout = Honeycomb.layout(Config)
+	for _, catId in layout.order do
+		local cat = layout.categories[catId]
+		t.expectEq(#cat.empty, #Honeycomb.emptySlots(#cat.upgrades), `{catId}: its empty hexes`)
+	end
+end
+
 -- Slots read top to bottom, left to right, so the earliest upgrades sit nearest the top; the same
 -- count always gives the same slots.
 function tests.ring_slots_read_top_to_bottom_and_are_deterministic(t)

@@ -5,9 +5,10 @@
 -- small even gap between hexes, colour-coded (client/HoneycombHex). The main view: the tool at the
 -- centre (a click buys its next level) in a ring of categories, each with a red badge counting what
 -- can be bought inside; a click glides into a category: its Back hex at the centre, its upgrades
--- around it (Comb.ringSlots). A small card (Tooltip, words: client/HoneycombText) sits by the
--- hovered hex, else the selected one. A mouse click on an affordable hex buys its next level; on
--- touch the first tap selects and the next buys; on a gamepad the D-pad or stick steps between hexes
+-- around it (Comb.ringSlots), dark empty hexes completing its rings. A small card (Tooltip, words:
+-- client/HoneycombText) sits by the hovered hex, else the selected one. A mouse click on an
+-- affordable hex buys its next level; on touch the first tap selects and the next buys; on a
+-- gamepad the D-pad or stick steps between hexes
 -- and A presses. A buy sends Buy(id, bought) (`bought`: what this client saw bought, so a teammate's
 -- buy of the same level wins); a gate's is Buy("gate:<areaId>", 0). Everything is the team's, from
 -- its wallet at the team's price (Hud.price); the server checks every buy and sets the buyer's
@@ -31,7 +32,7 @@ local Cues = require(ReplicatedStorage.Shared.Cues)
 local Comb = require(ReplicatedStorage.Shared.Honeycomb)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Areas = require(ReplicatedStorage.Common.Areas)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Hud = require(script.Parent.Hud)
 local Card = require(script.Parent.HoneycombCard)
 local Data = require(script.Parent.HoneycombData)
@@ -99,6 +100,7 @@ end
 type ViewData = {
 	id: string,
 	hexes: { Hex.Hex }, -- every hex; the gamepad steps between them
+	empties: { Hex.Hex }, -- dark hexes completing a category's rings: never selected
 	byKey: { [string]: Hex.Hex }, -- by upgrade id, "cat:<id>" and "back"
 	upgrades: { Hex.Hex }, -- the hexes that sell something
 	ring: { [string]: Hex.Hex }, -- main: the category hexes
@@ -262,7 +264,7 @@ function Honeycomb.start()
 			table.insert(positions, { q = pos.q, r = pos.r })
 		end
 		local cx, cy, w, h = Comb.bounds(positions, hexSize, Comb.SPACING)
-		return { id = id, hexes = {}, byKey = {}, upgrades = {}, ring = {}, w = w, h = h, zoom = 1 }, cx, cy
+		return { id = id, hexes = {}, empties = {}, byKey = {}, upgrades = {}, ring = {}, w = w, h = h, zoom = 1 }, cx, cy
 	end
 
 	local function newHex(v: ViewData, pos: Comb.Pos, cx: number, cy: number, key: string, onClick: (Input) -> ()): Hex.Hex
@@ -298,18 +300,29 @@ function Honeycomb.start()
 
 	local function buildCategory(catId: string): ViewData
 		local cat = layout.categories[catId]
-		local v, cx, cy = newView(catId, cat.slots)
+		local cells = table.clone(cat.slots)
+		table.move(cat.empty, 1, #cat.empty, #cells + 1, cells)
+		local v, cx, cy = newView(catId, cells)
 		v.back = newHex(v, { q = 0, r = 0 }, cx, cy, "back", function()
 			showView("main")
 		end)
 		for i, upgrade in cat.upgrades do
 			addUpgrade(v, upgrade, cat.slots[i], cx, cy)
 		end
+		for _, pos in cat.empty do
+			local x, y = Comb.toPixel(pos.q, pos.r, hexSize * Comb.SPACING)
+			local hex = Hex.new(hexTemplate, pos.q, pos.r, x - cx, y - cy, canvas)
+			Hex.paintEmpty(hex)
+			table.insert(v.empties, hex)
+		end
 		return v
 	end
 
 	local function setVisible(v: ViewData, visible: boolean)
 		for _, hex in v.hexes do
+			hex.button.Visible = visible
+		end
+		for _, hex in v.empties do
 			hex.button.Visible = visible
 		end
 	end
@@ -509,9 +522,11 @@ function Honeycomb.start()
 		zoomScale.Scale = v.zoom * CUE.glideZoomFrom
 		TweenService:Create(zoomScale, TweenInfo.new(CUE.glideSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = v.zoom }):Play()
 		local now = os.clock()
-		for _, hex in v.hexes do
-			hex.animKind, hex.animAt = "enter", now + Comb.enterDelay(hex.q, hex.r, CUE.enterStagger, CUE.enterCap)
-			hex.holdUntil, hex.hover, hex.down = 0, false, false
+		for _, list in { v.hexes, v.empties } do
+			for _, hex in list do
+				hex.animKind, hex.animAt = "enter", now + Comb.enterDelay(hex.q, hex.r, CUE.enterStagger, CUE.enterCap)
+				hex.holdUntil, hex.hover, hex.down = 0, false, false
+			end
 		end
 		set(title, "Text", if id == "main" then "UPGRADES" else `UPGRADES › {Text.category(id):upper()}`)
 		refresh()
@@ -672,13 +687,18 @@ function Honeycomb.start()
 		local hoverHex: Hex.Hex? = nil
 		for _, hex in v.hexes do
 			local selected = hex.key == selectedKey
-			local target = if hex.down then motion.pressScale elseif hex.hover or (selected and input == "gamepad") then motion.hoverScale elseif hex.breathe then breathe else 1
+			local lit = hex.hover or (selected and input == "gamepad")
+			local target = if hex.down then motion.pressScale elseif lit then motion.hoverScale elseif hex.breathe then breathe else 1
 			hex.ease += (target - hex.ease) * rate
 			set(hex.press, "Scale", math.round(hex.ease * Hex.animScale(hex, now) * 1000) / 1000)
 			set(hex.select, "Visible", hex.hover or selected)
+			Hex.lit(hex, lit)
 			if hex.hover then
 				hoverHex = hex
 			end
+		end
+		for _, hex in v.empties do
+			set(hex.press, "Scale", math.round(Hex.animScale(hex, now) * 1000) / 1000)
 		end
 		-- The card follows the hovered upgrade (mouse), else the selected one; it stays while the
 		-- mouse is on its Assign button.
