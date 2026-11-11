@@ -11,3 +11,5 @@ sourcemap.json
 # Secrets: never commit one
 .env
 .env.*
+
+vid/

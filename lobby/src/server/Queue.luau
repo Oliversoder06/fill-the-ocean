@@ -8,7 +8,8 @@
 -- A saved run loads only with exactly its team standing on the pad (SessionRules.loadError for the
 -- card, RunSave.sameTeam again at launch). One save per map per team (RunSave.key): a new party whose
 -- team already has a save on its map starts over it only if the host confirmed that save (New Game:
--- "open" with `replace` = its key); it is erased at launch (RunStore.erase: never while a server has it
+-- "open" with `replace` = its key; a save on nobody's list, every member having left it, is found
+-- when the host presses Create and asked about then); it is erased at launch (RunStore.erase: never while a server has it
 -- open). The host's confirm is enough; each member of that save's team is told when they join (toast
 -- and HostBar). Delete on a card erases a solo run; a team run only leaves the player's list (D5's
 -- Leave run), so one member can't wipe the others' progress. At launch the lobby writes a run ticket
@@ -54,6 +55,8 @@ type Pad = {
 	settings: SessionRules.Settings?,
 	replaceKey: string?, -- New Game: the host's saved run this party may start over
 	startsOver: { members: { number }, percent: number }?, -- that save's team and fill, for the notice
+	checking: boolean, -- Create is looking for the team's save (openParty)
+	offered: { key: string, save: RunSave.Save }?, -- a save Create found and asked the host to replace
 	members: { Player }, -- join order, host included
 	declined: { [Player]: boolean }, -- must step off before they can host again
 	told: { [Player]: string },
@@ -135,6 +138,7 @@ end
 
 local function reset(pad: Pad)
 	pad.host, pad.settings, pad.replaceKey, pad.startsOver = nil, nil, nil, nil
+	pad.checking, pad.offered = false, nil
 	pad.members = {}
 	pad.friends = {}
 	pad.saved, pad.savedError = nil, nil
@@ -441,7 +445,7 @@ local function launchParty(pad: Pad)
 			return nil,
 				if save.finished
 					then "Your team already filled this ocean. Press New Game to play it again."
-					else "Your team already has a run on this map. Load it from Saved Runs."
+					else "Your team already has a run on this map. Load it from Saved Runs, or create the party again with the whole team on the pad to replace it."
 		end
 		if key == replaceKey then
 			if save and not RunSave.isBlank(save) then
@@ -554,6 +558,56 @@ end
 local function startsOverFor(pad: Pad, player: Player): number?
 	local info = pad.startsOver
 	return if info and table.find(info.members, player.UserId) then info.percent else nil
+end
+
+-- The host's party is set up (replace: the confirmed save it starts over, or nil).
+local function openParty(pad: Pad, player: Player, settings: SessionRules.Settings, map: Maps.Map, replace: string?, replaced: RunSave.Save?)
+	pad.settings = settings
+	pad.replaceKey = replace
+	pad.startsOver = if replaced
+		then { members = replaced.members, percent = math.floor(math.clamp(fillOf(replaced, map), 0, 1) * 100) }
+		else nil
+	pad.offered = nil
+	if settings.maxPlayers == 1 then
+		tell(player, "Starting your solo run!")
+	end
+end
+
+-- Create without New Game: the team on the pad may still have a save on this map that is on nobody's
+-- Saved Runs (every member left it), so the client couldn't ask. It is looked up here (it yields); if
+-- there is one, the host is asked to replace it (SessionState "replace") and their Yes comes back as
+-- a New Game for that key (pad.offered).
+local function checkAndOpen(pad: Pad, player: Player, settings: SessionRules.Settings, map: Maps.Map)
+	local team = SessionRules.newTeam(settings.maxPlayers, userIds(loaders(pad, occupants(pad.zone))))
+	if team then
+		local token = pad.savedToken
+		pad.checking = true
+		local key = RunSave.key(settings.mapId, team)
+		local save, err = RunStore.load(key)
+		if pad.savedToken ~= token then
+			return -- the pad was reset meanwhile
+		end
+		pad.checking = false
+		if pad.host ~= player or pad.settings or pad.launching then
+			return
+		end
+		if err then
+			warn(`[Queue] couldn't check run {key} before a new party: {err}`)
+			tell(player, "Couldn't check for an old run. Please try again.")
+			return
+		end
+		if save and not RunSave.isBlank(save) then
+			pad.offered = { key = key, save = save }
+			remotes.SessionState:FireClient(player, {
+				kind = "replace",
+				key = key,
+				mapName = map.name,
+				percent = math.floor(math.clamp(fillOf(save, map), 0, 1) * 100),
+			})
+			return
+		end
+	end
+	openParty(pad, player, settings, map, nil, nil)
 end
 
 local function updateSign(pad: Pad)
@@ -697,10 +751,11 @@ local function onAction(player: Player, action: unknown, payload: unknown)
 	if not pad or pad.host ~= player or pad.launching then
 		return
 	end
-	if action == "open" and not pad.settings then
+	if action == "open" and not pad.settings and not pad.checking then
 		local settings = SessionRules.validate(payload, Profiles.unlockedMaps(player))
 		local replace = if type(payload) == "table" then (payload :: any).replace else nil
-		-- New Game only starts over a save the host's Saved Runs showed, on the party's map
+		-- New Game only starts over a save the host's Saved Runs showed, or the one Create just found
+		-- for this team and asked about (pad.offered), on the party's map
 		local replaced: RunSave.Save? = nil
 		if replace ~= nil and pad.saved and ownsRun(player, replace) then
 			for _, run in pad.saved do
@@ -710,18 +765,17 @@ local function onAction(player: Player, action: unknown, payload: unknown)
 				end
 			end
 		end
+		local offered = pad.offered
+		if replace ~= nil and not replaced and offered and offered.key == replace then
+			replaced = offered.save
+		end
 		local map = settings and Maps.get(settings.mapId)
 		if replace ~= nil and deleting[player] then
 			tell(player, "Wait for the delete to finish.")
-		elseif settings and map and (replace == nil or (replaced and replaced.mapId == settings.mapId)) then
-			pad.settings = settings
-			pad.replaceKey = replace
-			pad.startsOver = if replaced
-				then { members = replaced.members, percent = math.floor(math.clamp(fillOf(replaced, map), 0, 1) * 100) }
-				else nil
-			if settings.maxPlayers == 1 then
-				tell(player, "Starting your solo run!")
-			end
+		elseif settings and map and replace == nil then
+			task.spawn(checkAndOpen, pad, player, settings, map)
+		elseif settings and map and replaced and replaced.mapId == settings.mapId then
+			openParty(pad, player, settings, map, replace, replaced)
 		else
 			tell(player, "Those settings aren't allowed.")
 		end
@@ -764,6 +818,8 @@ function Queue.start()
 				settings = nil,
 				replaceKey = nil,
 				startsOver = nil,
+				checking = false,
+				offered = nil,
 				members = {},
 				declined = {},
 				told = {},

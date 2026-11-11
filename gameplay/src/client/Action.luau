@@ -23,16 +23,23 @@ local UserInputService = game:GetService("UserInputService")
 
 local AreaRules = require(ReplicatedStorage.Shared.AreaRules)
 local Config = require(ReplicatedStorage.Shared.Config)
+local Icons = require(ReplicatedStorage.Shared.Icons)
 local Zones = require(ReplicatedStorage.Shared.Zones)
 local Items = require(ReplicatedStorage.Common.Items)
 local Hud = require(script.Parent.Hud)
 local Vehicles = require(script.Parent.Vehicles)
 
 local AIM_DISTANCE = 80
-local LOW_WATER = 4 -- studs below the player's root: the water is out of sight at a level aim
+local AIM_MARGIN = 6 -- studs around a Source/Pour (sideways and below) that still count as aiming at it
+local AIM_DOWN = 0.2 -- from inside that box, how far down (look.Y) the camera must point
 local PENDING_GRACE = 0.75 -- seconds after an action ends to wait for the server's credit
 local ACTION_NAME = "FillAct"
 local SPRAY_RESEND_SECONDS = 0.25 -- while the server's Spraying disagrees with the input, ask again this often
+-- The touch button: Roblox's default is tiny and hugs Jump, so kids jump instead. It is this times
+-- Jump's size, BUTTON_GAP pixels left of it and BUTTON_RISE of its size higher.
+local BUTTON_SCALE = 1.15
+local BUTTON_GAP = 14
+local BUTTON_RISE = 0.35
 
 export type Kind = "scoop" | "pour"
 export type Current = { kind: Kind, id: number, started: number, duration: number, hit: Vector3 }
@@ -63,20 +70,20 @@ local function emit(listeners: { (Current) -> () }, action: Current)
 end
 
 local function keyName(): string
-	local last = UserInputService:GetLastInputType()
-	if last == Enum.UserInputType.Touch then
+	local input = Hud.input()
+	if input == "touch" then
 		return "the button"
-	elseif last.Name:sub(1, 7) == "Gamepad" then
+	elseif input == "gamepad" then
 		return "RT"
 	end
 	return "E"
 end
 
 local function jumpName(): string
-	local last = UserInputService:GetLastInputType()
-	if last == Enum.UserInputType.Touch then
+	local input = Hud.input()
+	if input == "touch" then
 		return "the jump button"
-	elseif last.Name:sub(1, 7) == "Gamepad" then
+	elseif input == "gamepad" then
 		return "A"
 	end
 	return "Space"
@@ -90,8 +97,6 @@ function Action.start()
 	local hint = Hud.find(gui, "ActHint")
 	local honeycomb = Hud.find(gui, "Honeycomb")
 
-	local aimParams = RaycastParams.new()
-	aimParams.FilterType = Enum.RaycastFilterType.Include
 	local seeParams = RaycastParams.new()
 	seeParams.FilterType = Enum.RaycastFilterType.Exclude
 
@@ -127,11 +132,45 @@ function Action.start()
 		held = false
 	end)
 
-	-- Where the aim lands on `part` (a Source or Pour), or nil when it misses the part.
+	-- Where the aim enters `part` (a Source, DeepPool, cloud or Pour) grown by AIM_MARGIN sideways and
+	-- below, or nil when it misses. Box maths, not a raycast: the visible water spills past the zone
+	-- part and sits at its bottom, and a raycast never hits a part the camera is already inside.
 	local function aimAt(part: BasePart, origin: Vector3, look: Vector3): Vector3?
-		aimParams.FilterDescendantsInstances = { part }
-		local aim = workspace:Raycast(origin, look, aimParams)
-		return aim and aim.Position
+		local cf = part.CFrame
+		local half = part.Size / 2
+		local low = Vector3.new(-half.X - AIM_MARGIN, -half.Y - AIM_MARGIN, -half.Z - AIM_MARGIN)
+		local high = Vector3.new(half.X + AIM_MARGIN, half.Y, half.Z + AIM_MARGIN)
+		local from = cf:PointToObjectSpace(origin)
+		local dir = cf:VectorToObjectSpace(look)
+		local enter, leave = 0, 1
+		for _, axis in { "X", "Y", "Z" } do
+			local p, d = (from :: any)[axis], (dir :: any)[axis]
+			local lo, hi = (low :: any)[axis], (high :: any)[axis]
+			if math.abs(d) < 1e-9 then
+				if p < lo or p > hi then
+					return nil
+				end
+			else
+				local t1, t2 = (lo - p) / d, (hi - p) / d
+				if t1 > t2 then
+					t1, t2 = t2, t1
+				end
+				enter, leave = math.max(enter, t1), math.min(leave, t2)
+				if enter > leave then
+					return nil
+				end
+			end
+		end
+		-- From inside the box only a look down at the water counts, not the sky.
+		if enter == 0 and look.Unit.Y > -AIM_DOWN then
+			return nil
+		end
+		return origin + look * enter
+	end
+
+	-- A zone's water: the middle of its bottom face (the visible water sits there).
+	local function waterOf(part: BasePart): Vector3
+		return (part.CFrame * CFrame.new(0, -part.Size.Y / 2, 0)).Position
 	end
 
 	-- The action this spot offers, the visible point aimed at (nil = not aimed at its water) and,
@@ -154,23 +193,29 @@ function Action.start()
 			end
 		end
 		seeParams.FilterDescendantsInstances = ignore
+		-- Close enough is enough everywhere (owner, 2026-11-11): a look that misses the water still acts,
+		-- splashing at the zone's water (its bottom).
 		if source then
 			local aim = aimAt(source, origin, look)
 			if not aim then
-				return "scoop", nil, area, deep
+				return "scoop", waterOf(source), area, deep
 			end
 			local seen = workspace:Raycast(origin, look, seeParams)
 			return "scoop", if seen then seen.Position else aim, area, deep
 		end
 		local _, pour = Hud.openSpot(ocean, "Pour", root.Position, reach)
 		if pour then
-			return "pour", aimAt(pour, origin, look), nil, false -- the splash plays on the channel inlet
+			return "pour", aimAt(pour, origin, look) or waterOf(pour), nil, false -- the splash plays on the channel inlet
 		end
 		if not Hud.nearPour(ocean, root.Position, reach) then
 			return nil, nil, nil, false
 		end
 		local seen = workspace:Raycast(origin, look, seeParams)
-		return "pour", if seen and Zones.willFlood(ocean, seen.Position) then seen.Position else nil, nil, false
+		if seen and Zones.willFlood(ocean, seen.Position) then
+			return "pour", seen.Position, nil, false
+		end
+		-- Close enough is enough: no need to look down at the seabed (owner, 2026-11-11).
+		return "pour", Hud.floodPoint(ocean, root.Position, reach, look), nil, false
 	end
 
 	local function canStart(kind: Kind): boolean
@@ -198,14 +243,8 @@ function Action.start()
 		emit(startedListeners, action)
 	end
 
-	-- Whether the ocean's water is far below the player, so a level aim only sees dry seabed or sky.
-	local function waterLow(ocean: Model, root: BasePart): boolean
-		local water = Zones.part(ocean, "Water")
-		return water.Position.Y + water.Size.Y / 2 < root.Position.Y - LOW_WATER
-	end
-
 	-- `ice`: the scoop chips an ice block (the Glacier's Source).
-	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?, root: BasePart?, ice: boolean): string?
+	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?, ice: boolean): string?
 		if not kind or current then
 			return nil
 		end
@@ -215,8 +254,6 @@ function Action.start()
 			return `Full! Pour it into the {if ocean then ocean.Name:lower() else "water"}`
 		elseif kind == "pour" and carried <= 0 then
 			return "Empty! Scoop more at the well"
-		elseif not aimed and kind == "pour" and ocean and root and waterLow(ocean, root) then
-			return "Look down at the dry seabed"
 		elseif not aimed then
 			return "Aim at the water"
 		end
@@ -277,6 +314,26 @@ function Action.start()
 	end
 
 	local shownTitle: string? = nil
+	local shownIcon: string? = nil
+	-- The touch button: big, left of Jump, showing the thing in hand (shared/Icons).
+	local function fitButton(button: GuiObject, gadget: any)
+		local touchGui = player.PlayerGui:FindFirstChild("TouchGui")
+		local jump = touchGui and touchGui:FindFirstChild("JumpButton", true)
+		local frame = button.Parent
+		if jump and jump:IsA("GuiObject") and frame and frame:IsA("GuiObject") then
+			local size = math.floor(jump.AbsoluteSize.X * BUTTON_SCALE)
+			local at = jump.AbsolutePosition - frame.AbsolutePosition - Vector2.new(size + BUTTON_GAP, size * BUTTON_RISE)
+			Hud.set(button, "Size", UDim2.fromOffset(size, size))
+			Hud.set(button, "Position", UDim2.fromOffset(math.round(at.X), math.round(at.Y)))
+		end
+		local item = if type(gadget) == "string" and gadget ~= "" then Items.get(Config, gadget) else nil
+		local model = if item then item.model else player:GetAttribute("ToolModel")
+		local icon = if type(model) == "string" then Icons.of(model) else nil
+		if icon and icon ~= shownIcon then
+			shownIcon = icon
+			ContextActionService:SetImage(ACTION_NAME, icon)
+		end
+	end
 	RunService.RenderStepped:Connect(function()
 		local now = os.clock()
 		local finished = current
@@ -326,7 +383,7 @@ function Action.start()
 				title = if kind == "scoop" then "Scoop" elseif kind then "Pour" else nil
 			end
 			local ice = kind == "scoop" and not deep and area.mechanic == "ice"
-			text = hintText(kind, hit ~= nil, ocean, if root and root:IsA("BasePart") then root else nil, ice)
+			text = hintText(kind, hit ~= nil, ocean, ice)
 			if ready and gadget == "jetpackTank" then
 				text = if (player:GetAttribute("Fuel") or 0) > 0 then `Hold {jumpName()} to fly` else "Out of fuel: land to refill"
 			end
@@ -339,6 +396,9 @@ function Action.start()
 		local button = ContextActionService:GetButton(ACTION_NAME)
 		if button then
 			Hud.set(button, "Visible", title ~= nil)
+			if title then
+				fitButton(button, gadget)
+			end
 		end
 		if title and title ~= shownTitle then
 			shownTitle = title

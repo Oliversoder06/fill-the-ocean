@@ -1,4 +1,4 @@
--- Session pad UI, built in Studio under StarterGui.LobbyHud in the sunbaked-sea style; colours come
+-- Session pad UI, built in Studio under StarterGui.LobbyHud in the clear-tide style; colours come
 -- from the theme. Stepping on a pad as host opens PadScreen, one screen with two panels: Create Party
 -- (map pager, party size, friends-only and Create, which reads NEW GAME when the team on the pad
 -- already has a save on that map) and Saved Runs (one card per saved run, cloned from its hidden
@@ -12,7 +12,7 @@ local TweenService = game:GetService("TweenService")
 
 local Maps = require(ReplicatedStorage.Common.Maps)
 local SessionRules = require(ReplicatedStorage.Common.SessionRules)
-local Theme = require(ReplicatedStorage.Kit.UI.Themes["sunbaked-sea"])
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 
 local player = Players.LocalPlayer
 local Session = {}
@@ -166,8 +166,8 @@ function Session.start()
 	local yesLabel = find(yes, "Label")
 	local no = find(confirm, "CancelButton")
 	confirm.Visible = false
-	yes.ImageColor3 = C.buyCoral
-	no.ImageColor3 = C.shallowWater
+	yes.ImageColor3 = C.back
+	no.ImageColor3 = C.upgradeTop
 
 	local bar = find(hud, "HostBar")
 	local barLine = find(bar, "Line")
@@ -213,7 +213,7 @@ function Session.start()
 		local isOpen = unlocked[map.id] == true
 		mapTitle.Text = map.name
 		mapInfo.Text = `x{map.waterMultiplier} water  -  +{map.rewardRaindrops} Raindrops`
-		mapCard.ImageColor3 = if isOpen then C.shallowWater else C.locked
+		mapCard.ImageColor3 = if isOpen then C.upgradeTop else C.locked
 		mapArt.Visible = isOpen
 		mapLock.Visible = not isOpen
 		mapLockText.Visible = not isOpen
@@ -222,15 +222,15 @@ function Session.start()
 			mapLockText.Text = `Clear {if before then before.name else "the map before"} to unlock`
 		end
 		page.Text = `{mapIndex}/{#Maps.list}`
-		prev.ImageColor3 = if mapIndex > 1 then C.shallowWater else C.locked
-		nextMap.ImageColor3 = if mapIndex < #Maps.list then C.shallowWater else C.locked
+		prev.ImageColor3 = if mapIndex > 1 then C.upgradeTop else C.locked
+		nextMap.ImageColor3 = if mapIndex < #Maps.list then C.upgradeTop else C.locked
 		local n = settings.maxPlayers
 		count.Text = if n == 1 then "Solo" else `{n} players`
-		minus.ImageColor3 = if n > 1 then C.shallowWater else C.locked
-		plus.ImageColor3 = if n < SessionRules.MAX_PLAYERS then C.shallowWater else C.locked
-		toggle.ImageColor3 = if settings.friendsOnly then C.speedTag else C.locked
+		minus.ImageColor3 = if n > 1 then C.upgradeTop else C.locked
+		plus.ImageColor3 = if n < SessionRules.MAX_PLAYERS then C.upgradeTop else C.locked
+		toggle.ImageColor3 = if settings.friendsOnly then C.owned else C.locked
 		find(toggle, "Label").Text = if settings.friendsOnly then "ON" else "OFF"
-		createButton.ImageColor3 = if isOpen then C.buyCoral else C.locked
+		createButton.ImageColor3 = if isOpen then C.upgradeTop else C.locked
 		createLabel.Text = if not isOpen then "LOCKED" elseif replaced() then "NEW GAME" else "CREATE"
 	end
 
@@ -245,9 +245,9 @@ function Session.start()
 		reason.Text = run.reason
 		reason.Visible = run.reason ~= ""
 		local load = find(card, "LoadButton")
-		load.ImageColor3 = if run.canLoad then C.buyCoral else C.locked
+		load.ImageColor3 = if run.canLoad then C.upgradeTop else C.locked
 		local delete = find(card, "DeleteButton")
-		delete.ImageColor3 = C.buyCoral
+		delete.ImageColor3 = C.back
 		juice(load)
 		juice(delete)
 		load.Activated:Connect(function()
@@ -356,6 +356,15 @@ function Session.start()
 
 	stateEvent.OnClientEvent:Connect(function(state)
 		local kind = state.kind
+		if kind == "replace" then
+			-- Create found this team's save on the map (one on nobody's Saved Runs): ask before erasing it
+			local chosen = table.clone(settings)
+			ask(`Your team already has a saved run on {state.mapName} ({state.percent}% filled). Creating erases it. Start over?`, "Erase and start", function()
+				chosen.replace = state.key
+				action:FireServer("open", chosen)
+			end)
+			return
+		end
 		hint.Visible = kind == "none"
 		if kind == "choose" then
 			unlocked = state.unlocked
