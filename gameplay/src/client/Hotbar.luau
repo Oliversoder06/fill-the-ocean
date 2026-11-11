@@ -96,6 +96,12 @@ function Hotbar.start()
 		end
 	end
 	assert(#gadgets <= #GADGET_KEYS, "Hotbar: more hotbar gadgets than keys")
+	-- The place sizes the Wave line under every gadget slot; it shortens to the owned ones.
+	local wave = Hud.find(bar, "Wave")
+	local waveFull = wave.Size
+	local slotStep = if gadgets[1]
+		then gadgets[1].slot.Size.X.Offset + Hud.find(bar, "Gadgets.UIListLayout").Padding.Offset
+		else 0
 
 	local function bump(entry: Held)
 		entry.press.Scale = restScale(entry) * motion.pressScale
@@ -191,9 +197,13 @@ function Hotbar.start()
 		local equipped = player:GetAttribute("Equipped") ~= false
 		local out = player:GetAttribute("Gadget")
 		local itemState = Hud.items()
+		local hidden = 0
 		for _, entry in gadgets do
 			local id = entry.item.id
 			set(entry.slot, "Visible", Items.owned(itemState, id))
+			if not entry.slot.Visible then
+				hidden += 1
+			end
 			hold(entry, out == id)
 			if not entry.shown and entry.slot.Visible then
 				local template = ToolModels.find(entry.item.model, "Gadgets")
@@ -203,6 +213,11 @@ function Hotbar.start()
 				end
 			end
 		end
+		set(
+			wave,
+			"Size",
+			UDim2.new(waveFull.X.Scale, waveFull.X.Offset - hidden * slotStep, waveFull.Y.Scale, waveFull.Y.Offset)
+		)
 
 		-- What the bar measures: the vehicle's tank, else the gadget out, else the tool while it is out.
 		local gadget = if type(out) == "string" and out ~= "" then Items.get(Config, out) else nil

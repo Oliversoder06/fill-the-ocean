@@ -156,7 +156,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
   with `Ease.pop`) for only what is in hand, its model at the left end: the tool's water, the Water
   Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
-  shows `Hotbar.Status` text instead (clipped? flowing L/s).
+  shows `Hotbar.Status` text instead (clipped? flowing L/s). `Hotbar.Wave` (a cropped wavy water
+  line with faded ends, sized in the place under every gadget slot) shortens to the owned slots.
 - `Guide.luau`: the first-minute tutorial (new saves, until the first purchase): `Hud.Guide`
   objective at the top centre (theme `guide` yellow), a flat yellow lane from inside the player
   toward the step's place, `Cues.guide.belowCamera` studs under the camera whatever the ground does
