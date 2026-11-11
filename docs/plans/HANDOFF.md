@@ -22,6 +22,10 @@ Read this first in every new session. Then read CLAUDE.md, AGENTS.md and
   15/33/56/77%, fill curve per stretch); milestones every 5% (`shared/Milestones`, boosts, revived
   cove decor `Map.Revive.M1..M8`, bacon-hair sightings, Raindrops); save version 3 migrates old
   saves. Left: 4e, the owner's 2-hour playtest from a new save. **Next: Phase 5** (cutscenes).
+- UI restyle (2026-11-11): style `clear-tide` (library `ui/styles/clear-tide`, theme
+  `C:\RobloxDev\shared\UI\Themes\clear-tide.luau`, refs from the owner): icon-led HUD, icon-only
+  hotbar, gradient hexes with a glow and rim, one colour per job, thin soft text strokes, glowing
+  yellow guide chevrons; gameplay HUD, honeycomb and the lobby restyled in Studio.
 - Restarting `rojo serve` drops Studio's Rojo connection; only the owner can click Connect again.
 - Phase 2 leftovers (do with 3b or later): per-area ambience/music, guide hint toward the next gate, a
   gate-burst VFX.
