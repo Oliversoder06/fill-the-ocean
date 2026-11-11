@@ -343,6 +343,129 @@ def clear_tide_lane_tile():
 	tile.save(os.path.join(CT_OUT, "ct_laneTile.png"))
 
 
+CT_OL_DARK = (0x14, 0x16, 0x1C)
+CT_OL_COIN = (0x7A, 0x4A, 0x00)
+CT_OL_WIDTH = 14  # px on the 256 canvas: ~3 px around a 56 px icon on screen
+CT_OL_FIT = 0.84  # the art shrinks so its outline fits the canvas
+CT_RIM_THICK = 18  # ~4 px on a 110 px hex
+
+
+# Round 3 (owner, 2026-11-11): every icon gets a darker-hue outline (`_ol`), plus the pin and
+# stopwatch for the run panel, a water drop, the hotbar's wave line and a thicker hex rim.
+def clear_tide_outlined():
+	from PIL import ImageChops
+
+	os.makedirs(CT_OUT, exist_ok=True)
+	cs = 256
+	big = cs * SS
+
+	def grow(mask, px):
+		# Dilate by a disc: the mask shifted around rings from px down to the centre.
+		out = mask
+		r = px
+		while r > 0:
+			steps = max(8, round(2 * math.pi * r / SS))
+			for i in range(steps):
+				a = 2 * math.pi * i / steps
+				out = ImageChops.lighter(out, ImageChops.offset(mask, round(r * math.cos(a)), round(r * math.sin(a))))
+			r -= 2 * SS
+		return out
+
+	def outlined(art, colour, name):
+		fit = round(big * CT_OL_FIT)
+		placed = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+		placed.alpha_composite(art.resize((fit, fit), Image.LANCZOS), ((big - fit) // 2, (big - fit) // 2))
+		edge = Image.new("RGBA", (big, big), colour + (0,))
+		edge.putalpha(grow(placed.getchannel("A"), CT_OL_WIDTH * SS))
+		edge.alpha_composite(placed)
+		edge.resize((cs, cs), Image.LANCZOS).save(os.path.join(CT_OUT, name + "_ol.png"))
+
+	def loaded(*path):
+		return Image.open(os.path.join(os.path.dirname(__file__), "..", "ui", *path)).convert("RGBA").resize((big, big), Image.LANCZOS)
+
+	def white(mask):
+		art = Image.new("RGBA", mask.size, (255, 255, 255, 0))
+		art.putalpha(mask)
+		return art
+
+	def s(*v):
+		return [n * SS for n in v]
+
+	outlined(loaded("clear-tide", "ct_coin.png"), CT_OL_COIN, "ct_coin")
+	outlined(loaded("honeycomb", "area_flag.png"), CT_OL_DARK, "ct_flag")
+	for name in ("ct_lock", "ct_check", "ct_backArrow"):
+		outlined(loaded("clear-tide", name + ".png"), CT_OL_DARK, name)
+
+	# Map pin: a round head tapering to a point, a hole through the head.
+	img = Image.new("L", (big, big), 0)
+	d = ImageDraw.Draw(img)
+	head, cx, cy, tip = 84, 128, 104, 244
+	d.ellipse(s(cx - head, cy - head, cx + head, cy + head), fill=255)
+	touch = math.asin(head / (tip - cy))
+	side = [(cx + head * math.cos(touch) * k, cy + head * math.sin(touch)) for k in (-1, 1)]
+	d.polygon([(x * SS, y * SS) for x, y in (side[0], side[1], (cx, tip))], fill=255)
+	d.ellipse(s(cx - 34, cy - 34, cx + 34, cy + 34), fill=0)
+	outlined(white(img), CT_OL_DARK, "ct_pin")
+
+	# Stopwatch: a full face with its crown; the hands are cut out so the outline colour shows through.
+	img = Image.new("L", (big, big), 0)
+	d = ImageDraw.Draw(img)
+	cx, cy, rad = 128, 146, 104
+	d.ellipse(s(cx - rad, cy - rad, cx + rad, cy + rad), fill=255)
+	d.rounded_rectangle(s(96, 6, 160, 38), radius=10 * SS, fill=255)
+	d.rectangle(s(114, 30, 142, 50), fill=255)
+	hand = 22 * SS
+	for x, y in ((cx, cy - 70), (cx + 46, cy - 26)):
+		d.line(s(cx, cy, x, y), fill=0, width=hand)
+		d.ellipse((x * SS - hand / 2, y * SS - hand / 2, x * SS + hand / 2, y * SS + hand / 2), fill=0)
+	d.ellipse(s(cx - 20, cy - 20, cx + 20, cy + 20), fill=0)
+	outlined(white(img), CT_OL_DARK, "ct_clock")
+
+	# Water drop: a round bottom rising to a point.
+	img = Image.new("L", (big, big), 0)
+	d = ImageDraw.Draw(img)
+	rad, cx, cy, tip = 92, 128, 152, 6
+	d.ellipse(s(cx - rad, cy - rad, cx + rad, cy + rad), fill=255)
+	touch = math.asin(rad / (cy - tip))
+	side = [(cx + rad * math.cos(touch) * k, cy - rad * math.sin(touch)) for k in (-1, 1)]
+	d.polygon([(x * SS, y * SS) for x, y in (side[0], side[1], (cx, tip))], fill=255)
+	outlined(white(img), CT_OL_DARK, "ct_drop")
+
+	# ct_wave: the hotbar's line behind the slots, white with a thin dark edge, fading out at both ends.
+	ww, wh, amp, waves, line, edge, fade = 1024, 96, 22, 4, 12, 3, 96
+	wave = Image.new("RGBA", (ww * SS, wh * SS), CT_OL_DARK + (0,))
+	d = ImageDraw.Draw(wave)
+	ends = line / 2 + edge + 2
+	pts = []
+	for i in range(4097):
+		x = ends + (ww - 2 * ends) * i / 4096
+		pts.append((x * SS, (wh / 2 + amp * math.sin((x - ends) / (ww - 2 * ends) * waves * 2 * math.pi)) * SS))
+	# Stamped discs, not d.line: its joints leave dark slivers across the white.
+	for width, colour in ((line + 2 * edge, CT_OL_DARK), (line, (255, 255, 255))):
+		w = width * SS
+		for x, y in pts:
+			d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=colour + (255,))
+	wave = wave.resize((ww, wh), Image.LANCZOS)
+	ramp = Image.new("L", (ww, 1))
+	ramp.putdata([round(255 * min(1.0, x / fade, (ww - 1 - x) / fade)) for x in range(ww)])
+	wave.putalpha(ImageChops.multiply(wave.getchannel("A"), ramp.resize((ww, wh))))
+	wave.save(os.path.join(CT_OUT, "ct_wave.png"))
+
+	# ct_hexRim_thick: ct_hexRim three times as wide.
+	cx, cy = W * SS / 2, H * SS / 2
+	r = (W / 2 - 1) * SS
+	apothem = r * math.sqrt(3) / 2
+
+	def inset(px):
+		return r * (apothem - px * SS) / apothem
+
+	def rim(d):
+		d.polygon(hex_points(cx, cy, inset(CT_RIM_INSET), CORNER * SS * 0.8), fill=255)
+		d.polygon(hex_points(cx, cy, inset(CT_RIM_INSET + CT_RIM_THICK), CORNER * SS * 0.6), fill=0)
+
+	white(hexagon(rim)).save(os.path.join(CT_OUT, "ct_hexRim_thick.png"))
+
+
 if __name__ == "__main__":
 	import sys
 
@@ -354,5 +477,7 @@ if __name__ == "__main__":
 		clear_tide_lane()
 	elif sys.argv[1:] == ["clear-tide-lane-tile"]:
 		clear_tide_lane_tile()
+	elif sys.argv[1:] == ["clear-tide-outlined"]:
+		clear_tide_outlined()
 	else:
 		main()
