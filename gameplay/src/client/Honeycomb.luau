@@ -212,7 +212,6 @@ function Honeycomb.start()
 	local function fitView(v: ViewData)
 		local size = board.AbsoluteSize
 		v.zoom = (Comb.zoom(v.w, v.h, size.X, size.Y, hexHeight, CUE.minHexPixels, CUE.maxZoom))
-		Hex.setTextScale(v.zoom)
 	end
 
 	board:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
@@ -220,7 +219,6 @@ function Honeycomb.start()
 		if v then
 			fitView(v)
 			zoomScale.Scale = v.zoom
-			dirty = true -- hex text keeps its on-screen size
 		end
 	end)
 

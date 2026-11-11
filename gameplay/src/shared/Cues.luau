@@ -118,6 +118,14 @@ Cues.purchase = {
 	sparkle = "Sparkle",
 }
 
+-- Hotbar slots (client/Hotbar): the one in hand at full size and opacity; the rest at idleScale with
+-- their art idleTransparency, easing over `seconds`.
+Cues.hotbar = {
+	idleScale = 0.82,
+	idleTransparency = 0.45,
+	seconds = 0.12,
+}
+
 -- Milestones every 5% (client/Milestones). The camera swoops swoopRise studs up and up to swoopOut
 -- studs out toward the ocean, looking swoopLook studs past that, and back over swoopSeconds; the
 -- music ducks for duckSeconds under `sound`. A revived cove decoration pops from reviveFrom of its

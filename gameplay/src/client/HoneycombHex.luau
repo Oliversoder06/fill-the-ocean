@@ -50,14 +50,12 @@ local PAINT: { [Kind]: Paint } = {
 	empty = look(colors.empty, nil),
 }
 local BACK_OVERSHOOT = 1.70158 -- TweenService's Back easing
--- On-screen text sizes in pixels at the fitted zoom (never hidden).
-local TEXT = { name = { 14, 18 }, level = { 12, 14 }, price = { 14, 16 } }
+-- Text sizes in template pixels (Theme.type): the canvas's Zoom scales them with the hexes, so every
+-- hex in a view shows the same sizes.
+local TEXT = { name = Theme.type.label, level = Theme.type.small, price = Theme.type.label }
 
 -- Art for the tracks that have an icon (the tool shows its 3D model; the rest none until drawn).
 local ICONS = { pickup = "pipFull", tip = "coin" }
-
--- On-screen pixels per template pixel in the shown view (its zoom).
-local textScale = 1
 
 export type Hex = {
 	button: ImageButton,
@@ -83,7 +81,6 @@ export type Hex = {
 	waterWidth: UDim,
 	checkSize: UDim2,
 	badgeSize: UDim2,
-	designs: { [TextLabel]: number }, -- text sizes at zoom 1
 	q: number,
 	r: number,
 	x: number, -- offset from the canvas centre, before zoom
@@ -128,15 +125,6 @@ function HoneycombHex.parts(button: ImageButton)
 	}
 end
 
--- A label's text size at view scale 1: TextScaled labels have no real TextSize (it reads 8).
-local function designSize(label: TextLabel): number
-	if not label.TextScaled then
-		return label.TextSize
-	end
-	local limit = label:FindFirstChildOfClass("UITextSizeConstraint")
-	return if limit then limit.MaxTextSize else label.Size.Y.Offset
-end
-
 -- A hidden copy of `template` at axial (q, r), `x`, `y` from the canvas centre, in `parent`.
 function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number, y: number, parent: Instance): Hex
 	local button = template:Clone()
@@ -145,9 +133,13 @@ function HoneycombHex.new(template: ImageButton, q: number, r: number, x: number
 	hex.waterWidth = hex.water.Size.X
 	hex.checkSize = hex.check.Size
 	hex.badgeSize = hex.badge.Size
-	hex.designs = {}
-	for _, label in { hex.name, hex.level, hex.price } do
-		hex.designs[label] = designSize(label)
+	for label, size in { [hex.name] = TEXT.name, [hex.level] = TEXT.level, [hex.price] = TEXT.price } do
+		label.TextScaled = false
+		label.TextSize = size
+		local limit = label:FindFirstChildOfClass("UITextSizeConstraint")
+		if limit then
+			limit:Destroy() -- would clamp the fixed size
+		end
 	end
 	hex.q, hex.r, hex.x, hex.y = q, r, x, y
 	hex.hover, hex.down = false, false
@@ -169,34 +161,18 @@ function HoneycombHex.scaled(size: UDim2, k: number): UDim2
 	return UDim2.new(size.X.Scale * k, size.X.Offset * k, size.Y.Scale * k, size.Y.Offset * k)
 end
 
--- The shown view's zoom: hex text keeps to its TEXT sizes on screen. The caller repaints after.
-function HoneycombHex.setTextScale(scale: number)
-	textScale = scale
-end
-
--- `label` shows `text` (nil hides it) at an on-screen size within `range`: a TextScaled label with a
--- UITextSizeConstraint shrinks to fit within it, any other label takes its design size clamped.
-local function paintText(hex: Hex, label: TextLabel, text: string?, range: { number })
+-- `label` shows `text` (nil hides it), at its fixed size.
+local function paintText(label: TextLabel, text: string?)
 	set(label, "Visible", text ~= nil)
-	if not text then
-		return
-	end
-	set(label, "Text", text)
-	local low, high = range[1] / textScale, range[2] / textScale
-	local limit = label:FindFirstChildOfClass("UITextSizeConstraint")
-	if label.TextScaled and limit then
-		set(limit, "MinTextSize", math.clamp(math.floor(low), 1, 100))
-		set(limit, "MaxTextSize", math.clamp(math.ceil(high), 1, 100))
-	else
-		set(label, "TextScaled", false)
-		set(label, "TextSize", math.round(math.clamp(hex.designs[label], low, high)))
+	if text then
+		set(label, "Text", text)
 	end
 end
 
 -- The price row: `text` (nil hides it), the coin, its colour.
 local function paintPrice(hex: Hex, text: string?, coin: boolean, color: Color3)
 	set(hex.priceRow, "Visible", text ~= nil)
-	paintText(hex, hex.price, text, TEXT.price)
+	paintText(hex.price, text)
 	if text then
 		set(hex.price, "TextColor3", color)
 		set(hex.coin, "Visible", coin)
@@ -297,8 +273,8 @@ function HoneycombHex.paintUpgrade(hex: Hex, upgrade: Comb.Upgrade, st: Comb.Hex
 	end
 	paintBody(hex, kind, water, state == "max", not art, false, gate and art)
 	local tool = upgrade.id == "tool"
-	paintText(hex, hex.name, if tool then Format.toolName(stats.toolName) else Text.short(link), TEXT.name)
-	paintText(hex, hex.level, HoneycombHex.levelText(upgrade, st), TEXT.level)
+	paintText(hex.name, if tool then Format.toolName(stats.toolName) else Text.short(link))
+	paintText(hex.level, HoneycombHex.levelText(upgrade, st))
 	paintPrice(hex, priceText, coin, priceColor)
 	local template, image = nil, nil
 	if art and tool then
@@ -337,8 +313,8 @@ end
 function HoneycombHex.paintCategory(hex: Hex, layout: Comb.Layout, catId: string, view: Comb.View, count: number)
 	local owned, total = Comb.ownedShare(layout, catId, view)
 	paintBody(hex, "category", 0, false, false, false, catId == "areas")
-	paintText(hex, hex.name, Text.category(catId):upper(), TEXT.name)
-	paintText(hex, hex.level, `{owned}/{total}`, TEXT.level)
+	paintText(hex.name, Text.category(catId):upper())
+	paintText(hex.level, `{owned}/{total}`)
 	paintPrice(hex, "Open", false, colors.text)
 	local template, image = nil, nil
 	if catId == "boosts" then
@@ -353,8 +329,8 @@ end
 -- A category's centre: Back, with its arrow.
 function HoneycombHex.paintBack(hex: Hex)
 	paintBody(hex, "back", 0, false, false, true, false)
-	paintText(hex, hex.name, "Back", TEXT.name)
-	paintText(hex, hex.level, nil, TEXT.level)
+	paintText(hex.name, "Back")
+	paintText(hex.level, nil)
 	paintPrice(hex, nil, false, colors.text)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
 end
@@ -362,8 +338,8 @@ end
 -- A dark empty hex that completes the honeycomb's shape: nothing on it.
 function HoneycombHex.paintEmpty(hex: Hex)
 	paintBody(hex, "empty", 0, false, false, false, false)
-	paintText(hex, hex.name, nil, TEXT.name)
-	paintText(hex, hex.level, nil, TEXT.level)
+	paintText(hex.name, nil)
+	paintText(hex.level, nil)
 	paintPrice(hex, nil, false, colors.text)
 	HoneycombHex.showArt(hex, hex.view, hex.icon, nil, nil)
 end

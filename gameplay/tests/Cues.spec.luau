@@ -102,6 +102,14 @@ function tests.purchase_cue_is_sane(t)
 	end
 end
 
+-- Slots not in hand sit smaller and fainter, still visible.
+function tests.hotbar_idle_slots_are_smaller_and_fainter(t)
+	local cue = Cues.hotbar
+	t.expectEq(cue.idleScale, 0.82)
+	t.expectEq(cue.idleTransparency, 0.45)
+	t.expectEq(cue.seconds, 0.12)
+end
+
 function tests.milestone_cue_is_sane(t)
 	local cue = Cues.milestone
 	t.expectEq(cue.swoopSeconds, 2, "the swoop takes 2 s (D9)")

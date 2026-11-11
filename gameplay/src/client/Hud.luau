@@ -255,14 +255,15 @@ function Hud.start()
 	local cardLabel = find(gui, "Card")
 	local waiting = find(gui, "Waiting")
 	local progress = find(gui, "Progress")
-	local timeText = find(progress, "TimeRow.Time")
-	local placeText = find(progress, "PlaceRow.Place")
+	local timeText = find(progress, "Time")
+	local areaText = find(progress, "Area")
+	local areaSub = find(progress, "AreaSub")
 	local boostTag = find(progress, "BoostTag")
 	local progressFill = find(progress, "Bar.Fill")
 	local progressLabel = find(progress, "Bar.Label")
 	local progressPop = find(progress, "Bar.Pop")
 	fillPop = progressPop
-	local litresLabel = find(progress, "Litres")
+	local litresLabel = find(progress, "Bar.Litres")
 	local shownFill, fillFrom, fillTo, fillChangedAt = 0, 0, 0, -math.huge
 
 	local cardToken = 0
@@ -302,6 +303,7 @@ function Hud.start()
 	end)
 
 	local finalTime: number? = nil -- time played as last shown while playing
+	local shownGates: any = false -- the GatesOpen the area subtitle shows (false: none yet)
 	RunService.RenderStepped:Connect(function()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
 
@@ -320,8 +322,8 @@ function Hud.start()
 		set(waiting, "Visible", phase == "loading")
 		set(waiting, "Text", if type(waitText) ~= "string" or waitText == "" then "Get ready..." elseif waitText:match("^%d+/%d+$") then `Waiting for your friends... {waitText}` else waitText)
 
-		-- Run panel: stopwatch (time played on this save), the map's name, how full the ocean is
-		-- (hidden under the honeycomb's full-screen cover)
+		-- Run panel: the map's name and how many areas are open, how full the ocean is (inside the
+		-- bar), stopwatch (time played on this save) (hidden under the honeycomb's full-screen cover)
 		local startedAt = ReplicatedStorage:GetAttribute("RunStartedAt")
 		set(progress, "Visible", type(startedAt) == "number" and not honeycomb.Visible)
 		if type(startedAt) == "number" then
@@ -332,7 +334,12 @@ function Hud.start()
 			end
 			set(timeText, "Text", Hud.clock(finalTime))
 			local mapName = ReplicatedStorage:GetAttribute("MapName")
-			set(placeText, "Text", if type(mapName) == "string" then mapName else "")
+			set(areaText, "Text", if type(mapName) == "string" then mapName else "")
+			local gates = ReplicatedStorage:GetAttribute("GatesOpen")
+			if gates ~= shownGates then
+				shownGates = gates
+				areaSub.Text = `AREAS {Ladder.openAreas(Config, Hud.gatesOpen())}/{#Config.areas} OPEN`
+			end
 			-- A running fill-milestone boost shows its countdown in the boost tag.
 			local boost = ReplicatedStorage:GetAttribute("Boost")
 			local endsAt = ReplicatedStorage:GetAttribute("BoostEndsAt")

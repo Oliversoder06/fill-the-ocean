@@ -66,8 +66,9 @@ Server (`src/server/`):
 
 Client (`src/client/`, all started from `init.client.luau`):
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
-  panel: stopwatch, map name, fill bar with `shared/Format.fill` (two decimals below 10%) and
-  `Progress.Litres` (Current / Target)), frees the cursor while
+  panel: `Area` (map name), `AreaSub` ("AREAS 2/5 OPEN"), the pill `Bar` with `Fill`, `Label`
+  (`shared/Format.fill`, two decimals below 10%) and `Litres` (Current / Target) inside it, `Goal`
+  under it, `Time` (stopwatch), `BoostTag`), frees the cursor while
   a window is open. Exposes helpers `Hud.find` (asserting path lookup), `Hud.set` (write only on
   change), `Hud.short` (1.2K) and `Hud.money` (12,480; both `shared/Format`), the team's economy
   `Hud.wallet()`, `Hud.levels`, `Hud.items`, `Hud.buildings`, `Hud.teamSize()` and `Hud.price(cost)`
@@ -113,7 +114,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   in its state (`Name` on top, art, `Level` "2/6" / "MAX", the next level's price at the bottom
   (`short` with a rising fill while short), "Owned" / "Open"; `BackArrow`, `AreaIcon`), dark empty
   hexes completing a category's rings (`Comb.emptySlots`),
-  text kept 14-18 / 12-14 / 14-16 px on screen, the landing (`celebrate`), enter / pop / wake
+  text at fixed `Theme.type` sizes (Name label, Level small, price label; TextScaled off) scaled
+  only by the canvas `Zoom`, the landing (`celebrate`), enter / pop / wake
   scales. `HoneycombText.luau`: its words (names, effects, reasons, gate texts, staff posts).
   `HoneycombCard.luau`: the `Tooltip` card (words, placement, the staff `AssignButton`).
   `HoneycombData.luau`: the layout, upgrades by id and the team's state as `shared/Honeycomb` reads
@@ -148,7 +150,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   (`Music.duck`), plays through `SoundService.Music`.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
-- `Hotbar.luau`: icon-only slots (no boxes; the one in hand lifts 6 px and shows its `Glow`): the
+- `Hotbar.luau`: icon-only slots (no boxes, no glow; the ones not in hand sit at
+  `Cues.hotbar.idleScale` on their `Press` UIScale with their `View` faded): the
   tool slot (1 / gamepad X / click to equip or unequip), one slot per owned
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
   with `Ease.pop`) for only what is in hand, its model at the left end: the tool's water, the Water
@@ -364,8 +367,8 @@ The server publishes state as attributes; the client only reads them.
 - The look: icon-led HUD with no boxes or panels behind HUD numbers (a big icon and a plain
   number), an icon-only hotbar, flat-coloured hexes with a subtle top-to-bottom gradient and a thin
   lighter rim (no glow, no hard outline), one colour per job, Montserrat (Bold names, ExtraBold numbers and
-  titles), white text with a thin soft stroke (`textStroke`: thickness 1, colour `shadow`, never a
-  thick outline). Tintable images are white; colour them with `ImageColor3` from the theme.
+  titles; sizes from `Theme.type`), white text with a solid dark stroke (`textStroke`: thickness
+  2, colour `shadow`). Tintable images are white; colour them with `ImageColor3` from the theme.
 - Windows (anything the player clicks in) must be listed in `Hud.luau`'s `windows` table, so the
   first-person cursor is freed while they are open. While no window is open the mouse icon is
   hidden and `StarterGui.Cursor` (its own ScreenGui, IgnoreGuiInset so it sits on the true

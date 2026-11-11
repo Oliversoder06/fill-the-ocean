@@ -3,7 +3,7 @@
 -- Gadget slots (Hotbar.Gadgets.<itemId>, one per hotbar gadget in Config.items, built like Slot):
 -- shown once owned; press 2, 3, 4 (in config order), gamepad DPadRight (next one) or click a slot to
 -- take that gadget out instead of the tool, again to put it away. The server decides (Equip remote).
--- The thing in hand lifts a little and shows its Glow.
+-- The thing in hand shows at full size; the rest sit smaller and fainter (Cues.hotbar).
 -- The fill bar above the slots shows only what the thing in hand uses, its model at the left end:
 -- the tool's "carried / capacity" litres, the Water Gun's water, the Jetpack Tank's fuel, or, while
 -- the player drives their vehicle or stands by its hose (client/Vehicles.gauge), its tank. The Garden
@@ -17,6 +17,7 @@ local TweenService = game:GetService("TweenService")
 
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Config = require(ReplicatedStorage.Shared.Config)
+local Cues = require(ReplicatedStorage.Shared.Cues)
 local Items = require(ReplicatedStorage.Common.Items)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local ToolModels = require(ReplicatedStorage.Shared.ToolModels)
@@ -31,22 +32,27 @@ local QUICK = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Ou
 local POP = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local FILL_POP = TweenInfo.new(Ease.POP_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local FILL_POP_SCALE = 1.08 -- the bar swells a little each time water lands (shows even at 100%)
-local LIFT = 6 -- pixels the thing in hand rises
-local LIFT_TWEEN = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local IDLE = Cues.hotbar
+local IDLE_TWEEN = TweenInfo.new(IDLE.seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local GADGET_KEYS = { Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four }
 
 local Hotbar = {}
 
-type Held = { slot: GuiObject, glow: GuiObject, rest: UDim2, held: boolean? }
+-- `press`: the slot's one UIScale, carrying both its rest size and hover / press.
+type Held = { press: UIScale, view: ViewportFrame, held: boolean? }
 
--- A slot in hand lifts and glows; one put away settles back.
+local function restScale(entry: Held): number
+	return if entry.held then 1 else IDLE.idleScale
+end
+
+-- A slot in hand grows to full size and opacity; one put away settles smaller and fainter.
 local function hold(entry: Held, held: boolean)
 	if entry.held == held then
 		return
 	end
 	entry.held = held
-	entry.glow.Visible = held
-	TweenService:Create(entry.slot, LIFT_TWEEN, { Position = if held then entry.rest - UDim2.fromOffset(0, LIFT) else entry.rest }):Play()
+	TweenService:Create(entry.press, IDLE_TWEEN, { Scale = restScale(entry) }):Play()
+	TweenService:Create(entry.view, IDLE_TWEEN, { ImageTransparency = if held then 0 else IDLE.idleTransparency }):Play()
 end
 
 -- Litres for the fill label: whole numbers when whole (sweeps can leave thirds), 1.2K above 1000.
@@ -72,7 +78,7 @@ function Hotbar.start()
 	local slot = Hud.find(bar, "Slot")
 	local view = Hud.find(slot, "View")
 	local press = Hud.find(slot, "Press")
-	local toolHeld: Held = { slot = slot, glow = Hud.find(slot, "Glow"), rest = slot.Position }
+	local toolHeld: Held = { press = press, view = view }
 	fill.BackgroundColor3 = colors.owned
 	fillBar.BackgroundColor3 = colors.shadow
 	-- Hotbar gadgets (a `use`), in config order: each one's slot and key.
@@ -83,8 +89,6 @@ function Hotbar.start()
 			table.insert(gadgets, {
 				item = item,
 				slot = gadgetSlot,
-				glow = Hud.find(gadgetSlot, "Glow"),
-				rest = gadgetSlot.Position,
 				view = Hud.find(gadgetSlot, "View"),
 				press = Hud.find(gadgetSlot, "Press"),
 				shown = false,
@@ -93,14 +97,14 @@ function Hotbar.start()
 	end
 	assert(#gadgets <= #GADGET_KEYS, "Hotbar: more hotbar gadgets than keys")
 
-	local function bump(scale: UIScale)
-		scale.Scale = motion.pressScale
-		TweenService:Create(scale, POP, { Scale = 1 }):Play()
+	local function bump(entry: Held)
+		entry.press.Scale = restScale(entry) * motion.pressScale
+		TweenService:Create(entry.press, POP, { Scale = restScale(entry) }):Play()
 	end
 	-- The tool: out (also from a gadget) or away.
 	local function toggle()
 		equipRemote:FireServer(player:GetAttribute("Equipped") == false)
-		bump(press)
+		bump(toolHeld)
 	end
 	-- A gadget: out instead of the tool, or away when it already is. Only owned ones have a slot.
 	local function pick(entry)
@@ -108,7 +112,7 @@ function Hotbar.start()
 			return
 		end
 		equipRemote:FireServer(if player:GetAttribute("Gadget") == entry.item.id then false else entry.item.id)
-		bump(entry.press)
+		bump(entry)
 	end
 	-- Gamepad: the next owned gadget after the one out (the tool after the last).
 	local function cycle()
@@ -149,10 +153,10 @@ function Hotbar.start()
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.KeyCode.DPadRight, table.unpack(GADGET_KEYS, 1, #gadgets))
 	slot.MouseEnter:Connect(function()
-		TweenService:Create(press, QUICK, { Scale = motion.hoverScale }):Play()
+		TweenService:Create(press, QUICK, { Scale = restScale(toolHeld) * motion.hoverScale }):Play()
 	end)
 	slot.MouseLeave:Connect(function()
-		TweenService:Create(press, QUICK, { Scale = 1 }):Play()
+		TweenService:Create(press, QUICK, { Scale = restScale(toolHeld) }):Play()
 	end)
 
 	-- The template for the bar's icon: the vehicle's, a gadget's or the tool's; nil until replicated.
