@@ -261,6 +261,32 @@ def clear_tide_icons():
 	save_white(img.resize((128, 128), Image.LANCZOS), "ct_roundRect")
 
 
+# ct_chevronWide: the guide lane's ground chevron, a wide flat "^" across the lane (apex at the top
+# centre), white with its blurred copy behind at 50% as a glow; the margin keeps the blur unclipped.
+def clear_tide_lane():
+	from PIL import ImageChops, ImageFilter
+
+	os.makedirs(CT_OUT, exist_ok=True)
+	cw, ch, margin, drop = 512, 256, 20, 72  # drop: the arms' vertical thickness (~60 px across)
+	img = Image.new("L", (cw * SS, ch * SS), 0)
+	d = ImageDraw.Draw(img)
+	top, bottom = margin, ch - margin
+	points = [
+		(margin, bottom - drop),
+		(cw / 2, top),
+		(cw - margin, bottom - drop),
+		(cw - margin, bottom),
+		(cw / 2, top + drop),
+		(margin, bottom),
+	]
+	d.polygon([(x * SS, y * SS) for x, y in points], fill=255)
+	shape = img.resize((cw, ch), Image.LANCZOS)
+	halo = shape.filter(ImageFilter.GaussianBlur(14)).point(lambda v: v // 2)
+	out = Image.new("RGBA", (cw, ch), (255, 255, 255, 0))
+	out.putalpha(ImageChops.screen(shape, halo))
+	out.save(os.path.join(CT_OUT, "ct_chevronWide.png"))
+
+
 if __name__ == "__main__":
 	import sys
 
@@ -268,5 +294,7 @@ if __name__ == "__main__":
 		clear_tide()
 	elif sys.argv[1:] == ["clear-tide-icons"]:
 		clear_tide_icons()
+	elif sys.argv[1:] == ["clear-tide-lane"]:
+		clear_tide_lane()
 	else:
 		main()
