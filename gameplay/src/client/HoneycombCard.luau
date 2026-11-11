@@ -1,8 +1,8 @@
 -- The honeycomb's card (StarterGui.Hud.Honeycomb.Tooltip, built in Studio; client/Honeycomb shows
 -- it by the hovered or selected link): the link's name, its level step, one line of what it does,
--- its price and how to get it (Hint), placed on top of its hex (under it when there is no room
--- above) and kept on the screen. A hired staff's card has AssignButton: the staff moves to its next
--- post (Staff("assign", itemId, areaId), StaffRules.nextPost). Words from client/HoneycombText.
+-- its price and how to get it (Hint), beside the honeycomb so it never covers a hex. A hired staff's
+-- card has AssignButton: the staff moves to its next post (Staff("assign", itemId, areaId),
+-- StaffRules.nextPost). Words from client/HoneycombText.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
@@ -23,7 +23,7 @@ local set = Hud.set
 local CUE = Cues.honeycomb
 
 local GAP = 6 -- pixels between the card and the screen's edge
-local OVERLAP = 4 -- pixels the card covers its hex's edge, so the mouse moves straight onto it
+local GAP_SIDE = 28 -- pixels between the honeycomb and the card
 local BUY_HINT = { mouse = "Click to buy", touch = "Tap to buy", gamepad = "Press A to buy" }
 
 export type Input = "mouse" | "touch" | "gamepad"
@@ -116,18 +116,16 @@ function HoneycombCard.paint(card: Card, link: Comb.Link?, st: Comb.HexState?, v
 	end
 end
 
--- Puts the card on top of `button` (a hex `halfHeight` pixels tall from its centre on screen),
--- under it when there is no room above, inside `root` (the full-screen cover).
-function HoneycombCard.place(card: Card, root: GuiObject, button: GuiObject, halfHeight: number)
+-- Puts the card beside the honeycomb, never over a hex: right of `right` (the cluster's right edge on
+-- screen), else left of `left` when the right side has no room; vertically centred on the screen.
+function HoneycombCard.place(card: Card, root: GuiObject, left: number, right: number)
 	local frame = card.frame
 	local size, screen = frame.AbsoluteSize, root.AbsoluteSize
-	local centre = button.AbsolutePosition + button.AbsoluteSize / 2 - root.AbsolutePosition
-	local half = halfHeight - OVERLAP
-	local below = centre.Y - half - size.Y < GAP
-	local x = math.clamp(centre.X, size.X / 2 + GAP, math.max(size.X / 2 + GAP, screen.X - size.X / 2 - GAP))
-	local y = if below then math.min(centre.Y + half, screen.Y - size.Y - GAP) else centre.Y - half
-	set(frame, "AnchorPoint", Vector2.new(0.5, if below then 0 else 1))
-	set(frame, "Position", UDim2.fromOffset(math.round(x), math.round(y)))
+	local origin = root.AbsolutePosition
+	local onRight = right - origin.X + GAP_SIDE + size.X <= screen.X - GAP
+	local x = if onRight then right - origin.X + GAP_SIDE else math.max(size.X + GAP, left - origin.X - GAP_SIDE)
+	set(frame, "AnchorPoint", Vector2.new(if onRight then 0 else 1, 0.5))
+	set(frame, "Position", UDim2.fromOffset(math.round(x), math.round(screen.Y / 2)))
 end
 
 -- A refused press: the card (and its hint) pulses.

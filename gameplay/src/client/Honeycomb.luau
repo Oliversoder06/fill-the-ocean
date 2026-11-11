@@ -715,7 +715,16 @@ function Honeycomb.start()
 		end
 		local shown = if cardKey then v.byKey[cardKey] else nil
 		if shown and card.frame.Visible then
-			Card.place(card, root, shown.button, hexHeight * zoomScale.Scale / 2)
+			local left, right = math.huge, -math.huge
+			for _, hex in v.hexes do
+				left = math.min(left, hex.button.AbsolutePosition.X)
+				right = math.max(right, hex.button.AbsolutePosition.X + hex.button.AbsoluteSize.X)
+			end
+			for _, hex in v.empties do
+				left = math.min(left, hex.button.AbsolutePosition.X)
+				right = math.max(right, hex.button.AbsolutePosition.X + hex.button.AbsoluteSize.X)
+			end
+			Card.place(card, root, left, right)
 		end
 	end)
 end
