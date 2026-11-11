@@ -11,44 +11,45 @@ local EASE = 1.5 -- how quickly the mood follows the fill (slow, so it reads as 
 -- Owner direction (2026-11-05): vibrant and happy (bright stylized sim lighting) AND cinematic:
 -- late-afternoon sun with long shadows, distance fog that keeps the play area clear (Atmosphere
 -- Offset pushes it out), soft sun rays and bloom, a light lens blur far away.
--- Owner (2026-11-11): calmer and comfortable: less exposure, glare, haze and bloom.
--- Dry is the sun winning: warm, a little washed-out and hazy, with straw-coloured grass.
+-- Owner (2026-11-11): calmer and comfortable: a blue horizon, no white wash near the sun, sand that
+-- reads as sand (values tested in play).
+-- Dry is the sun winning: warm and a little hazy, with straw-coloured grass.
 -- Filling the basin brings the world back: colour, clear air and green grass (the place's own
 -- terrain colours are the wet look).
 local DRY = {
 	clockTime = 15.6,
-	brightness = 2.6,
-	ambient = Color3.fromRGB(158, 128, 104),
-	outdoorAmbient = Color3.fromRGB(196, 160, 126),
-	tint = Color3.fromRGB(255, 234, 210),
-	saturation = 0.02,
-	contrast = 0.1,
-	atmosphereColor = Color3.fromRGB(244, 230, 200),
-	atmosphereDecay = Color3.fromRGB(228, 190, 130),
+	brightness = 2.8,
+	ambient = Color3.fromRGB(140, 128, 118),
+	outdoorAmbient = Color3.fromRGB(168, 154, 140),
+	tint = Color3.fromRGB(255, 238, 216),
+	saturation = 0.14,
+	contrast = 0.22,
+	atmosphereColor = Color3.fromRGB(226, 228, 230),
+	atmosphereDecay = Color3.fromRGB(156, 174, 204),
 	density = 0.3,
-	offset = 0.25,
-	haze = 1.0,
+	offset = 0.3,
+	haze = 0.8,
 	glare = 0.15,
-	bloom = 0.35,
-	sunRays = 0.08,
+	bloom = 0.3,
+	sunRays = 0.05,
 	cloudCover = 0.3,
 	cloudDensity = 0.4,
 	cloudColor = Color3.fromRGB(255, 240, 222),
 }
 local WET = {
 	clockTime = 16.8,
-	brightness = 2.4,
-	ambient = Color3.fromRGB(136, 130, 128),
-	outdoorAmbient = Color3.fromRGB(170, 164, 158),
-	tint = Color3.fromRGB(255, 246, 236),
+	brightness = 2.6,
+	ambient = Color3.fromRGB(132, 128, 128),
+	outdoorAmbient = Color3.fromRGB(158, 154, 150),
+	tint = Color3.fromRGB(255, 248, 240),
 	saturation = 0.25,
-	contrast = 0.08,
-	atmosphereColor = Color3.fromRGB(206, 228, 250),
-	atmosphereDecay = Color3.fromRGB(108, 156, 216),
-	density = 0.25,
+	contrast = 0.2,
+	atmosphereColor = Color3.fromRGB(210, 226, 244),
+	atmosphereDecay = Color3.fromRGB(110, 150, 210),
+	density = 0.28,
 	offset = 0.35,
-	haze = 0.4,
-	glare = 0.05,
+	haze = 0.5,
+	glare = 0.08,
 	bloom = 0.25,
 	sunRays = 0.04,
 	cloudCover = 0.56,
@@ -90,7 +91,7 @@ function Mood.start()
 
 	-- Fixed settings that don't change with wetness
 	bloom.Size = 24
-	bloom.Threshold = 1.1
+	bloom.Threshold = 1.6
 	sunRays.Spread = 0.6
 	depth.FocusDistance = 60
 	depth.InFocusRadius = 90
