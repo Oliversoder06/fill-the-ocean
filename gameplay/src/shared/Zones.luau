@@ -206,27 +206,46 @@ end
 -- Whether some ground within `radius` studs (across) of `position` will be under water when the
 -- ocean is full. `ignore` lists what may stand on that ground (characters).
 function Zones.nearFlood(ocean: Model, position: Vector3, radius: number, ignore: { Instance }): boolean
+	return Zones.floodPoint(ocean, position, radius, ignore, nil) ~= nil
+end
+
+-- A ground point within `radius` studs of `position` that will be under water when the ocean is
+-- full, nil for none: with `toward` (a direction), the one most in that direction (the spot a pour
+-- lands when the player looks out, not down); without, the first found.
+function Zones.floodPoint(ocean: Model, position: Vector3, radius: number, ignore: { Instance }, toward: Vector3?): Vector3?
 	local tiles, fullY = waterTiles(ocean)
 	floodParams.FilterDescendantsInstances = ignore
-	local function floods(x: number, z: number): boolean
+	local function floods(x: number, z: number): Vector3?
 		if not inFootprint(tiles, Vector3.new(x, fullY, z)) then
-			return false
+			return nil
 		end
 		local hit = workspace:Raycast(Vector3.new(x, fullY + LOOK_ABOVE, z), Vector3.new(0, -LOOK_DOWN, 0), floodParams)
-		return hit ~= nil and hit.Position.Y <= fullY and hit.Position.Y >= position.Y - MAX_DROP
+		return if hit and hit.Position.Y <= fullY and hit.Position.Y >= position.Y - MAX_DROP then hit.Position else nil
 	end
-	if floods(position.X, position.Z) then
-		return true
+	local under = floods(position.X, position.Z)
+	if under and not toward then
+		return under
 	end
+	local flat = if toward then Vector3.new(toward.X, 0, toward.Z) else Vector3.zero
+	flat = if flat.Magnitude > 1e-6 then flat.Unit else flat
+	local best, bestScore = under, -math.huge
 	for _, ring in RINGS do
 		for i = 1, SPOKES do
 			local angle = (i / SPOKES) * 2 * math.pi
-			if floods(position.X + math.cos(angle) * radius * ring, position.Z + math.sin(angle) * radius * ring) then
-				return true
+			local offset = Vector3.new(math.cos(angle), 0, math.sin(angle))
+			local point = floods(position.X + offset.X * radius * ring, position.Z + offset.Z * radius * ring)
+			if point then
+				if not toward then
+					return point
+				end
+				local score = offset:Dot(flat)
+				if score > bestScore then
+					best, bestScore = point, score
+				end
 			end
 		end
 	end
-	return false
+	return best
 end
 
 return Zones

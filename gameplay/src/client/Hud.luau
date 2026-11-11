@@ -185,6 +185,17 @@ function Hud.scoopSpot(ocean: Model, position: Vector3)
 	return Zones.scoopSpot(ocean, Config, reached, areaIds("RocksBroken"), position, Hud.REACH, net)
 end
 
+-- What may stand on the ground a pour lands on: the camera and every player's character.
+local function pourIgnore(): { Instance }
+	local ignore: { Instance } = { workspace.CurrentCamera }
+	for _, other in Players:GetPlayers() do
+		if other.Character then
+			table.insert(ignore, other.Character)
+		end
+	end
+	return ignore
+end
+
 -- Whether a character at `position` may pour from `reach` studs (Hud.REACH by default; the Water
 -- Gun's range): by an open area's Pour, or next to where the water will be, past the camera and
 -- every player's character (the same check Action offers the pour with).
@@ -192,14 +203,13 @@ function Hud.nearPour(ocean: Model, position: Vector3, reach: number?): boolean
 	if Hud.openSpot(ocean, "Pour", position, reach) then
 		return true
 	end
-	local ignore: { Instance } = { workspace.CurrentCamera }
-	for _, other in Players:GetPlayers() do
-		if other.Character then
-			table.insert(ignore, other.Character)
-		end
-	end
-	return Zones.nearFlood(ocean, position, reach or Hud.REACH, ignore)
+	return Zones.nearFlood(ocean, position, reach or Hud.REACH, pourIgnore())
+end
 
+-- Where a pour from `position` lands when the look doesn't reach the water: the ground within
+-- `reach` that will flood, most in the direction `toward` (Zones.floodPoint).
+function Hud.floodPoint(ocean: Model, position: Vector3, reach: number?, toward: Vector3): Vector3?
+	return Zones.floodPoint(ocean, position, reach or Hud.REACH, pourIgnore(), toward)
 end
 
 -- Grows on hover, shrinks while pressed (motion values from the style).
