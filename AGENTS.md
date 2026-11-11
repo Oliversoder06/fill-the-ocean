@@ -43,7 +43,8 @@ Server (`src/server/`):
   (`Act` remote), buying, publishing attributes. Most gameplay changes land here.
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it, on a `HeldGrip`
   Motor6D (hand to tool) that client `Bodies` turns to suit the carry pose.
-- `Map.luau`: checks the baked ocean model and moves the water.
+- `Map.luau`: checks the baked ocean model and moves the water (shallow water fades in over its
+  first `SHALLOW_STUDS`, so an almost empty ocean shows a dry seabed, not a blue sheet).
 - `Mechanics.luau`: area mechanics (steam vents and their knockback, snow, the drifting cloud, the
   rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
   `rocksBroken` and `goldenId` when it credits a scoop.
