@@ -220,10 +220,11 @@ function Honeycomb.start()
 		Purchase.landed(target, sent.cost, Cues.stingPitch(sent.owned + 1), firstBuy(bought), arrive, still)
 	end
 
-	-- Zoom to fill the board, never under CUE.minHexPixels a hex on screen.
+	-- Zoom to fill the board, never under CUE.minHexPixels a hex on screen (the HUD's scale counts).
 	local function fitView(v: ViewData)
-		local size = board.AbsoluteSize
-		v.zoom = (Comb.zoom(v.w, v.h, size.X, size.Y, hexHeight, CUE.minHexPixels, CUE.maxZoom))
+		local s = Hud.uiScale()
+		local size = board.AbsoluteSize / s
+		v.zoom = (Comb.zoom(v.w, v.h, size.X, size.Y, hexHeight, CUE.minHexPixels / s, CUE.maxZoom))
 	end
 
 	-- The canvas at its pan, kept so some of the view always covers the board's centre.
@@ -247,7 +248,7 @@ function Honeycomb.start()
 			glide:Cancel()
 		end
 		-- The canvas is a zero-size frame anchored at its centre: it scales around AbsolutePosition.
-		local off = point - canvas.AbsolutePosition
+		local off = (point - canvas.AbsolutePosition) / Hud.uiScale()
 		pan = Vector2.new(Comb.zoomPan(pan.X, pan.Y, off.X, off.Y, was, userZoom))
 		zoomScale.Scale = v.zoom * userZoom
 		placeCanvas()
@@ -745,7 +746,7 @@ function Honeycomb.start()
 			end
 		end
 		if held.dragging then
-			pan += at - held.last
+			pan += (at - held.last) / Hud.uiScale()
 			placeCanvas()
 		end
 		held.last = at

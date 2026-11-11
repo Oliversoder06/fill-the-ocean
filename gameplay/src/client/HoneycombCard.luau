@@ -120,8 +120,10 @@ end
 -- screen), else left of `left` when the right side has no room; vertically centred on the screen.
 function HoneycombCard.place(card: Card, root: GuiObject, left: number, right: number)
 	local frame = card.frame
-	local size, screen = frame.AbsoluteSize, root.AbsoluteSize
-	local origin = root.AbsolutePosition
+	local s = Hud.uiScale() -- screen pixels to the HUD's offsets
+	local size, screen = frame.AbsoluteSize / s, root.AbsoluteSize / s
+	local origin = root.AbsolutePosition / s
+	left, right = left / s, right / s
 	local onRight = right - origin.X + GAP_SIDE + size.X <= screen.X - GAP
 	local x = if onRight then right - origin.X + GAP_SIDE else math.max(size.X + GAP, left - origin.X - GAP_SIDE)
 	set(frame, "AnchorPoint", Vector2.new(if onRight then 0 else 1, 0.5))

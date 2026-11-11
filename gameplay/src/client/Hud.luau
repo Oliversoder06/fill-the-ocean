@@ -239,6 +239,18 @@ Hud.walletHold = 0
 
 local fillPop: UIScale? = nil -- the fill bar's Progress.Bar.Pop, once Hud.start has found it
 
+-- The HUD is laid out for screens DESIGN_HEIGHT tall: a smaller one (a phone) shrinks all of it
+-- (Hud.Scale, a UIScale on the ScreenGui), a touch-only tablet grows it a little.
+local DESIGN_HEIGHT = 600
+local MIN_SCALE = 0.55
+local TOUCH_MAX_SCALE = 1.25
+local hudScale: UIScale? = nil
+
+-- The HUD's scale: code that turns screen pixels (AbsolutePosition, input) into offsets divides by it.
+function Hud.uiScale(): number
+	return if hudScale then hudScale.Scale else 1
+end
+
 -- Pours on their way down a channel (client/Channels): their landing pulses the bar, so the Fill rise
 -- doesn't pop it too.
 Hud.wavesInFlight = 0
@@ -258,6 +270,15 @@ function Hud.start()
 	local cardEvent = remotes:WaitForChild("Card") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
 
+	local scale = find(gui, "Scale") :: UIScale
+	hudScale = scale
+	local function fitScreen()
+		local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+		local fitted = workspace.CurrentCamera.ViewportSize.Y / DESIGN_HEIGHT
+		set(scale, "Scale", math.round(math.clamp(fitted, MIN_SCALE, if touchOnly then TOUCH_MAX_SCALE else 1) * 100) / 100)
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitScreen)
+	fitScreen()
 	local walletFrame = find(gui, "Wallet")
 	local coins = find(walletFrame, "Pill.Coins")
 	local coinPop = find(walletFrame, "Coin.Pop")

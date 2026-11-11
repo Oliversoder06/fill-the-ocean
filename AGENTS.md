@@ -75,9 +75,14 @@ Client (`src/client/`, all started from `init.client.luau`):
   (what a listed price costs the team; every price shown goes through it), `Hud.offer` (what
   TAB offers next: `Items.tabOffer`; `"useless"` for a level that changes nothing, `Ladder.helps`), `Hud.ocean`,
   `Hud.pulseFill(litres)` (the fill bar's pulse when poured water reaches the ocean) and
-  `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it).
-- `Action.luau`: scoop and pour input (aim at the water + hold E / LMB / RT / touch button), one
-  full sweep or pour per action, the `ActHint` text. Viewmodel and Feel read `Action.current()`.
+  `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it). Scales the
+  whole HUD to the screen (`Hud.Scale`, a UIScale on the ScreenGui: laid out for 600 px tall, a phone
+  shrinks it to 0.55, a touch-only tablet grows it to 1.25); code that turns screen pixels
+  (AbsolutePosition, input) into offsets divides by `Hud.uiScale()`.
+- `Action.luau`: scoop and pour input (near a Source / Pour / the ocean + hold E / LMB / RT / touch
+  button; aiming is optional: a look that misses still acts, owner 2026-11-11), one
+  full sweep or pour per action, the `ActHint` text. The touch button is sized and placed by code
+  (bigger than Jump, left of it, showing the thing in hand's icon). Viewmodel and Feel read `Action.current()`.
 - `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`;
   `Feel.splash` is shared with `Channels`.
 - `Channels.luau`: poured water's trip to the ocean: open areas' `Channel.Water` textures trickle,
@@ -354,7 +359,7 @@ The server publishes state as attributes; the client only reads them.
   server errors "missing remote" until then).
 
 ## UI
-- All UI is built in Studio under `StarterGui.Hud` (Wallet, Hotbar, Honeycomb, Card, Waiting,
+- All UI is built in Studio under `StarterGui.Hud` (Scale (the HUD's UIScale), Wallet, Hotbar, Honeycomb, Card, Waiting,
   Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
   the honeycomb's piece: a transparent ImageButton hit area over `Glow` (1.25x, lowest; hidden by
   code), `Body`

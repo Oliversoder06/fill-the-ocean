@@ -94,7 +94,7 @@ function Buildings.start()
 	local plotPrompt: ProximityPrompt? = nil
 	local fitScale = 1
 	local function refit()
-		local view = gui.AbsoluteSize
+		local view = gui.AbsoluteSize / Hud.uiScale()
 		fitScale = math.min(view.X / DESIGN_SIZE.X, view.Y / DESIGN_SIZE.Y, 1)
 		if open then
 			fit.Scale = fitScale
@@ -109,6 +109,7 @@ function Buildings.start()
 		end
 		open = value
 		if value then
+			refit() -- the HUD's scale may have changed since
 			window.open(fitScale)
 		else
 			window.close(fitScale)

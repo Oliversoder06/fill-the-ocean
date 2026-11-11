@@ -109,8 +109,9 @@ function Purchase.start()
 		play(cue.deny, cue.denyVolume, 1)
 	end
 
+	-- A GUI object's centre in the HUD's offsets.
 	local function centre(object: GuiObject): Vector2
-		return object.AbsolutePosition + object.AbsoluteSize / 2
+		return (object.AbsolutePosition + object.AbsoluteSize / 2) / Hud.uiScale()
 	end
 
 	local function stamp(button: GuiObject)

@@ -217,7 +217,7 @@ function Guide.start()
 		if not shown then
 			return
 		end
-		local at = (button :: GuiObject).AbsolutePosition + (button :: GuiObject).AbsoluteSize / 2
+		local at = ((button :: GuiObject).AbsolutePosition + (button :: GuiObject).AbsoluteSize / 2) / Hud.uiScale()
 		local tap = math.abs(math.sin(os.clock() * math.pi * CUE.handSpeed)) * CUE.handBob
 		set(hand, "Position", UDim2.fromOffset(math.round(at.X), math.round(at.Y + tap)))
 	end
