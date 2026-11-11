@@ -244,11 +244,24 @@ local fillPop: UIScale? = nil -- the fill bar's Progress.Bar.Pop, once Hud.start
 local DESIGN_HEIGHT = 600
 local MIN_SCALE = 0.55
 local TOUCH_MAX_SCALE = 1.25
+local SMALL_SCALE = 0.75 -- below this the HUD drops its small print (litres, areas open)
 local hudScale: UIScale? = nil
 
 -- The HUD's scale: code that turns screen pixels (AbsolutePosition, input) into offsets divides by it.
 function Hud.uiScale(): number
 	return if hudScale then hudScale.Scale else 1
+end
+
+-- What the player plays with, for words and key tags: the last input, but always touch on a
+-- touch-only device (a phone reports no Touch until its first tap).
+function Hud.input(): "touch" | "gamepad" | "mouse"
+	local last = UserInputService:GetLastInputType()
+	if last.Name:sub(1, 7) == "Gamepad" then
+		return "gamepad"
+	elseif last == Enum.UserInputType.Touch or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
+		return "touch"
+	end
+	return "mouse"
 end
 
 -- Pours on their way down a channel (client/Channels): their landing pulses the bar, so the Fill rise
@@ -371,6 +384,7 @@ function Hud.start()
 				shownGates = gates
 				areaSub.Text = `AREAS {Ladder.openAreas(Config, Hud.gatesOpen())}/{#Config.areas} OPEN`
 			end
+			set(areaSub, "Visible", Hud.uiScale() >= SMALL_SCALE)
 			-- A running fill-milestone boost shows its countdown in the boost tag.
 			local boost = ReplicatedStorage:GetAttribute("Boost")
 			local endsAt = ReplicatedStorage:GetAttribute("BoostEndsAt")
@@ -395,7 +409,7 @@ function Hud.start()
 			set(progressLabel, "Text", `{Format.fill(target)} filled`)
 			local current, goal = ReplicatedStorage:GetAttribute("Current"), ReplicatedStorage:GetAttribute("Target")
 			local known = type(current) == "number" and type(goal) == "number"
-			set(litresLabel, "Visible", known)
+			set(litresLabel, "Visible", known and Hud.uiScale() >= SMALL_SCALE)
 			if known then
 				set(litresLabel, "Text", `{Format.litres(current)} / {Format.litres(goal)} L`)
 			end

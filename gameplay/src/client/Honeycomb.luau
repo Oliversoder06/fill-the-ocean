@@ -669,19 +669,13 @@ function Honeycomb.start()
 		setOpen(not open and inRun())
 	end)
 
-	local function onInputType(kind: Enum.UserInputType)
-		if kind.Name:sub(1, 7) == "Gamepad" then
-			input = "gamepad"
-		elseif kind == Enum.UserInputType.Touch then
-			input = "touch"
-		elseif kind == Enum.UserInputType.Keyboard or kind.Name:sub(1, 5) == "Mouse" then
-			input = "mouse"
-		end
+	local function onInputType()
+		input = Hud.input()
 		set(closeLabel, "Text", if input == "touch" then "Close" elseif input == "gamepad" then "Close [Y]" else "Close [Tab]")
 		dirty = true -- the card's hint names the input
 	end
 	UserInputService.LastInputTypeChanged:Connect(onInputType)
-	onInputType(UserInputService:GetLastInputType())
+	onInputType()
 
 	-- The close button holds a HitPad (a transparent button built in Studio) that keeps the touch
 	-- target at least 44 px on phones. The pad takes mouse and touch; the button itself still takes

@@ -14,6 +14,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -97,6 +98,18 @@ function Hotbar.start()
 		end
 	end
 	assert(#gadgets <= #GADGET_KEYS, "Hotbar: more hotbar gadgets than keys")
+	-- Key numbers only mean something with a keyboard.
+	local keyLabels = { Hud.find(slot, "Key") }
+	for _, entry in gadgets do
+		table.insert(keyLabels, Hud.find(entry.slot, "Key"))
+	end
+	local function showKeys()
+		for _, label in keyLabels do
+			set(label, "Visible", Hud.input() == "mouse")
+		end
+	end
+	UserInputService.LastInputTypeChanged:Connect(showKeys)
+	showKeys()
 	-- The place puts the tool slot at the centre and every gadget slot where the first owned one goes,
 	-- one step right of it. Owned ones line up a step apart (not a UIListLayout: it would space them
 	-- by their idle shrink) and the row slides left half a step per owned gadget to stay centred.

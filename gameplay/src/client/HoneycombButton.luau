@@ -70,12 +70,13 @@ function HoneycombButton.start(upgrades: GuiButton, toggle: () -> ())
 		release(true)
 	end)
 
-	local function onInputType(kind: Enum.UserInputType)
-		set(key, "Visible", kind ~= Enum.UserInputType.Touch)
-		set(keyText, "Text", if kind.Name:sub(1, 7) == "Gamepad" then "Y" else "TAB")
+	local function onInputType()
+		local input = Hud.input()
+		set(key, "Visible", input ~= "touch")
+		set(keyText, "Text", if input == "gamepad" then "Y" else "TAB")
 	end
 	UserInputService.LastInputTypeChanged:Connect(onInputType)
-	onInputType(UserInputService:GetLastInputType())
+	onInputType()
 end
 
 return HoneycombButton

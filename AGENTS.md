@@ -78,7 +78,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it). Scales the
   whole HUD to the screen (`Hud.Scale`, a UIScale on the ScreenGui: laid out for 600 px tall, a phone
   shrinks it to 0.55, a touch-only tablet grows it to 1.25); code that turns screen pixels
-  (AbsolutePosition, input) into offsets divides by `Hud.uiScale()`.
+  (AbsolutePosition, input) into offsets divides by `Hud.uiScale()`. Below 0.75 it hides the small
+  print (`Bar.Litres`, `AreaSub`). `Hud.input()` ("touch" / "gamepad" / "mouse"; always touch on a
+  touch-only device) picks key words and tags: hints, the Upgrades `Key`, hotbar key numbers, Close.
 - `Action.luau`: scoop and pour input (near a Source / Pour / the ocean + hold E / LMB / RT / touch
   button; aiming is optional: a look that misses still acts, owner 2026-11-11), one
   full sweep or pour per action, the `ActHint` text. The touch button is sized and placed by code
