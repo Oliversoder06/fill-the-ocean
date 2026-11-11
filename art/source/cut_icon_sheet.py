@@ -1,17 +1,17 @@
-"""Cuts the Studio icon sheet (StarterGui.IconSheet: every 3D model the UI shows, framed like
-ToolModels.showIn, on magenta) out of a screenshot into one transparent PNG per model.
+"""Cuts the Studio icon sheet (StarterGui.IconSheet: the 3D models the UI shows, framed like
+ToolModels.showIn, on magenta, six per page) out of a screenshot into one transparent PNG per model.
 
-Run: python cut_icon_sheet.py [screenshot.png]   (default: the newest Windows snip)
-Writes art/ui/renders/<Name>.png.
+Run: python cut_icon_sheet.py <screenshot.png> <page>   (page 0, 1, ...)
+The screenshot: snap_studio.ps1 -Out <png> (the Studio window only). Writes art/ui/renders/<Name>.png.
 """
-import glob
 import os
 import sys
 
 from PIL import Image
 
-# The sheet's layout and order (the Studio script builds it the same way).
-CELL, GAP, COLS, ROWS = 128, 8, 8, 4
+# The sheet's layout and order (the Studio script builds it the same way). Three columns keep the
+# page clear of Studio's view gizmo in the viewport's top-right corner.
+CELL, GAP, COLS, ROWS = 256, 8, 3, 2
 NAMES = [
 	"Spoon", "Cup", "Bucket", "Bathtub", "KiddiePool", "SwimmingPool", "CargoShip", "TheMoon",
 	"WaterGun", "GardenHose", "HeatGloves", "IcePick", "JetpackTank", "CloudNet",
@@ -28,18 +28,9 @@ def magenta(r, g, b):
 	return (min(r, b) - g) / 255 if abs(r - b) < 60 else 0.0
 
 
-def newest_snip():
-	home = os.path.expanduser("~")
-	found = []
-	for folder in ("OneDrive/Pictures/Screenshots", "Pictures/Screenshots"):
-		found += glob.glob(os.path.join(home, folder, "*.png"))
-	if not found:
-		sys.exit("No screenshot found; pass its path")
-	return max(found, key=os.path.getmtime)
-
-
 def main():
-	path = sys.argv[1] if len(sys.argv) > 1 else newest_snip()
+	path, page = sys.argv[1], int(sys.argv[2])
+	names = NAMES[page * COLS * ROWS : (page + 1) * COLS * ROWS]
 	shot = Image.open(path).convert("RGB")
 	px = shot.load()
 	w, h = shot.size
@@ -57,7 +48,7 @@ def main():
 	print(f"{path}: sheet at {left},{top} to {right},{bottom}, scale {scale:.3f}")
 	os.makedirs(OUT, exist_ok=True)
 	key = (255, 0, 255)
-	for i, name in enumerate(NAMES):
+	for i, name in enumerate(names):
 		col, row = i % COLS, i // COLS
 		x0 = left + round((GAP + col * (CELL + GAP)) * scale)
 		y0 = top + round((GAP + row * (CELL + GAP)) * scale)
@@ -76,7 +67,7 @@ def main():
 				c = [min(255, max(0, round((v - (1 - a) * k) / a))) for v, k in zip((r, g, b), key)]
 				dst[x, y] = (c[0], c[1], c[2], round(a * 255))
 		out.save(os.path.join(OUT, name + ".png"))
-	print(f"Saved {len(NAMES)} renders to {os.path.abspath(OUT)}")
+	print(f"Saved {', '.join(names)} to {os.path.abspath(OUT)}")
 
 
 if __name__ == "__main__":
