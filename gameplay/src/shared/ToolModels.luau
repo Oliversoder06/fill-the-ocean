@@ -9,6 +9,10 @@
 -- SurfaceAppearance ColorMap, because the imported TextureID rendered grey.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
+
+local OUTLINE = 0.1 -- icon outline width, as a share of the model's radius (~2 px on a hex, ~4 in the hotbar)
+
 local ToolModels = {}
 
 -- Hero model names in ladder order, each once: the starting tool, then each new model.
@@ -84,8 +88,42 @@ function ToolModels.itemModel(item): (Model | Accessory)?
 	return if model and (model:IsA("Model") or model:IsA("Accessory")) then model else nil
 end
 
+-- An icon's outline: each visible part again, fattened by `margin` studs, flat dark, and moved out
+-- along the camera's rays (scaled by k about the camera, so it projects exactly where it was) to
+-- sit behind the whole model. Only its rim shows around the silhouette.
+local function outline(model: Model, eye: Vector3, margin: number, k: number)
+	local shell = Instance.new("Model")
+	shell.Name = "Outline"
+	for _, part in model:GetDescendants() do
+		if not part:IsA("BasePart") or part.Transparency >= 1 or part.Name:sub(-6) == "_Water" then
+			continue
+		end
+		local copy = part:Clone()
+		local grow = (part.Size + Vector3.one * 2 * margin) / part.Size * k
+		for _, child in copy:GetChildren() do
+			if child:IsA("SpecialMesh") and child.MeshType == Enum.MeshType.FileMesh then
+				child.Scale *= grow -- a file mesh ignores the part's Size
+				child.TextureId = ""
+			elseif not child:IsA("DataModelMesh") then
+				child:Destroy()
+			end
+		end
+		if copy:IsA("MeshPart") then
+			copy.TextureID = ""
+		end
+		copy.Size *= grow
+		copy.CFrame = part.CFrame.Rotation + eye + (part.Position - eye) * k
+		copy.Color = Theme.colors.outline
+		copy.Material = Enum.Material.SmoothPlastic
+		copy.Reflectance = 0
+		copy.Transparency = 0
+		copy.Parent = shell
+	end
+	shell.Parent = model.Parent
+end
+
 -- Client UI: puts a copy of a model (a tool, an item, a backpack's Accessory) in a ViewportFrame,
--- framed to fit (hotbar, honeycomb).
+-- framed to fit (hotbar, honeycomb), with a dark outline.
 function ToolModels.showIn(view: ViewportFrame, template: Model | Accessory)
 	view:ClearAllChildren()
 	local model: Model
@@ -103,9 +141,14 @@ function ToolModels.showIn(view: ViewportFrame, template: Model | Accessory)
 	local radius = size.Magnitude / 2
 	local direction = Vector3.new(1, 0.6, 1).Unit
 	camera.FieldOfView = 40
-	camera.CFrame = CFrame.lookAt(center.Position + direction * radius / math.tan(math.rad(20)) * 1.05, center.Position)
+	-- Room for the outline around the model.
+	local distance = radius / math.tan(math.rad(20)) * 1.05 * (1 + 2 * OUTLINE)
+	local eye = center.Position + direction * distance
+	camera.CFrame = CFrame.lookAt(eye, center.Position)
 	camera.Parent = view
 	view.CurrentCamera = camera
+	-- Push the outline past the model's far side.
+	outline(model, eye, radius * OUTLINE, (distance + radius) / (distance - radius) * 1.05)
 end
 
 -- Show or hide the "<Name>_Water" piece if the model has one.

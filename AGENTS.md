@@ -156,8 +156,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   hotbar gadget (`Hotbar.Gadgets.<itemId>`; 2 / 3 / 4, gamepad DPadRight) and the fill bar (springs
   with `Ease.pop`) for only what is in hand, its model at the left end: the tool's water, the Water
   Gun's water, the jetpack's fuel, the vehicle's tank (driving or by its hose); the Garden Hose
-  shows `Hotbar.Status` text instead (clipped? flowing L/s). `Hotbar.Wave` (a cropped wavy water
-  line with faded ends, sized in the place under every gadget slot) shortens to the owned slots.
+  shows `Hotbar.Status` text instead (clipped? flowing L/s). `Hotbar.Wave` (a slot-tall wave
+  tiled one period per slot, `TileSize` 124 wide, faded ends by its `Fade` UIGradient, sized in the
+  place under every gadget slot) shortens to the owned slots.
 - `Guide.luau`: the first-minute tutorial (new saves, until the first purchase): `Hud.Guide`
   objective at the top centre (theme `guide` yellow), a flat yellow lane from inside the player
   toward the step's place, `Cues.guide.belowCamera` studs under the camera whatever the ground does
@@ -380,6 +381,8 @@ The server publishes state as attributes; the client only reads them.
   (4 and up) also swing in by `Reveal.SPIN` degrees and finish with the last item. Never mark a
   child of a UIListLayout/UIGridLayout (its scale moves its siblings); mark what is inside it.
 - Tool icons are not drawn yet; slots use the `unknown` image or the tool's 3D model.
+  `ToolModels.showIn` gives every 3D icon a dark outline (`OUTLINE`): a fattened, flat dark copy
+  of each part pushed back along the camera's rays, so it projects just around the model.
 
 ## Gotchas (each one has cost time)
 - After changing anything in Studio (StarterGui, the map), the owner must **save the place**, or the

@@ -431,25 +431,23 @@ def clear_tide_outlined():
 	d.polygon([(x * SS, y * SS) for x, y in (side[0], side[1], (cx, tip))], fill=255)
 	outlined(white(img), CT_OL_DARK, "ct_drop")
 
-	# ct_wave: the hotbar's line behind the slots, white with a thin dark edge, fading out at both ends.
-	ww, wh, amp, waves, line, edge, fade = 1024, 96, 22, 4, 12, 3, 96
-	wave = Image.new("RGBA", (ww * SS, wh * SS), CT_OL_DARK + (0,))
+	# ct_waveTile: one period of the hotbar's wave, as tall as a slot (2x of 124x104: a slot and its
+	# gap), seamless left to right; each slot sits on a crossing. The ends fade in the place.
+	tw, th, line, edge = 248, 208, 26, 6
+	amp = th / 2 - line / 2 - edge - 4
+	wave = Image.new("RGBA", (tw * SS, th * SS), CT_OL_DARK + (0,))
 	d = ImageDraw.Draw(wave)
-	ends = line / 2 + edge + 2
 	pts = []
-	for i in range(4097):
-		x = ends + (ww - 2 * ends) * i / 4096
-		pts.append((x * SS, (wh / 2 + amp * math.sin((x - ends) / (ww - 2 * ends) * waves * 2 * math.pi)) * SS))
+	for i in range(-200, 1401):
+		x = tw * i / 1200
+		pts.append((x * SS, (th / 2 - amp * math.sin(x / tw * 2 * math.pi)) * SS))
 	# Stamped discs, not d.line: its joints leave dark slivers across the white.
 	for width, colour in ((line + 2 * edge, CT_OL_DARK), (line, (255, 255, 255))):
 		w = width * SS
 		for x, y in pts:
 			d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=colour + (255,))
-	wave = wave.resize((ww, wh), Image.LANCZOS)
-	ramp = Image.new("L", (ww, 1))
-	ramp.putdata([round(255 * min(1.0, x / fade, (ww - 1 - x) / fade)) for x in range(ww)])
-	wave.putalpha(ImageChops.multiply(wave.getchannel("A"), ramp.resize((ww, wh))))
-	wave.save(os.path.join(CT_OUT, "ct_wave.png"))
+	wave = wave.resize((tw, th), Image.LANCZOS)
+	wave.save(os.path.join(CT_OUT, "ct_waveTile.png"))
 
 	# ct_hexRim_thick: ct_hexRim three times as wide.
 	cx, cy = W * SS / 2, H * SS / 2
