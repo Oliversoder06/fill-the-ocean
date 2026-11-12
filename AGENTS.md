@@ -175,8 +175,11 @@ Client (`src/client/`, all started from `init.client.luau`):
   rolls for the beach faster and faster and its slope throws him past you and off over the island
   (`IntroCut.flight`); you sit up and lean out to follow him, then turn back to the sea. `StarterGui.Cutscene`
   (eyelids, logo, Skip), `Lighting.IntroBlur`, `Audio.Intro*`; the HUD, chat, prompts, touch
-  controls and every character are off meanwhile and your character waits anchored at
-  `IntroCut.places.stand`. At `IntroCut.handover` the camera becomes the game's own first-person
+  controls and every character are off meanwhile (re-hidden every frame: teammates who spawn,
+  stream in or load accessories late never show; only your own copy does) and your character
+  waits anchored at `IntroCut.places.stand` (R6 stands on its legs: `HipHeight` is only an offset
+  there). It starts once the beach under the scene has streamed in (`StreamingEnabled`); the ground
+  it stands on is never guessed (no ground errors loudly). At `IntroCut.handover` the camera becomes the game's own first-person
   view at that exact spot (focus and zoom measured off the camera at the start), the HUD comes back
   and the tool swings up (`Viewmodel.swingIn`); play starts at `IntroCut.length`. Its end or Skip
   tells the server; the phase leaving `intro` tears it down. `Intro.preview()` (the admin window)
@@ -304,10 +307,12 @@ Shared (`src/shared/`, pure unless noted):
   and the R6 one, with the pace their feet match), the tired `slump` layer, `lie(anatomy, seat,
   watch)` (two clips built for your body: the stand (stretch, yawn, step round) and the lie (sit,
   legs up, lie back, watch, doze); their hips and legs solved by hand in 3D (`solved`) for any
-  hip-knee-ankle leg, whichever way the runtime reads the foot: planted feet stay flat on the sand,
+  hip-knee-ankle leg, whichever way the runtime reads the foot, or a leg that can't bend (R6:
+  swung whole at the hip, its foot kept on the sand or the cushion): planted feet stay flat on the sand,
   steps lift over an arc, the legs swing up over the cushion and the heels rest on it, sized from
   the foot part's box), and the bacon-hair's `sandSit` / `sandPlay`; `tests/IntroClips.spec` lints
-  them on R15 (also a tall R15 and an R15 on tall block feet, read as a plain chain) and R6, and
+  them on R15 (also a tall R15 and an R15 on tall block feet, read as a plain chain) and R6 (the
+  lie-down too: `an_r6_avatar_lies_down_too`), and
   checks the feet stay flat and never go into the sand or the cushion, and that they line up with
   the cut.
 

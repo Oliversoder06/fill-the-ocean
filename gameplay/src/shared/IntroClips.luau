@@ -236,6 +236,42 @@ local function solveLeg(g: any, ankle: { number }, side: { number }): (M3, M3)
 	return align(hinge, unit(sub(knee, g.hip)), g.thigh0), align(hinge, unit(sub(foot, knee)), g.shin0)
 end
 
+-- A leg that can't bend (R6: one part swinging at the hip), at rest in the clips' frame: its hip, its
+-- length and way down to the foot's contact, and half its thickness. Nil for any other leg.
+local function stickOf(rig: any, leg: any): any
+	if not leg.rigid or #leg.movable ~= 1 then
+		return nil
+	end
+	local joint = rig.joints[leg.movable[1]]
+	local hip = arr(joint.world.p)
+	local down = sub(arr(leg.contact), hip)
+	return { hip = hip, length = len(down), bone0 = unit(down), half = if joint.size then math.min(joint.size.x, joint.size.z) / 2 else 0 }
+end
+
+-- A stick's turn (from rest, in the hips' frame) toward `target`. Nearer than its length it can't
+-- reach down to it without digging in, so its foot swings ahead instead and rests on the level
+-- through the target (`up`: the world's up as the hips see it), its lower edge on it.
+local function swingStick(k: any, target: { number }, up: { number }, side: { number }): M3
+	local d = sub(target, k.hip)
+	local along = unit(d)
+	if len(d) < k.length then
+		local flat = sub(d, scale(up, dot(d, up)))
+		if len(flat) < 1e-6 then
+			flat = sub({ 0, 0, -1 }, scale(up, -up[3]))
+		end
+		local ahead = unit(flat)
+		local height = -dot(d, up) -- the hip over the level
+		local s = len(flat) / len(d)
+		for _ = 1, 4 do
+			local c = math.clamp((k.half * s - height) / k.length, -1, 1)
+			s = math.sqrt(1 - c * c)
+			along = add(scale(up, c), scale(ahead, s))
+		end
+	end
+	-- align keeps the hinge square to the bone: square it to the way the leg points first
+	return align(unit(sub(side, scale(along, dot(side, along)))), along, k.bone0)
+end
+
 -- A monotone cubic through the keys (the runtime's own kind of curve), still at both ends.
 local function spline(ts: { number }, ys: { number }): (number) -> number
 	local n = #ts
@@ -278,7 +314,8 @@ end
 -- `ankle` at a point, its `heel` resting on a point (off the ground, the toes relaxed), or `tuck`ed:
 -- the ankle `tuck[1]` of the leg's length in front of the hip and as high over it as the foot hangs
 -- plus `tuck[2]` of the reach, so the foot clears a seat the hips sit on (lifted with the hips). Off
--- the ground a foot moves with the hips: it goes from one key to the next as the hips see them.
+-- the ground a foot moves with the hips: it goes from one key to the next as the hips see them. A
+-- leg that can't bend (R6) swings whole at the hip (swingStick).
 local function solved(anatomy: any, hips: { any }, feet: { [string]: { any } }, dense: number): { [string]: any }
 	local rig = anatomy.rig
 	local pivot = arr(rig.joints[anatomy.body].world.p)
@@ -311,11 +348,15 @@ local function solved(anatomy: any, hips: { any }, feet: { [string]: { any } }, 
 
 	local L = 0
 	local legs = {}
+	local step = STEP
 	for _, leg in anatomy.legs do
 		local side = if leg.side < 0 then "left" elseif leg.side > 0 then "right" else nil
 		if side and feet[side] then
 			L += leg.reach / 2
-			legs[side] = { leg = leg, g = legOf(rig, leg) }
+			legs[side] = { leg = leg, g = legOf(rig, leg), stick = stickOf(rig, leg) }
+			if legs[side].stick then
+				step = STEP / 3 -- a straight leg swings far for a small move of the hips: keyed closer
+			end
 		end
 	end
 
@@ -349,8 +390,11 @@ local function solved(anatomy: any, hips: { any }, feet: { [string]: { any } }, 
 				end
 			end
 			local inHips = hipsFrame(key.t)
-			if key.tuck then
-				assert(g, "a tucked foot needs a hip, knee and ankle")
+			if key.tuck and l.stick then
+				local k = l.stick -- held out straight, its underside clear of the seat
+				key.held = add(k.hip, { 0, key.tuck[2] * L + k.half, -key.tuck[1] * k.length })
+			elseif key.tuck then
+				assert(g, "a tucked foot needs a hip, knee and ankle, or a leg that can't bend")
 				key.held = add(g.hip, { 0, g.drop + key.tuck[2] * L, -key.tuck[1] * (g.a + g.b) })
 			else
 				key.held = inHips(key.ankle)
@@ -393,13 +437,26 @@ local function solved(anatomy: any, hips: { any }, feet: { [string]: { any } }, 
 	end
 
 	local samples = {}
-	for i = 0, math.floor(dense / STEP + 0.5) do
-		table.insert(samples, i * STEP)
+	for i = 0, math.floor(dense / step + 0.5) do
+		table.insert(samples, i * step)
 	end
 	for _, key in hips do
 		if key.t > dense + 1e-6 then
 			table.insert(samples, key.t)
 		end
+	end
+	if step ~= STEP then
+		-- a straight leg swings as fast as the hips' height changes near standing: keyed at the hips'
+		-- and the feet's own keys only (one side leads), the runtime's smooth curve carries it between
+		samples = table.clone(times)
+		for _, keys in feet do
+			for _, key in keys do
+				if not table.find(samples, key.t) then
+					table.insert(samples, key.t)
+				end
+			end
+		end
+		table.sort(samples)
 	end
 	local tracks: { [string]: any } = { hips = {} }
 	local function push(name: string, key: any)
@@ -413,7 +470,11 @@ local function solved(anatomy: any, hips: { any }, feet: { [string]: { any } }, 
 		local back = transpose(turn)
 		for side, l in legs do
 			local ankle, faces, off = footAt(feet[side], l.g, t)
-			if not l.g then
+			if l.stick then
+				local swung = swingStick(l.stick, ankle, apply(back, { 0, 1, 0 }), sideOf(back, faces or r[2], off))
+				push(side .. "Leg", { t = t, rot = angles(swung) })
+				continue
+			elseif not l.g then
 				push(side .. "Leg", { t = t, reach = ankle }) -- not hip, knee and ankle: the runtime reaches
 				continue
 			end
@@ -457,7 +518,9 @@ function IntroClips.lie(anatomy: any, seat: any, watch: any): (any, any)
 	local ground = (left.contact.y + right.contact.y) / 2
 	local hipY = (left.base.y + right.base.y) / 2
 	local spread = (right.contact.x - left.contact.x) / 2
-	local thigh = 0.12 * L -- half a thigh's thickness: what the hips sit on
+	local stick = stickOf(rig, left)
+	-- what the hips sit on: half a thigh's thickness (a leg that can't bend: half the leg's)
+	local thigh = if stick then stick.half else 0.12 * L
 	local sitUp = pivot.y - hipY + thigh -- the pivot's height over a seat, sitting upright
 
 	local function at(x: number, y: number, z: number): { number }
@@ -483,7 +546,8 @@ function IntroClips.lie(anatomy: any, seat: any, watch: any): (any, any)
 	end
 	local feetX = math.min(seat.edge - 0.3 * L, seat.edge - heelBack - 0.08 * L)
 	local tl, tr = v(feetX - 0.06 * L, ground, spread * 1.05), v(feetX + 0.03 * L, ground, -spread)
-	local standAt = at(feetX, pivot.y - 0.1 * L, 0)
+	local soft = if stick then 0 else 1 -- straight legs can't soften: the hips stay up
+	local standAt = at(feetX, pivot.y - 0.1 * L * soft, 0)
 	-- on the edge; then legs up along the cushion, sitting up; then lying back into the backrest
 	local sitAt = at(seat.edge + 0.16 * L, seat.top + sitUp, 0)
 	local upAt = at(seat.centre, seat.top + sitUp, seat.hinge - 0.05 * L)
@@ -494,7 +558,8 @@ function IntroClips.lie(anatomy: any, seat: any, watch: any): (any, any)
 	local reachLying = 0
 	for _, leg in { left, right } do
 		local g = legOf(rig, leg)
-		reachLying += (if g then g.a + g.b else 0.8 * L) / 2
+		local k = stickOf(rig, leg)
+		reachLying += (if g then g.a + g.b elseif k then k.length else 0.8 * L) / 2
 	end
 	local footZ = seat.hinge - 0.1 * L - 0.9 * reachLying
 	local hl = v(seat.centre - 0.75 * spread, seat.top, footZ + 0.03 * L)
@@ -512,12 +577,12 @@ function IntroClips.lie(anatomy: any, seat: any, watch: any): (any, any)
 	-- touch short of the ground) still reaches its planted feet; then stepping round, the right foot
 	-- first, each planted foot pivoting a little on the spot as the hips turn
 	local standTracks = solved(anatomy, {
-		{ t = 0, pos = v(0, -0.005 * L, 0), rot = still },
-		{ t = 0.35, pos = v(0, -0.02 * L, 0), rot = still },
-		{ t = 1.1, pos = v(0, -0.012 * L, 0), rot = v(2, 0, 0) },
-		{ t = 1.75, pos = v(0, -0.012 * L, 0), rot = v(2.5, 0, 0) },
-		{ t = 2.25, pos = v(0, -0.03 * L, 0), rot = v(-2, 0, 0) },
-		{ t = 2.45, pos = v(0, -0.06 * L, 0), rot = still },
+		{ t = 0, pos = v(0, -0.005 * L * soft, 0), rot = still },
+		{ t = 0.35, pos = v(0, -0.02 * L * soft, 0), rot = still },
+		{ t = 1.1, pos = v(0, -0.012 * L * soft, 0), rot = v(2, 0, 0) },
+		{ t = 1.75, pos = v(0, -0.012 * L * soft, 0), rot = v(2.5, 0, 0) },
+		{ t = 2.25, pos = v(0, -0.03 * L * soft, 0), rot = v(-2, 0, 0) },
+		{ t = 2.45, pos = v(0, -0.06 * L * soft, 0), rot = still },
 		{ t = 3.5, pos = standAt, rot = v(0, 90, 0) },
 	}, {
 		right = {
@@ -695,6 +760,14 @@ function IntroClips.lie(anatomy: any, seat: any, watch: any): (any, any)
 		tracks = lieTracks,
 		seed = "IntroLie",
 	}
+	for _, name in { "rightForearm", "leftForearm" } do
+		if not anatomy.parts[name] then -- arms that don't bend (R6)
+			standTracks[name], lieTracks[name] = nil, nil
+		end
+	end
+	if anatomy.chest == nil or anatomy.chest == anatomy.body then -- one-piece torso (R6): the hips turn it
+		standTracks.chest, lieTracks.chest = nil, nil
+	end
 	return stand, lie
 end
 

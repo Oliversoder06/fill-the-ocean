@@ -65,6 +65,7 @@ local BURP_SECONDS = 0.45
 local STRAW_OUT = 0.95 -- of his ball's radius: how far the straw goes out in front before it bends
 local STRAW_DROP = 0.1 -- of his ball's radius: how far it dips on the way out
 local CHARACTER_WAIT = 5 -- seconds the intro waits for your character to spawn
+local STREAM_WAIT = 10 -- seconds it waits for the beach to stream in here (StreamingEnabled)
 local CURSOR_SECONDS = 2 -- the mouse cursor shows for this long after the mouse moves (for Skip)
 
 local player = Players.LocalPlayer
@@ -93,41 +94,47 @@ groundParams.RespectCanCollide = true
 local function groundAt(x: number, z: number, ignore: { Instance }): number
 	groundParams.FilterDescendantsInstances = ignore
 	local hit = workspace:Raycast(Vector3.new(x, 100, z), Vector3.new(0, -200, 0), groundParams)
-	return if hit then hit.Position.Y else 0
+	assert(hit, `[Intro] no ground under ({x}, {z}) here: it hasn't streamed in`)
+	return hit.Position.Y
 end
 
-local function charactersOf(): { Instance }
-	local list: { Instance } = {}
-	for _, other in Players:GetPlayers() do
-		if other.Character then
-			table.insert(list, other.Character)
+-- Keeps a character hidden here (parts, decals and its name), whatever streams or loads into it
+-- later (accessories come after it spawns); rays for the ground pass through it.
+local function hide(s, character: Model)
+	if not s.hidden[character] then
+		s.hidden[character] = true
+		table.insert(s.ignore, character)
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local was = humanoid.DisplayDistanceType
+			humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			table.insert(s.undo, function()
+				humanoid.DisplayDistanceType = was
+			end)
 		end
+		table.insert(s.undo, function()
+			for _, inst in character:GetDescendants() do
+				if inst:IsA("BasePart") or inst:IsA("Decal") then
+					inst.LocalTransparencyModifier = 0
+				end
+			end
+		end)
 	end
-	return list
-end
-
--- Hides a character here (others see nothing of it): parts, decals and its name.
-local function hide(character: Instance, undo: { () -> () })
 	for _, inst in character:GetDescendants() do
-		if inst:IsA("BasePart") or inst:IsA("Decal") then
+		if (inst:IsA("BasePart") or inst:IsA("Decal")) and inst.LocalTransparencyModifier ~= 1 then
 			inst.LocalTransparencyModifier = 1
 		end
 	end
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		local was = humanoid.DisplayDistanceType
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-		table.insert(undo, function()
-			humanoid.DisplayDistanceType = was
-		end)
-	end
-	table.insert(undo, function()
-		for _, inst in character:GetDescendants() do
-			if inst:IsA("BasePart") or inst:IsA("Decal") then
-				inst.LocalTransparencyModifier = 0
-			end
+end
+
+-- Only your own copy shows in the cut: every player's character stays hidden here (yours too: the
+-- default camera shows it again every frame).
+local function hideCharacters(s)
+	for _, other in Players:GetPlayers() do
+		if other.Character then
+			hide(s, other.Character)
 		end
-	end)
+	end
 end
 
 -- A copy of your avatar for the cut: no scripts, nothing in hand or on the back, anchored at the
@@ -236,7 +243,12 @@ local function walkOf(character: Model, humanoid: Humanoid): (string, number)
 	local animate = character:FindFirstChild("Animate")
 	local walk = animate and animate:FindFirstChild("walk")
 	local animation = walk and walk:FindFirstChildOfClass("Animation")
-	local id = if animation and animation.AnimationId ~= "" then animation.AnimationId else IntroClips.walks.player.default
+	local r6 = humanoid.RigType == Enum.HumanoidRigType.R6
+	local walks = IntroClips.walks
+	local id = if animation and animation.AnimationId ~= "" then animation.AnimationId elseif r6 then walks.bacon.id else walks.player.default
+	if r6 then
+		return id, walks.bacon.pace -- R6's Animate steps the classic walk (the bacon-hair's) at speed / 14.5
+	end
 	local scale = 1
 	if humanoid.RigType == Enum.HumanoidRigType.R15 and humanoid.AutomaticScalingEnabled then
 		local damping = animate and animate:FindFirstChild("ScaleDampeningPercent")
@@ -301,11 +313,13 @@ local function walkedAt(t: number, from: number, to: number, length: number): nu
 	return IntroCut.walked(t, from, to) * length
 end
 
--- The place's lounger nearest IntroCut.places.lounger.
-local function findLounger(): BasePart
-	local map = workspace:WaitForChild("Map", 10)
-	local beach = map and map:WaitForChild("Beach", 10)
-	assert(beach, "workspace.Map.Beach is missing")
+-- The place's lounger nearest IntroCut.places.lounger, once it has streamed in here.
+local function findLounger(): BasePart?
+	local map = workspace:FindFirstChild("Map")
+	local beach = map and map:FindFirstChild("Beach")
+	if not beach then
+		return nil
+	end
 	local at, best, bestDistance = v3(IntroCut.places.lounger), nil, math.huge
 	for _, child in beach:GetChildren() do
 		if child.Name == "Stage_Pool_Lounger" and child:IsA("BasePart") then
@@ -315,8 +329,23 @@ local function findLounger(): BasePart
 			end
 		end
 	end
-	assert(best and bestDistance < 2, "workspace.Map.Beach has no Stage_Pool_Lounger at IntroCut.places.lounger")
-	return best
+	return if best and bestDistance < 2 then best else nil
+end
+
+local terrainParams = RaycastParams.new()
+terrainParams.FilterType = Enum.RaycastFilterType.Include
+terrainParams.FilterDescendantsInstances = { workspace.Terrain }
+local GROUND_PLACES = { "walkFrom", "walkTo", "stand", "baconFrom", "baconBend", "baconTo" }
+
+-- Whether the beach the cut stands on has streamed in here: the sand under its places and the lounger.
+local function beachLoaded(): boolean
+	for _, name in GROUND_PLACES do
+		local p = IntroCut.places[name]
+		if not workspace:Raycast(Vector3.new(p[1], 100, p[3]), Vector3.new(0, -200, 0), terrainParams) then
+			return false
+		end
+	end
+	return findLounger() ~= nil
 end
 
 -- A place on the ground: { x, _, z } at the ground's height.
@@ -363,13 +392,19 @@ local function begin(at: number, preview: boolean)
 	folder.Name = "IntroScene"
 	folder.Parent = workspace
 	s.folder = folder
-	local ignore = charactersOf()
-	table.insert(ignore, folder)
-	s.ignore = ignore
+	s.ignore = { folder } :: { Instance }
+	s.hidden = {} :: { [Model]: boolean }
+	hideCharacters(s)
+	local ignore = s.ignore
 
 	-- Where play starts, and the game's own view there (the cut's last frame).
 	local focus, zoom = gameEye(camera, humanoid, root)
 	s.rootHeight = humanoid.HipHeight + root.Size.Y / 2
+	if humanoid.RigType == Enum.HumanoidRigType.R6 then
+		local leg = character:FindFirstChild("Left Leg")
+		assert(leg and leg:IsA("BasePart"), "your R6 avatar has no Left Leg")
+		s.rootHeight += leg.Size.Y -- R6 stands on its legs; its HipHeight is only an offset (Roblox docs)
+	end
 	s.stand = onGround(places.stand, ignore) + Vector3.new(0, s.rootHeight, 0)
 	s.standLook = v3(places.standLook).Unit
 	s.standEye = s.stand + focus - s.standLook * zoom
@@ -414,28 +449,11 @@ local function begin(at: number, preview: boolean)
 			character:PivotTo(stoodAt)
 		end)
 	end
-	for _, other in Players:GetPlayers() do
-		if other.Character then
-			hide(other.Character, undo)
-		end
-	end
-	local joined = Players.PlayerAdded:Connect(function(other)
-		local spawned = other.CharacterAdded:Connect(function(c)
-			if scene == s then
-				hide(c, undo)
-			end
-		end)
-		table.insert(undo, function()
-			spawned:Disconnect()
-		end)
-	end)
-	table.insert(undo, function()
-		joined:Disconnect()
-	end)
 
 	-- The lounger, turned round to face the sea; the place's own hides until the end (out of view by
 	-- then, so nobody sees it turn back).
 	local lounger = findLounger()
+	assert(lounger, "workspace.Map.Beach has no Stage_Pool_Lounger at IntroCut.places.lounger")
 	local turned = lounger:Clone()
 	turned:ClearAllChildren()
 	turned.CFrame = lounger.CFrame * CFrame.Angles(0, math.pi, 0)
@@ -999,33 +1017,29 @@ local function frame(s, dt: number)
 		local near = (workspace.CurrentCamera.CFrame.Position - s.head.Position).Magnitude
 		fade(s.headParts, math.clamp((HEAD_FADE.far - near) / (HEAD_FADE.far - HEAD_FADE.near), 0, 1))
 	end
-	-- your own character stays hidden (the default camera shows it again every frame), and the
-	-- cursor is free for Skip
-	local character = player.Character
-	if character then
-		for _, part in character:GetDescendants() do
-			if part:IsA("BasePart") and part.LocalTransparencyModifier ~= 1 then
-				part.LocalTransparencyModifier = 1
-			end
-		end
-	end
+	-- only your own copy shows, and the cursor is free for Skip
+	hideCharacters(s)
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	Hud.set(UserInputService, "MouseIconEnabled", kit.skip.Visible and os.clock() - mouseMovedAt < CURSOR_SECONDS)
 end
 
--- Plays the cut from `at` (server time of its first frame) once your character is there. A preview
--- is this client's alone: the server is never told.
+-- Plays the cut from `at` (server time of its first frame) once your character and the beach under
+-- the scene are there. A preview is this client's alone: the server is never told.
 local function run(at: number, preview: boolean)
 	local deadline = os.clock() + CHARACTER_WAIT
 	while not (player.Character and player.Character:FindFirstChild("HumanoidRootPart")) and os.clock() < deadline do
 		task.wait(0.1)
 	end
+	deadline = os.clock() + STREAM_WAIT
+	while not beachLoaded() and os.clock() < deadline do
+		task.wait(0.1)
+	end
 	if scene or not (preview or ReplicatedStorage:GetAttribute("Phase") == "intro") then
 		return
 	end
-	local s = begin(at, preview)
+	local s = if beachLoaded() then begin(at, preview) else nil
 	if not s then
-		warn("[Intro] no character to play the intro with; skipped here")
+		warn("[Intro] no character, or the beach hasn't streamed in here; the intro is skipped here")
 		if not preview then
 			kit.remote:FireServer("done")
 		end

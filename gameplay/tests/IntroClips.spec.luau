@@ -199,6 +199,47 @@ function tests.the_other_clips_lint_clean(t)
 	clean(t, "sandPlay", IntroClips.sandPlay, r6)
 end
 
+-- An R6 avatar lies down too (straight legs swung whole at the hip): the clips lint clean; its legs
+-- keep out of the sand and the cushion but for a corner's brush (a fifth of the leg's thickness: a
+-- leg that can't bend tips as the hips go down), and lying back they rest on the cushion.
+function tests.an_r6_avatar_lies_down_too(t)
+	local BRUSH = 0.2
+	local rig = r6.rig
+	local places = IntroCut.places
+	local root = { places.walkTo[1], BEACH - rig.ground, places.walkTo[3] }
+	local seat = IntroClips.seat(places.cushion, places.recline, root)
+	local far = 2 * seat.centre - seat.edge
+	local stand, lie = lieFor(r6)
+	clean(t, "stand (R6)", stand, r6)
+	clean(t, "lie (R6)", lie, r6)
+	local standBaked, lieBaked = Performance.bake(r6, stand), Performance.bake(r6, lie)
+	for _, leg in r6.legs do
+		local what = `R6 {leg.name}`
+		local standing = lowestFoot(r6, standBaked, leg, 0, stand.length)
+		t.expectEq(standing >= rig.ground - BRUSH, true, `{what}: {rig.ground - standing} studs into the sand standing`)
+		local sitting = lowestFoot(r6, lieBaked, leg, 0, 1.45)
+		t.expectEq(sitting >= rig.ground - BRUSH, true, `{what}: {rig.ground - sitting} studs into the sand sitting down`)
+		local joint = rig.joints[leg.movable[1]]
+		local worst = 0
+		for s = math.floor(1.0 * lieBaked.rate), math.floor(3.5 * lieBaked.rate) do
+			local box = M.xmul(Rig.fk(rig, Baked.locals(lieBaked, rig, s), Baked.get(lieBaked, s, 0))[leg.movable[1]], joint.center)
+			for _, sx in { -1, 1 } do
+				for _, sy in { -1, 1 } do
+					for _, sz in { -1, 1 } do
+						local p = M.xpoint(box, { x = sx * joint.size.x / 2, y = sy * joint.size.y / 2, z = sz * joint.size.z / 2 })
+						if p.x > seat.edge and p.x < far and p.z < seat.hinge then
+							worst = math.max(worst, seat.top - p.y)
+						end
+					end
+				end
+			end
+		end
+		t.expectEq(worst < BRUSH, true, `{what}: {worst} studs into the cushion swinging up`)
+		local lying = lowestFoot(r6, lieBaked, leg, 4, lie.length)
+		t.expectEq(lying >= seat.top - 0.05 and lying <= seat.top + 0.1, true, `{what}: lies {lying - seat.top} studs from the cushion's top`)
+	end
+end
+
 -- Lying back ends with the hips on the cushion: the clip's last hips key, added to the body's
 -- pivot, sits over the cushion's middle, above its top and by the backrest.
 function tests.the_lie_down_ends_on_the_cushion(t)
