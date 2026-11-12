@@ -35,6 +35,7 @@ local player = Players.LocalPlayer
 local Viewmodel = {}
 
 local revealListeners: { (Model) -> () } = {}
+local swingPending = false -- Viewmodel.swingIn: swing up the next time something shows
 
 type Arm = {
 	model: Model,
@@ -50,6 +51,11 @@ type Arm = {
 -- Called with the viewmodel when a new tool starts swinging into the hand (client/Purchase).
 function Viewmodel.onReveal(fn: (Model) -> ())
 	table.insert(revealListeners, fn)
+end
+
+-- What is in hand swings up into view the next time it shows (client/Intro hands the camera back).
+function Viewmodel.swingIn()
+	swingPending = true
 end
 
 local function shirtOf(character: Model): string
@@ -259,6 +265,9 @@ function Viewmodel.start()
 			arm.model.Parent = camera
 		end
 		local now = os.clock()
+		if swingPending then
+			swingPending, revealAt = false, now
+		end
 		if revealPending and not honeycombOpen() then
 			revealPending, revealAt = false, now
 			for _, fn in revealListeners do

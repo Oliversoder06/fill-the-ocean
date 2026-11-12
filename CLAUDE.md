@@ -55,7 +55,9 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     them, client/Milestones), `ReplicatedStorage.Story.BaconHair` (a Model, placeholder; the
     milestone sightings put a copy far out at sea, facing the beach along its pivot's front),
     the intro's story models in `ReplicatedStorage.Story` (client/Intro): `BaconRig` (the real
-    bacon-hair rig x20, facing -Z, pivot at its feet), `BaconFat` (a stand-in for the fat ball until
+    bacon-hair R6 rig at normal size with its Animator, facing -Z, pivot at its feet; he strolls
+    onto the beach), `SandPile` (a damp-sand ball he plays with, sunk into the sand), `BaconFat` (a
+    stand-in for the fat ball until
     `art/models/story/BaconHairFat.glb` is imported: the rig x20 with a `Belly` ball, a Motor6D `Neck`
     in the model's own axes and an Attachment `Mouth`; pivot at its feet), `Straw` and `Puddle`
     (cylinders along X), `StarterGui.Cutscene`, `Lighting.IntroBlur` and `Audio.Intro*`,

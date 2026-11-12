@@ -164,16 +164,23 @@ Client (`src/client/`, all started from `init.client.luau`):
   track for waiting (`Cues.musicTrack`); crossfades, ducks under cards and purchases
   (`Music.duck`), plays through `SoundService.Music`; `Music.hush` silences it (the intro).
 - `Intro.luau`: the intro cutscene (`shared/IntroCut`, `shared/IntroClips`) while Phase is `intro`,
-  on the server's clock from `IntroAt`: a local scene in `workspace.IntroScene` (a copy of your
-  avatar walking and lying on a copy of the lounger turned to the sea, the place's one hidden; the
-  water full, then dry, by `Zones.setFill`; `Story.BaconRig` as the giant in the sea, `Story.BaconFat`
-  drinking the `Puddle` through a bendy `Straw`, turning to you, burping, rolling off), the camera
-  (Scriptable, `Camera+4`), `StarterGui.Cutscene` (eyelids, logo, Skip), `Lighting.IntroBlur` and
-  `Audio.Intro*`; the HUD, chat, prompts, touch controls and every character are off meanwhile and
-  your character waits anchored at `IntroCut.places.stand`. Its end or Skip tells the server;
-  the phase leaving `intro` tears it down. `Intro.preview()` (the admin window) plays it from now
-  on this client only while the run goes on: the server is never told, and your character and view
-  go back to where they were. Studio: `StudioIntroAt` holds the cut on one second.
+  on the server's clock from `IntroAt`: a local scene in `workspace.IntroScene`: a copy of your
+  avatar walks up the beach on its own walk animation (its Animator, stepped by the distance
+  walked: no foot slide), stretches, sits and lies down on a copy of the lounger turned to the sea
+  (the place's one hidden; `IntroClips.lie`'s two clips); the normal-size `Story.BaconRig` strolls
+  onto the beach on the R6 walk, sits and plays in the sand (`Story.SandPile` grows); one spline
+  camera take ends in your eyes as they close (your copy's head fades as the camera goes in). The
+  water is full, then dry, by `Zones.setFill`; `Story.BaconFat` drinks the `Puddle` through a
+  bendy `Straw`, turns to you, burps (the whole sound) and rolls off. `StarterGui.Cutscene`
+  (eyelids, logo, Skip), `Lighting.IntroBlur`, `Audio.Intro*`; the HUD, chat, prompts, touch
+  controls and every character are off meanwhile and your character waits anchored at
+  `IntroCut.places.stand`. At `IntroCut.handover` the camera becomes the game's own first-person
+  view at that exact spot (focus and zoom measured off the camera at the start), the HUD comes back
+  and the tool swings up (`Viewmodel.swingIn`); play starts at `IntroCut.length`. Its end or Skip
+  tells the server; the phase leaving `intro` tears it down. `Intro.preview()` (the admin window)
+  plays it from now on this client only while the run goes on: the server is never told, and your
+  character and view go back to where they were. Studio: `StudioIntroAt` holds the cut on one
+  second (the server still ends the intro phase on its own clock).
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
 - `Hotbar.luau`: icon-only slots (no boxes, no glow; the ones not in hand sit at
@@ -217,7 +224,8 @@ Client (`src/client/`, all started from `init.client.luau`):
   `shared/StaffClips` (baked once per model); at most 30, nearest first, none past 250 studs.
 - `Viewmodel.luau`: first-person tool or hotbar gadget (`ToolModels.Gadgets.<model>`; sweep / pour
   poses), held by a copy of the player's own right
-  hand and forearm, with walk wobble and turn sway. `CameraFeel.luau`: first-person camera bob and
+  hand and forearm, with walk wobble and turn sway; `Viewmodel.swingIn()` swings it up into view
+  the next time it shows (the intro's handover). `CameraFeel.luau`: first-person camera bob and
   tilt (`CameraFeel.walk()` shares the walk cycle); third person (Classic, zoom 20-30) while
   driving your own vehicle, and `Hud`'s cursor code frees the mouse then. `Mood.luau`: lighting.
 
@@ -285,10 +293,19 @@ Shared (`src/shared/`, pure unless noted):
 - `StaffClips.luau` (pure data, tested): the staff's clips and gaits for the animation runtime, and
   `overlay` (the carry hold over the walk). `tests/StaffClips.spec` bakes and lints them on R15.
 - `IntroCut.luau` (pure, tested): the intro as data: `beats`, `places`, camera `shots` (keys with
-  places or subjects "player" / "bacon" / "sea" / "stand"), `lids`, `blur`, `black`, logo and music
-  tracks, `sounds`, `shakes`, and `value` / `segment` / `shot` / `walked` / `puddleLeft` / `rolled`.
-  `IntroClips.luau` (pure data, tested): your body's walk gait and `lie` clip (spot, yawn, doze);
-  `tests/IntroClips.spec` lints them and checks they line up with the cut.
+  places or subjects "player" / "bacon" / "baconLow" / "eye" / "fat" / "stand" / "standLook"; the
+  `spline` take runs smoothly through its keys, `IntroCut.spline`), `lids`, `blur`, `black`, logo
+  and music tracks, `sounds`, `shakes`, `handover`, and `value` / `segment` / `shot` / `walked` /
+  `puddleLeft` / `rolled`. `IntroClips.luau` (pure, tested): the walks (Roblox's own: your avatar's
+  and the R6 one, with the pace their feet match), the tired `slump` layer, `lie(anatomy, seat,
+  watch)` (two clips built for your body: the stand (stretch, yawn, step round) and the lie (sit,
+  legs up, lie back, watch, doze); their hips and legs solved by hand in 3D (`solved`) for any
+  hip-knee-ankle leg, whichever way the runtime reads the foot: planted feet stay flat on the sand,
+  steps lift over an arc, the legs swing up over the cushion and the heels rest on it, sized from
+  the foot part's box), and the bacon-hair's `sandSit` / `sandPlay`; `tests/IntroClips.spec` lints
+  them on R15 (also a tall R15 and an R15 on tall block feet, read as a plain chain) and R6, and
+  checks the feet stay flat and never go into the sand or the cushion, and that they line up with
+  the cut.
 
 Vendored (`vendor/Animation` -> `ReplicatedStorage.Animation`): the owner's roblox-animation
 runtime (pure core + `Roblox/` AnimPlayer etc.; `vendor/LICENSE`, `vendor/PROVENANCE.md`). Outside
