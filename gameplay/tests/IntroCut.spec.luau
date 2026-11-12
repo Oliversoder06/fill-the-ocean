@@ -165,4 +165,187 @@ function tests.walks_puddle_and_roll_run_zero_to_one(t)
 	end
 end
 
+-- Story.BaconFat's belly (92 studs) and Workspace.Gravity, as the client bakes it.
+local RADIUS, GRAVITY = 46, 196.2
+local ROLL_SOUND = 2.3 -- Audio.IntroRoll's length, seconds
+
+local function distance(a: { number }, x: number, y: number, z: number): number
+	return math.sqrt((x - a[1]) ^ 2 + (y - a[2]) ^ 2 + (z - a[3]) ^ 2)
+end
+
+-- When the shore first lets go of him.
+local function liftOff(flight): number
+	for _, sample in flight.samples do
+		local _, y, z = IntroCut.ballAt(flight, sample[1])
+		if y > IntroCut.rideHeight(z, RADIUS) + 0.05 then
+			return sample[1]
+		end
+	end
+	error("he never leaves the shore")
+end
+
+-- A ball resting on the shore touches it and never sinks into it: flat seabed, the slope, flat sand.
+function tests.the_ball_rests_on_the_shore(t)
+	local shore = IntroCut.places.shore
+	t.expectNear(IntroCut.rideHeight(-400, RADIUS), shore[1][2] + RADIUS, 1e-9, "on the seabed")
+	t.expectNear(IntroCut.rideHeight(100, RADIUS), shore[#shore][2] + RADIUS, 1e-9, "on the sand")
+	for z = -200, 0, 0.5 do
+		local y = IntroCut.rideHeight(z, RADIUS)
+		local nearest = math.huge
+		for i = 1, #shore - 1 do
+			local az, ay, bz, by = shore[i][1], shore[i][2], shore[i + 1][1], shore[i + 1][2]
+			local u = math.clamp(((z - az) * (bz - az) + (y - ay) * (by - ay)) / ((bz - az) ^ 2 + (by - ay) ^ 2), 0, 1)
+			nearest = math.min(nearest, math.sqrt((z - az - u * (bz - az)) ^ 2 + (y - ay - u * (by - ay)) ^ 2))
+		end
+		if z <= shore[1][1] then
+			nearest = math.min(nearest, y - shore[1][2]) -- the flat seabed
+		end
+		if z >= shore[#shore][1] then
+			nearest = math.min(nearest, y - shore[#shore][2]) -- the flat sand
+		end
+		t.expectEq(nearest >= RADIUS - 1e-6, true, `clear of the shore at z {z}`)
+		t.expectNear(nearest, RADIUS, 1e-6, `touching it at z {z}`)
+	end
+end
+
+-- He starts where he drank, still, and gathers speed all the way to the shore.
+function tests.he_rolls_for_the_beach_gathering_speed(t)
+	local b = IntroCut.beats
+	local flight = IntroCut.flight(RADIUS, GRAVITY)
+	local fat = IntroCut.places.fat
+	local x, y, z, turned = IntroCut.ballAt(flight, b.roll)
+	t.expectNear(distance({ fat[1], fat[2] + RADIUS, fat[3] }, x, y, z), 0, 1e-9, "starts where he drank")
+	t.expectEq(turned, 0)
+	local lastAt, lastSpeed = { x, y, z }, 0
+	for at = b.roll + 0.05, b.rollEnd, 0.05 do
+		local x2, y2, z2, turned2 = IntroCut.ballAt(flight, at)
+		local speed = distance(lastAt, x2, y2, z2) / 0.05
+		t.expectEq(speed >= lastSpeed, true, `faster and faster at {at}`)
+		t.expectNear(turned2, (z2 - z) / flight.hz / RADIUS, 1e-6, `rolls without slipping at {at}`)
+		t.expectNear(y2, y, 1e-9, "along the seabed")
+		lastAt, lastSpeed = { x2, y2, z2 }, speed
+	end
+	t.expectEq(lastSpeed > 400, true, "at speed when the shore lifts him")
+end
+
+-- From the shore on it is physics: energy never grows, he leaves it going up, and he never sinks
+-- into it.
+function tests.the_shore_throws_him(t)
+	local b = IntroCut.beats
+	local flight = IntroCut.flight(RADIUS, GRAVITY)
+	local start = 0.7 * flight.speed ^ 2 + GRAVITY * flight.seabed -- rolling: 1/2 v^2 + 1/5 v^2 (spin)
+	local last = flight.samples[#flight.samples]
+	local free = 0.5 * (flight.vs ^ 2 + flight.vy ^ 2) + 0.2 * (RADIUS * flight.spin) ^ 2 + GRAVITY * last[3]
+	t.expectEq(free <= start + 1e-6, true, "energy never grows after the run-up")
+	t.expectEq(free > 0.5 * start, true, "and most of it is kept")
+	local angle = math.deg(math.atan2(flight.vy, flight.vs))
+	t.expectEq(angle > 20 and angle < 50, true, `thrown up like off a ramp ({angle} degrees)`)
+	local lift = liftOff(flight)
+	t.expectEq(lift > b.rollEnd and lift < b.rollEnd + 0.3, true, "the shore throws him as he hits it")
+	for at = b.roll, b.back, 0.01 do
+		local _, y, z = IntroCut.ballAt(flight, at)
+		t.expectEq(y >= IntroCut.rideHeight(z, RADIUS) - 0.01, true, `never into the shore at {at}`)
+	end
+end
+
+-- He flies past you on your left, clear of you and the umbrella, and is far off and still high
+-- over the island when you get up.
+function tests.he_flies_past_you_and_off_into_the_distance(t)
+	local b, places = IntroCut.beats, IntroCut.places
+	local flight = IntroCut.flight(RADIUS, GRAVITY)
+	local closest, closestX = math.huge, 0
+	for at = b.roll, b.back, 0.01 do
+		local x, y, z = IntroCut.ballAt(flight, at)
+		local d = distance(places.eye, x, y, z)
+		if d < closest then
+			closest, closestX = d, x
+		end
+	end
+	t.expectEq(closest - RADIUS > 50, true, `well clear of you ({closest - RADIUS} studs)`)
+	t.expectEq(closestX < places.eye[1] - 80, true, "on your left")
+	local x, y, z = IntroCut.ballAt(flight, b.back)
+	t.expectEq(distance(places.lean, x, y, z) > 700, true, "far off when you get up")
+	t.expectEq(y - RADIUS > 150, true, "and still in the air, high over the island")
+end
+
+-- The camera's view at `t` in the wake shot: where it is and its zoom (tan of half the field of view).
+local function view(t: number): ({ number }, number)
+	local a, c, alpha = IntroCut.segment((IntroCut.shot(t) :: any).keys, t)
+	local function place(key): { number }
+		return if key.at == "eye" then IntroCut.places.eye else key.at
+	end
+	local pa, pc = place(a), place(c)
+	local at = {}
+	for i = 1, 3 do
+		at[i] = pa[i] + (pc[i] - pa[i]) * alpha
+	end
+	local ta, tc = math.tan(math.rad(a.fov) / 2), math.tan(math.rad(c.fov) / 2)
+	return at, ta + (tc - ta) * alpha
+end
+
+-- While the camera follows him he is whole in the frame, and big enough to read.
+function tests.the_camera_keeps_him_in_the_frame(t)
+	local b = IntroCut.beats
+	local flight = IntroCut.flight(RADIUS, GRAVITY)
+	local followFrom = nil
+	for _, key in (IntroCut.shot(b.roll) :: any).keys do
+		if key.look == "fat" and not followFrom then
+			followFrom = key.t
+		end
+	end
+	t.expectEq(followFrom ~= nil and followFrom < b.rollEnd - 1, true, "on him well before the shore")
+	for at = followFrom :: number, b.back, 0.01 do
+		local camera, half = view(at)
+		local x, y, z = IntroCut.ballAt(flight, at)
+		local share = math.tan(math.asin(RADIUS / distance(camera, x, y, z))) / half -- of the frame's half-height
+		t.expectEq(share < 0.8, true, `whole in the frame at {at} ({share})`)
+		t.expectEq(share > 0.12, true, `big enough to read at {at} ({share})`)
+	end
+end
+
+-- Getting up, the view turns back to the sea the way it came: he is never so far round that the
+-- short way back would be the other way.
+function tests.the_view_turns_back_the_way_it_came(t)
+	local b, places = IntroCut.beats, IntroCut.places
+	local flight = IntroCut.flight(RADIUS, GRAVITY)
+	local x, _, z = IntroCut.ballAt(flight, b.back)
+	local function yaw(dx: number, dz: number): number -- degrees to the left of looking out to sea
+		return math.deg(math.atan2(-dx, -dz))
+	end
+	local round = yaw(x - places.lean[1], z - places.lean[3]) - yaw(places.standLook[1], places.standLook[3])
+	t.expectEq(round > 90 and round < 170, true, `back to the sea the way it came ({round} degrees)`)
+	local backKey = nil
+	for _, key in (IntroCut.shot(b.back) :: any).keys do
+		if key.t == b.back then
+			backKey = key
+		end
+	end
+	t.expectEq(backKey and backKey.look, "fat", "still on him as you get up")
+end
+
+-- The roll is heard until the shore throws him, the whoosh as he flies past.
+function tests.the_sounds_follow_him(t)
+	local flight = IntroCut.flight(RADIUS, GRAVITY)
+	local lift = liftOff(flight)
+	local roll, whoosh = nil, nil
+	for _, cue in IntroCut.sounds do
+		if cue.sound == "IntroRoll" then
+			roll = cue
+		elseif cue.sound == "IntroWhoosh" and cue.t > IntroCut.beats.rollEnd and cue.t < IntroCut.beats.back then
+			whoosh = cue
+		end
+	end
+	t.expectEq(roll.t >= IntroCut.beats.roll, true, "not before he moves")
+	t.expectNear(roll.t + ROLL_SOUND, lift, 0.1, "the roll plays out as the shore throws him")
+	local closest, closestAt = math.huge, 0
+	for at = IntroCut.beats.rollEnd, IntroCut.beats.back, 0.01 do
+		local x, y, z = IntroCut.ballAt(flight, at)
+		local d = distance(IntroCut.places.eye, x, y, z)
+		if d < closest then
+			closest, closestAt = d, at
+		end
+	end
+	t.expectNear(whoosh.t, closestAt, 0.1, "the whoosh as he passes")
+end
+
 return tests

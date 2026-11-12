@@ -7,8 +7,9 @@
 -- (IntroClips.lie). The bacon-hair (ReplicatedStorage.Story.BaconRig) strolls onto the beach in
 -- front of you, sits down and plays in the sand (Story.SandPile). One camera take (a spline) runs
 -- from the music's drop into your eyes as they close. The water stands full, then drains
--- (Zones.setFill); the ball (Story.BaconFat, its Straw down to the Puddle) drinks it far out, burps
--- and rolls off. You get up into the game's own first-person view: from IntroCut.handover the
+-- (Zones.setFill); the ball (Story.BaconFat, its Straw down to the Puddle) drinks it far out, burps,
+-- rolls for the beach and its slope throws him past you over the island (IntroCut.flight). You get
+-- up into the game's own first-person view: from IntroCut.handover the
 -- camera is the game's (the same view, no cut), the HUD is back and your tool swings up into your
 -- hand (Viewmodel.swingIn); play starts at IntroCut.length. The HUD, the chat, every character,
 -- the prompts and the touch controls are off until then, and your character waits, anchored, where
@@ -47,6 +48,7 @@ local TURN_BLEND = 0.2 -- seconds the lie-down's stand hands over to its lie (In
 local SIT_BLEND = 0.25 -- seconds his walk takes to settle into sitting down
 local TURN_STUDS = 1.5 -- over your last steps you turn to face the sea, as the lie-down starts
 local LOOK_LAG = 0.25 -- seconds the camera's aim trails a walking body, so it doesn't bob with the steps
+local FAT_LAG = 0.06 -- seconds it trails the ball: your head chasing him as he flies past
 local HEAD_FADE = { far = 3, near = 1.2 } -- studs from your copy's head: it fades as the camera goes in
 local EYE_UP = 0.1 -- of the head's height: your eyes over its middle, at its front
 local BACON_LOW = 2 -- studs under him that "baconLow" aims (your eyes getting heavy)
@@ -468,6 +470,10 @@ local function begin(at: number, preview: boolean)
 	s.fat:PivotTo(s.fatAt)
 	s.belly = asset(s.fat, "Belly", "BasePart")
 	s.fatRadius = s.belly.Size.Y / 2
+	-- his roll for the beach and his flight off it; the model from his middle
+	s.flight = IntroCut.flight(s.fatRadius, workspace.Gravity)
+	s.rollAxis = Vector3.new(s.flight.hx, 0, s.flight.hz):Cross(Vector3.yAxis)
+	s.fromMiddle = CFrame.new(fatAt + Vector3.new(0, s.fatRadius, 0)):Inverse() * s.fatAt
 	s.neck = s.fat:FindFirstChild("Neck", true)
 	assert(s.neck and s.neck:IsA("Motor6D"), "Story.BaconFat needs a Motor6D Neck (his head turns)")
 	s.mouth = s.fat:FindFirstChild("Mouth", true)
@@ -568,7 +574,7 @@ local function subject(s, name: any): Vector3
 	elseif name == "eye" then
 		return s.eyeAt
 	elseif name == "fat" then
-		return s.belly.Position
+		return s.aim.fat
 	elseif name == "stand" then
 		return s.standEye
 	elseif name == "standLook" then
@@ -601,10 +607,16 @@ local function camera(s, t: number)
 		end
 		cf = CFrame.lookAt(at, at + ahead)
 	else
+		-- eased between the keys' places, turning in yaw and pitch so the horizon stays level
 		local a, b, alpha = IntroCut.segment(shot.keys, t)
-		local cfA = CFrame.lookAt(subject(s, a.at), subject(s, a.look))
-		local cfB = CFrame.lookAt(subject(s, b.at), subject(s, b.look))
-		cf = cfA:Lerp(cfB, alpha)
+		local fromA, fromB = subject(s, a.at), subject(s, b.at)
+		local dirA, dirB = (subject(s, a.look) - fromA).Unit, (subject(s, b.look) - fromB).Unit
+		local yawA = math.atan2(-dirA.X, -dirA.Z)
+		local turn = (math.atan2(-dirB.X, -dirB.Z) - yawA + math.pi) % (2 * math.pi) - math.pi -- the short way
+		local yaw = yawA + turn * alpha
+		local pitch = math.asin(dirA.Y) + (math.asin(dirB.Y) - math.asin(dirA.Y)) * alpha
+		local at = fromA:Lerp(fromB, alpha)
+		cf = CFrame.lookAt(at, at + Vector3.new(-math.sin(yaw) * math.cos(pitch), math.sin(pitch), -math.cos(yaw) * math.cos(pitch)))
 		local ta, tb = tanHalf(s, a), tanHalf(s, b)
 		half = ta + (tb - ta) * alpha -- the zoom eases as it looks, not in degrees
 	end
@@ -829,8 +841,8 @@ local function strawBetween(part: BasePart, a: Vector3, b: Vector3)
 	part.CFrame = CFrame.lookAt((a + b) / 2, b) * CFrame.Angles(0, math.pi / 2, 0)
 end
 
--- The ball, from the swap: drinks the puddle (head down, sucking), looks round at you, burps and
--- rolls off.
+-- The ball, from the swap: drinks the puddle (head down, sucking), looks round at you, burps, rolls
+-- for the beach and flies off it (IntroCut.flight).
 local function fat(s, t: number)
 	local b = IntroCut.beats
 	local swapped = t >= b.swap
@@ -854,14 +866,10 @@ local function fat(s, t: number)
 		hop = BURP_HOP * s.fatRadius * math.sin(math.pi * math.clamp(u, 0, 1))
 	end
 	s.neck.Transform = CFrame.Angles(0, math.rad(yaw), 0) * CFrame.Angles(math.rad(pitch), 0, 0)
-	-- the roll: along the seabed, turning by the distance over his radius
-	local from, to = v3(IntroCut.places.fat), v3(IntroCut.places.rollTo)
-	local path = to - from
-	local gone = IntroCut.rolled(t)
-	local axis = path.Unit:Cross(Vector3.yAxis)
-	local centre = from + path * gone + Vector3.new(0, s.fatRadius + hop, 0)
-	local turn = CFrame.fromAxisAngle(axis, -path.Magnitude * gone / s.fatRadius)
-	s.fat:PivotTo(CFrame.new(centre) * turn * (CFrame.new(from + Vector3.new(0, s.fatRadius, 0)):Inverse() * s.fatAt))
+	-- rolling for the beach, then flying: turned about the run's axis by how far he has rolled
+	local x, y, z, turned = IntroCut.ballAt(s.flight, t)
+	local turn = CFrame.fromAxisAngle(s.rollAxis, -turned)
+	s.fat:PivotTo(CFrame.new(x, y + hop, z) * turn * s.fromMiddle)
 	if drinking then
 		local left = IntroCut.puddleLeft(t)
 		local size = 2 * IntroCut.places.puddleRadius * math.max(left, 0.02)
@@ -875,12 +883,12 @@ local function fat(s, t: number)
 	end
 end
 
--- What the camera aims at this frame: walking bodies trail by LOOK_LAG (not bobbing with each step);
--- your eyes on the lounger (kept once your copy is gone).
+-- What the camera aims at this frame: walking bodies trail by LOOK_LAG (not bobbing with each step),
+-- the ball by FAT_LAG; your eyes on the lounger (kept once your copy is gone).
 local function aims(s, t: number, dt: number)
-	local function follow(name: string, target: Vector3)
+	local function follow(name: string, target: Vector3, lag: number)
 		local was = s.aim[name]
-		s.aim[name] = if was then was:Lerp(target, 1 - math.exp(-dt / LOOK_LAG)) else target
+		s.aim[name] = if was then was:Lerp(target, 1 - math.exp(-dt / lag)) else target
 	end
 	if t < IntroCut.beats.swap then
 		local head = s.head
@@ -890,16 +898,18 @@ local function aims(s, t: number, dt: number)
 				low = foot.Position
 			end
 		end
-		follow("player", (head.Position + low) / 2)
+		follow("player", (head.Position + low) / 2, LOOK_LAG)
 		s.eyeAt = (head.CFrame * CFrame.new(0, head.Size.Y * EYE_UP, -head.Size.Z / 2)).Position
 	end
-	follow("bacon", s.walkerHead.Position)
+	follow("bacon", s.walkerHead.Position, LOOK_LAG)
+	follow("fat", s.belly.Position, FAT_LAG)
 end
 
 -- The game's own view from here: your eyes where play starts (the camera keeps this exact view as it
 -- becomes the game's again), the tool swinging up into your hand, the HUD and the run's water back.
 local function handover(s)
 	s.handed = true
+	show(s.fat, false, s.folder) -- long gone over the island
 	local cam = workspace.CurrentCamera
 	cam.CameraType = Enum.CameraType.Scriptable
 	cam.CFrame = CFrame.lookAt(s.standEye, s.standEye + s.standLook)

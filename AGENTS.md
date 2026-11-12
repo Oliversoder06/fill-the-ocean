@@ -171,7 +171,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   onto the beach on the R6 walk, sits and plays in the sand (`Story.SandPile` grows); one spline
   camera take ends in your eyes as they close (your copy's head fades as the camera goes in). The
   water is full, then dry, by `Zones.setFill`; `Story.BaconFat` drinks the `Puddle` through a
-  bendy `Straw`, turns to you, burps (the whole sound) and rolls off. `StarterGui.Cutscene`
+  bendy `Straw`, turns to you, burps (the whole sound, plain: `Audio.IntroBurp` has no effects),
+  rolls for the beach faster and faster and its slope throws him past you and off over the island
+  (`IntroCut.flight`); you sit up and lean out to follow him, then turn back to the sea. `StarterGui.Cutscene`
   (eyelids, logo, Skip), `Lighting.IntroBlur`, `Audio.Intro*`; the HUD, chat, prompts, touch
   controls and every character are off meanwhile and your character waits anchored at
   `IntroCut.places.stand`. At `IntroCut.handover` the camera becomes the game's own first-person
@@ -296,7 +298,9 @@ Shared (`src/shared/`, pure unless noted):
   places or subjects "player" / "bacon" / "baconLow" / "eye" / "fat" / "stand" / "standLook"; the
   `spline` take runs smoothly through its keys, `IntroCut.spline`), `lids`, `blur`, `black`, logo
   and music tracks, `sounds`, `shakes`, `handover`, and `value` / `segment` / `shot` / `walked` /
-  `puddleLeft` / `rolled`. `IntroClips.luau` (pure, tested): the walks (Roblox's own: your avatar's
+  `puddleLeft` / `rolled`, and his roll and flight: `rideHeight` (a ball resting on the measured
+  `places.shore` profile), `flight(radius, gravity)` (the run-up, then rolling physics up the shore
+  and a free flight under `Workspace.Gravity`; energy never grows) and `ballAt`. `IntroClips.luau` (pure, tested): the walks (Roblox's own: your avatar's
   and the R6 one, with the pace their feet match), the tired `slump` layer, `lie(anatomy, seat,
   watch)` (two clips built for your body: the stand (stretch, yawn, step round) and the lie (sit,
   legs up, lie back, watch, doze); their hips and legs solved by hand in 3D (`solved`) for any
