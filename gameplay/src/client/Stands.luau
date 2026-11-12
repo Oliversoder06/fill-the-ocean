@@ -120,8 +120,8 @@ function Stands.start()
 			end
 			local s = sign :: BillboardGui
 			set(s, "Adornee", if shown then shown.Parent else nil)
-			-- not over the intro's shots (client/Intro)
-			set(s, "Enabled", shown ~= nil and ReplicatedStorage:GetAttribute("Phase") ~= "intro")
+			-- not over a cutscene's shots (client/Intro)
+			set(s, "Enabled", shown ~= nil and not Hud.cutscene)
 			if shown then
 				local item, status = Stands.offer(stand, snap, money)
 				local area = item and Areas.byId(Config, item.area)

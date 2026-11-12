@@ -357,6 +357,7 @@ function Action.start()
 		local gadget = player:GetAttribute("Gadget")
 		local gun = gadget == "waterGun"
 		local ready = ReplicatedStorage:GetAttribute("Phase") == "playing"
+			and not Hud.cutscene
 			and ocean
 			and character
 			and root

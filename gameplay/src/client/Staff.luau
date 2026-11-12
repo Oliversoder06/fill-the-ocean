@@ -372,7 +372,7 @@ local function refresh()
 	groundParams.FilterDescendantsInstances = ignore
 	local wanted = {}
 	local camera = workspace.CurrentCamera
-	if ReplicatedStorage:GetAttribute("Phase") == "playing" and camera then
+	if ReplicatedStorage:GetAttribute("Phase") == "playing" and camera and not Hud.cutscene then
 		local lanes: { [string]: number } = {}
 		for _, entry in StaffRules.decode(ReplicatedStorage:GetAttribute("Staff")) do
 			local item = Items.get(Config, entry.id)

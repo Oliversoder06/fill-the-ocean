@@ -185,7 +185,7 @@ function Honeycomb.start()
 	local dragEndedAt = -math.huge
 
 	local function inRun(): boolean
-		return ReplicatedStorage:GetAttribute("Phase") == "playing"
+		return ReplicatedStorage:GetAttribute("Phase") == "playing" and not Hud.cutscene
 	end
 
 	-- Only what can change a hex marks a refresh. Staff only changes words, so it counts while open;

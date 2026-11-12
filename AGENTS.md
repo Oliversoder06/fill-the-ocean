@@ -78,7 +78,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   (what a listed price costs the team; every price shown goes through it), `Hud.offer` (what
   TAB offers next: `Items.tabOffer`; `"useless"` for a level that changes nothing, `Ladder.helps`), `Hud.ocean`,
   `Hud.pulseFill(litres)` (the fill bar's pulse when poured water reaches the ocean) and
-  `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it). Scales the
+  `Hud.walletHold` (money still flying in as coins; the wallet shows Wallet minus it), and
+  `Hud.cutscene` (true while client/Intro is on screen, the team's intro or an admin's preview:
+  Action, the honeycomb, staff bodies, stand signs and the guide's lane stand down). Scales the
   whole HUD to the screen (`Hud.Scale`, a UIScale on the ScreenGui: laid out for 600 px tall, a phone
   shrinks it to 0.55, a touch-only tablet grows it to 1.25); code that turns screen pixels
   (AbsolutePosition, input) into offsets divides by `Hud.uiScale()`. Below 0.75 it hides the small
@@ -141,8 +143,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   a click or G opens the honeycomb on it or points the way (`Guide.pointTo` with the stand, gate
   or plot to outline, from ux/b1); `Stands.holder` is a stand's model.
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
-  ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote) and
-  `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`).
+  ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote),
+  `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`) and
+  `Hud.Admin.Body.PreviewIntro` plays the intro on the admin's own screen (`Intro.preview`).
 - `Purchase.luau`: the purchase moment's sounds and coins, `Purchase.landed` (from `Honeycomb`):
   a sting climbing per level of an upgrade, coins fly from the honeycomb's money into the hex, a chime
   and "NEW!" stamp (`Templates.BoughtStamp`) on a first; `Purchase.deny` shakes a button; new-tool
@@ -168,7 +171,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   (Scriptable, `Camera+4`), `StarterGui.Cutscene` (eyelids, logo, Skip), `Lighting.IntroBlur` and
   `Audio.Intro*`; the HUD, chat, prompts, touch controls and every character are off meanwhile and
   your character waits anchored at `IntroCut.places.stand`. Its end or Skip tells the server;
-  the phase leaving `intro` tears it down. Studio: `StudioIntroAt` holds the cut on one second.
+  the phase leaving `intro` tears it down. `Intro.preview()` (the admin window) plays it from now
+  on this client only while the run goes on: the server is never told, and your character and view
+  go back to where they were. Studio: `StudioIntroAt` holds the cut on one second.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
 - `Hotbar.luau`: icon-only slots (no boxes, no glow; the ones not in hand sit at

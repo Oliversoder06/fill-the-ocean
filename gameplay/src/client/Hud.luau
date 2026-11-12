@@ -237,6 +237,10 @@ end
 -- up coin by coin instead of jumping when the server pays.
 Hud.walletHold = 0
 
+-- client/Intro is on screen (the team's intro or an admin's preview, which plays while the run does):
+-- acting, the honeycomb, staff bodies, stand signs and the guide's lane stand down meanwhile.
+Hud.cutscene = false
+
 local fillPop: UIScale? = nil -- the fill bar's Progress.Bar.Pop, once Hud.start has found it
 
 -- The HUD is laid out for screens DESIGN_HEIGHT tall: a smaller one (a phone) shrinks all of it

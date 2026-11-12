@@ -239,6 +239,7 @@ function Guide.start()
 			and ocean ~= nil
 			and ReplicatedStorage:GetAttribute("Phase") == "playing"
 			and not admin.Visible
+			and not Hud.cutscene
 		local step, message, goal, click = 0, "", nil, nil
 		if active and thanks then
 			step, message = STEPS, "Nice! Keep filling the ocean."
@@ -249,8 +250,8 @@ function Guide.start()
 		set(panel, "Visible", active and not Honeycomb.isOpen()) -- hidden under the honeycomb's cover; the hand still shows
 		set(skip, "Visible", active and not thanks)
 		set(upgradesRing, "Visible", click == upgrades)
-		placeTrail(if active then goal else pointed)
-		local outline = if not active and pointedModel and pointedModel:IsDescendantOf(workspace) then pointedModel else nil
+		placeTrail(if active then goal elseif Hud.cutscene then nil else pointed)
+		local outline = if not active and not Hud.cutscene and pointedModel and pointedModel:IsDescendantOf(workspace) then pointedModel else nil
 		set(highlight, "Adornee", outline)
 		set(highlight, "Parent", if outline then workspace.CurrentCamera else nil)
 		pointHand(click)

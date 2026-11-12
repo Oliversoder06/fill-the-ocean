@@ -182,8 +182,9 @@ local function onGround(place: { number }, ignore: { Instance }): Vector3
 	return Vector3.new(place[1], groundAt(place[1], place[3], ignore), place[3])
 end
 
--- Builds the scene and takes the screen. Returns nil when your character isn't there.
-local function begin(at: number)
+-- Builds the scene and takes the screen. Returns nil when your character isn't there. A preview puts
+-- your character back where it was at the end.
+local function begin(at: number, preview: boolean)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -193,6 +194,8 @@ local function begin(at: number)
 	local camera = workspace.CurrentCamera
 	local s: any = {
 		at = at,
+		preview = preview,
+		view = camera.CFrame,
 		undo = {} :: { () -> () },
 		sounds = {} :: { [number]: Sound },
 		water = "",
@@ -230,11 +233,17 @@ local function begin(at: number)
 	body.Parent = nil
 
 	-- Your character waits where play starts, anchored and hidden; so does everyone else's.
+	local stoodAt = character:GetPivot()
 	root.Anchored = true
 	character:PivotTo(CFrame.lookAt(s.stand, s.stand + SEA))
 	table.insert(undo, function()
 		root.Anchored = false
 	end)
+	if preview then
+		table.insert(undo, function() -- runs before the unanchoring above (undo goes backwards)
+			character:PivotTo(stoodAt)
+		end)
+	end
 	for _, other in Players:GetPlayers() do
 		if other.Character then
 			hide(other.Character, undo)
@@ -567,6 +576,7 @@ local function finish(s, tellServer: boolean)
 	end
 	s.finished = true
 	scene = nil
+	Hud.cutscene = false
 	RunService:UnbindFromRenderStep(STEP)
 	if tellServer then
 		kit.remote:FireServer("done")
@@ -587,10 +597,10 @@ local function finish(s, tellServer: boolean)
 	gui.Enabled = false
 	kit.blur.Enabled = false
 	kit.blur.Size = 0
-	-- back to your own eyes, looking out to sea
+	-- back to your own eyes: looking out to sea where play starts, or where a preview began
 	local cam = workspace.CurrentCamera
 	local eye = s.stand + s.eyeOffset
-	cam.CFrame = CFrame.lookAt(eye, eye + SEA)
+	cam.CFrame = if s.preview then s.view else CFrame.lookAt(eye, eye + SEA)
 	cam.CameraType = Enum.CameraType.Custom
 end
 
@@ -598,7 +608,7 @@ local function frame(s)
 	local hold = if RunService:IsStudio() then workspace:GetAttribute("StudioIntroAt") else nil
 	local t = if type(hold) == "number" then hold else workspace:GetServerTimeNow() - s.at
 	if t >= IntroCut.length then
-		finish(s, true)
+		finish(s, not s.preview)
 		return
 	end
 	camera(s, t)
@@ -621,6 +631,35 @@ local function frame(s)
 	Hud.set(UserInputService, "MouseIconEnabled", kit.skip.Visible and os.clock() - mouseMovedAt < CURSOR_SECONDS)
 end
 
+-- Plays the cut from `at` (server time of its first frame) once your character is there. A preview
+-- is this client's alone: the server is never told.
+local function run(at: number, preview: boolean)
+	local deadline = os.clock() + CHARACTER_WAIT
+	while not (player.Character and player.Character:FindFirstChild("HumanoidRootPart")) and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	if scene or not (preview or ReplicatedStorage:GetAttribute("Phase") == "intro") then
+		return
+	end
+	local s = begin(at, preview)
+	if not s then
+		warn("[Intro] no character to play the intro with; skipped here")
+		if not preview then
+			kit.remote:FireServer("done")
+		end
+		return
+	end
+	scene = s
+	Hud.cutscene = true
+	-- after the camera, the HUD's cursor and everything else that moves the camera
+	RunService:BindToRenderStep(STEP, Enum.RenderPriority.Camera.Value + 4, function()
+		if scene == s then
+			frame(s)
+		end
+	end)
+end
+
+-- The team's intro (Phase "intro").
 local function play()
 	if scene then
 		return
@@ -632,32 +671,28 @@ local function play()
 		kit.remote:FireServer("done") -- joined after it ended: nothing to wait for here
 		return
 	end
-	local deadline = os.clock() + CHARACTER_WAIT
-	while not (player.Character and player.Character:FindFirstChild("HumanoidRootPart")) and os.clock() < deadline do
-		task.wait(0.1)
+	run(at, false)
+end
+
+-- An admin's preview (client/Admin): the whole cut from now, on this client only, while the run goes
+-- on. Returns why it can't start, or nil.
+function Intro.preview(): string?
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if scene then
+		return "The intro is already playing."
+	elseif humanoid and humanoid.SeatPart then
+		return "Get out of the seat first."
 	end
-	if scene or ReplicatedStorage:GetAttribute("Phase") ~= "intro" then
-		return
-	end
-	local s = begin(at)
-	if not s then
-		warn("[Intro] no character to play the intro with; skipped here")
-		kit.remote:FireServer("done")
-		return
-	end
-	scene = s
-	-- after the camera, the HUD's cursor and everything else that moves the camera
-	RunService:BindToRenderStep(STEP, Enum.RenderPriority.Camera.Value + 4, function()
-		if scene == s then
-			frame(s)
-		end
-	end)
+	task.spawn(run, workspace:GetServerTimeNow(), true)
+	return nil
 end
 
 local function skip()
 	local s = scene
 	if s and kit.skip.Visible then
-		kit.remote:FireServer("skip")
+		if not s.preview then
+			kit.remote:FireServer("skip")
+		end
 		finish(s, false)
 	end
 end
@@ -720,6 +755,9 @@ function Intro.start()
 	local function onPhase()
 		local phase = ReplicatedStorage:GetAttribute("Phase")
 		if phase == "intro" then
+			if scene and scene.preview then
+				finish(scene, false) -- the team's own comes first
+			end
 			task.spawn(play)
 		elseif scene then
 			finish(scene, false)
