@@ -54,6 +54,11 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     `workspace.Map.Revive.M1..M8` (Models: cove decorations shown once their milestone revives
     them, client/Milestones), `ReplicatedStorage.Story.BaconHair` (a Model, placeholder; the
     milestone sightings put a copy far out at sea, facing the beach along its pivot's front),
+    the intro's story models in `ReplicatedStorage.Story` (client/Intro): `BaconRig` (the real
+    bacon-hair rig x20, facing -Z, pivot at its feet), `BaconFat` (a stand-in for the fat ball until
+    `art/models/story/BaconHairFat.glb` is imported: the rig x20 with a `Belly` ball, a Motor6D `Neck`
+    in the model's own axes and an Attachment `Mouth`; pivot at its feet), `Straw` and `Puddle`
+    (cylinders along X), `StarterGui.Cutscene`, `Lighting.IntroBlur` and `Audio.Intro*`,
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects, `ChannelWave` included) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.
@@ -67,7 +72,9 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
 - Studio test helpers (gameplay), workspace attributes: `WaterScale` (less water needed),
   `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins put into the
   team's wallet) and `StudioFill` (a fraction 0-1:
-  jumps the fill) and `StudioGolden` (true: starts a golden spring now). Teleports and saving need the published game / Studio API access.
+  jumps the fill) and `StudioGolden` (true: starts a golden spring now) and `StudioIntro` (true: the
+  run opens on the intro, whatever the save) and `StudioIntroAt` (seconds: the intro holds on that
+  frame, for framing shots). Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.
 

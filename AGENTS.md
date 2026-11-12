@@ -40,10 +40,13 @@ Server (`src/server/`):
   phases, the team's economy (`team`: one wallet, track levels, items, staff posts; `earn` / `spend`,
   prices through `Items.price` for the save's team size, `announce` to teammates), per-player state
   (carried, earned, stats from the team's levels, equipped, gadget, hose), scoop/pour validation
-  (`Act` remote), buying, publishing attributes. Most gameplay changes land here.
+  (`Act` remote), buying, publishing attributes. Most gameplay changes land here. A run nobody has
+  played (`RunSave.wantsIntro`; in Studio only with `StudioIntro`) opens on the intro: phase `intro`
+  from `IntroAt` until everyone is `done` or anyone skips (`Intro` remote), then `introSeen` and
+  play; time played counts from when play starts (`startPlaying`).
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it, on a `HeldGrip`
   Motor6D (hand to tool) that client `Bodies` turns to suit the carry pose.
-- `Map.luau`: checks the baked ocean model and moves the water.
+- `Map.luau`: checks the baked ocean model (the water itself moves by `shared/Zones.setFill`).
 - `Mechanics.luau`: area mechanics (steam vents and their knockback, snow, the drifting cloud, the
   rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
   `rocksBroken` and `goldenId` when it credits a scoop.
@@ -156,7 +159,16 @@ Client (`src/client/`, all started from `init.client.luau`):
   heat out and the bed up (`Cues.ambience`, `Cues.ambienceMix`).
 - `Music.luau`: the map's track, a faster final-push track (last 5% of the ocean) and a calm
   track for waiting (`Cues.musicTrack`); crossfades, ducks under cards and purchases
-  (`Music.duck`), plays through `SoundService.Music`.
+  (`Music.duck`), plays through `SoundService.Music`; `Music.hush` silences it (the intro).
+- `Intro.luau`: the intro cutscene (`shared/IntroCut`, `shared/IntroClips`) while Phase is `intro`,
+  on the server's clock from `IntroAt`: a local scene in `workspace.IntroScene` (a copy of your
+  avatar walking and lying on a copy of the lounger turned to the sea, the place's one hidden; the
+  water full, then dry, by `Zones.setFill`; `Story.BaconRig` as the giant in the sea, `Story.BaconFat`
+  drinking the `Puddle` through a bendy `Straw`, turning to you, burping, rolling off), the camera
+  (Scriptable, `Camera+4`), `StarterGui.Cutscene` (eyelids, logo, Skip), `Lighting.IntroBlur` and
+  `Audio.Intro*`; the HUD, chat, prompts, touch controls and every character are off meanwhile and
+  your character waits anchored at `IntroCut.places.stand`. Its end or Skip tells the server;
+  the phase leaving `intro` tears it down. Studio: `StudioIntroAt` holds the cut on one second.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
 - `Hotbar.luau`: icon-only slots (no boxes, no glow; the ones not in hand sit at
@@ -254,7 +266,8 @@ Shared (`src/shared/`, pure unless noted):
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
   vehicle's own area). Numbers in `Config.vehicle`; `Water.share` splits a tank's value.
-- `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). `Zones.channelPath` reads
+- `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). `Zones.setFill` sets the
+  water's height for a fill fraction (server/Run; client/Intro for its own); `Zones.channelPath` reads
   an area's `Channel.Path` (server/Map checks it, client/Channels follows it). `Zones.stand`,
   `Zones.shop` and `Zones.standPrompt` find stands for the server (`Map`) and the client (`Stands`).
 - `Icons.luau` (pure, tested): each model's UI image by model name (`Icons.of`); `tests/Icons.spec`
@@ -266,6 +279,11 @@ Shared (`src/shared/`, pure unless noted):
   `encode` / `decode`. Numbers in `Config.staff`.
 - `StaffClips.luau` (pure data, tested): the staff's clips and gaits for the animation runtime, and
   `overlay` (the carry hold over the walk). `tests/StaffClips.spec` bakes and lints them on R15.
+- `IntroCut.luau` (pure, tested): the intro as data: `beats`, `places`, camera `shots` (keys with
+  places or subjects "player" / "bacon" / "sea" / "stand"), `lids`, `blur`, `black`, logo and music
+  tracks, `sounds`, `shakes`, and `value` / `segment` / `shot` / `walked` / `puddleLeft` / `rolled`.
+  `IntroClips.luau` (pure data, tested): your body's walk gait and `lie` clip (spot, yawn, doze);
+  `tests/IntroClips.spec` lints them and checks they line up with the cut.
 
 Vendored (`vendor/Animation` -> `ReplicatedStorage.Animation`): the owner's roblox-animation
 runtime (pure core + `Roblox/` AnimPlayer etc.; `vendor/LICENSE`, `vendor/PROVENANCE.md`). Outside
@@ -276,7 +294,7 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `itemLevels`, staff `assign` (staff id -> area id); its `buildings` levels and `plots`; per player
   only `litres`; `milestones` reached (indices, nil in a save from before them: the server marks
   those below its fill without granting, and lists them in `milestonesSkipped`, never paid)), its key, the exact-team check (`sameTeam`), `blank` / `isBlank` (what erasing a run
-  leaves), and `sanitize`, which turns a save from before the team economy (money, levels and items
+  leaves), `wantsIntro` (unplayed and not seen), and `sanitize`, which turns a save from before the team economy (money, levels and items
   per player) into one team: money added up, the best levels, every item, the first member's posts;
   given gameplay's Config (`RunStore.load(key, Config)`) it also migrates a version 2 save's tool
   level by model (`V2_TOOL_MODELS`) and clamps every level and milestone to the Config.
@@ -315,7 +333,8 @@ The server publishes state as attributes; the client only reads them.
   the last milestone granted, `shared/Milestones`) and `Revived` (`"1,2,5"`: the `Revive.M<n>`
   decorations the run's milestones brought back), `RocksBroken` (`"1,3"`), `Golden`
   (area id of the golden spring, 0 for none) and `GoldenEndsAt`, `LastPour`
-  (`"<areaId>@<litres>@<serverTime>"`, set on every accepted `Act` pour; `shared/PourFlow`); vent parts carry `VentState`
+  (`"<areaId>@<litres>@<serverTime>"`, set on every accepted `Act` pour; `shared/PourFlow`), `IntroAt`
+  (server time of the intro's first frame, `shared/IntroCut`); vent parts carry `VentState`
   (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the
   boost applied. `BuildingLevel_<id>` (the team's upgrades per building, nil until built); a placed
   building (`Plots.PlotN.Building`) carries `Clogged`; `Town.Aqueduct_<side>` carries `Flowing`.
@@ -354,7 +373,9 @@ The server publishes state as attributes; the client only reads them.
   while on foot within reach of your own truck by the water; rate-limited), `Look` (camera pitch in degrees, range-checked and
   rate-limited), `Admin` (a fill fraction 0-1, or `"reset"`: the run starts over live for the same
   team and map, at most once per 10 s; the server checks `shared/Admins` and only acts
-  while Phase is `playing`), `Card` (server to client).
+  while Phase is `playing`), `Intro` (`"done"` at the cut's end, `"skip"` from Skip: only while
+  Phase is `intro`, a skip only from `IntroCut.skipAfter`, and it ends the intro for everyone;
+  rate-limited), `Card` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish` (a player's) or `publishTeam` (the team's). A new remote: add it to
   `default.project.json` AND to the `remote(...)` list in `Run.start`, validate its arguments, and
   tell the owner to restart `rojo serve` (a running Rojo does not reload the project file; the
@@ -370,6 +391,9 @@ The server publishes state as attributes; the client only reads them.
   ImageLabels), `Select`, `Press`; `Bottom` is hidden and unused; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
   cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton` (hidden by code),
   `CloseButton`, `Wallet`, `Tooltip`; with `Lighting.HoneycombBlur` (a BlurEffect at Size 0).
+  `StarterGui.Cutscene` is the intro's own ScreenGui (DisplayOrder 50, IgnoreGuiInset, off until
+  the intro): `Scale`, `TopLid` / `BottomLid` (black, each with a soft `Edge` gradient), `Logo`
+  (UIScale `Pop`), `Black`, `Skip` (`Label`, `Chevron`, UIScale `Press`).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.

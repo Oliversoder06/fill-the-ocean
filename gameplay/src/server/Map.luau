@@ -50,32 +50,8 @@ local AREA_PARTS = { "Source", "Pour", "Spawn", "Tap" }
 
 local Map = {}
 
-local baseTransparency: { [BasePart]: number } = {} -- each Water part's look in the place
 -- How each part clear() hid looked and collided in the place, so show() can put it back.
 local hidden: { [BasePart]: { transparency: number, canCollide: boolean, canQuery: boolean, canTouch: boolean } } = {}
-
--- Sets the visible water height for a fill fraction (0-1). An empty basin shows no water at all,
--- so a drained ocean looks drained.
-function Map.setFill(ocean: Model, fraction: number)
-	local water = Zones.part(ocean, "Water")
-	local basin = Zones.part(ocean, "Basin")
-	local height = math.max(0.05, (water:GetAttribute("Depth") :: number) * math.clamp(fraction, 0, 1))
-	local y = basin.Position.Y + 0.5 + height / 2
-	local tiles: { BasePart } = { water }
-	for _, child in water:GetChildren() do
-		if child:IsA("BasePart") then
-			table.insert(tiles, child)
-		end
-	end
-	for _, tile in tiles do
-		if baseTransparency[tile] == nil then
-			baseTransparency[tile] = tile.Transparency
-		end
-		tile.Size = Vector3.new(tile.Size.X, height, tile.Size.Z)
-		tile.Position = Vector3.new(tile.Position.X, y, tile.Position.Z)
-		tile.Transparency = if fraction <= 0 then 1 else baseTransparency[tile]
-	end
-end
 
 local function child(parent: Instance, name: string): Instance
 	local found = parent:FindFirstChild(name)

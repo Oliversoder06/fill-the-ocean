@@ -271,6 +271,7 @@ local function remove(key: string)
 end
 
 -- Outfit pieces (sleeves, props) hang on plain welds; read as joints they'd turn into extra limbs.
+-- AnimPlayer ignores them (client/Intro's copy of your avatar too: its accessories).
 local function outfit(model: Instance): { Instance }
 	local rigParts: { [Instance]: boolean } = {}
 	for _, inst in model:GetDescendants() do
@@ -297,6 +298,7 @@ local function outfit(model: Instance): { Instance }
 	end
 	return list
 end
+Staff.outfit = outfit
 
 -- A clone of the kind's rig, ready to be moved and posed: anchored root, nothing to collide with,
 -- touch or aim at, no name tag.

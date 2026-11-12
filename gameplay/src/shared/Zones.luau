@@ -191,6 +191,27 @@ local function inFootprint(tiles: { BasePart }, point: Vector3): boolean
 	return false
 end
 
+-- Sets the visible water height for a fill fraction (0-1). An empty basin shows no water at all, so
+-- a drained ocean looks drained. The server sets the run's (server/Run); client/Intro shows its own
+-- for a while and then this again with the run's Fill. Each tile keeps its look in the place as its
+-- attribute BaseTransparency (set by the first call, on the server).
+function Zones.setFill(ocean: Model, fraction: number)
+	local tiles, fullY = waterTiles(ocean)
+	local depth = Zones.part(ocean, "Water"):GetAttribute("Depth") :: number
+	local height = math.max(0.05, depth * math.clamp(fraction, 0, 1))
+	local y = fullY - depth + height / 2
+	for _, tile in tiles do
+		local base = tile:GetAttribute("BaseTransparency")
+		if type(base) ~= "number" then
+			base = tile.Transparency
+			tile:SetAttribute("BaseTransparency", base)
+		end
+		tile.Size = Vector3.new(tile.Size.X, height, tile.Size.Z)
+		tile.Position = Vector3.new(tile.Position.X, y, tile.Position.Z)
+		tile.Transparency = if fraction <= 0 then 1 else base :: number
+	end
+end
+
 -- Whether `point` (a surface you look at) will be under water when the ocean is full.
 function Zones.willFlood(ocean: Model, point: Vector3): boolean
 	local tiles, fullY = waterTiles(ocean)

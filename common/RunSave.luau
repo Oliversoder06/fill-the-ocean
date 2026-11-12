@@ -260,6 +260,13 @@ function RunSave.isBlank(save: Save): boolean
 	return next(save.players) == nil and save.current <= 0 and save.playSeconds <= 0 and not save.finished
 end
 
+-- The intro plays on a run nobody has played yet and only until it has been seen. Time played only
+-- counts once play starts (server/Run), so a team that left during the intro sees it again; a save
+-- from before the intro was played, so it never does.
+function RunSave.wantsIntro(save: Save): boolean
+	return not save.introSeen and save.current <= 0 and save.playSeconds <= 0 and not save.finished
+end
+
 -- DataStore keys are at most 50 characters.
 RunSave.KEY_LIMIT = 50
 

@@ -14,10 +14,16 @@ local SILENT = 0.005 -- a fade snaps to its target within this volume; silent tr
 local Music = {}
 
 local duckUntil = -math.huge
+local hushed = false
 
 -- Lowers the music for `seconds` so a big moment reads over it.
 function Music.duck(seconds: number)
 	duckUntil = math.max(duckUntil, os.clock() + seconds)
+end
+
+-- Fades every track out while on (client/Intro plays its own music), and back in when off.
+function Music.hush(on: boolean)
+	hushed = on
 end
 
 function Music.start()
@@ -49,7 +55,7 @@ function Music.start()
 		local k = 1 - math.exp(-dt * 3 / cue.fadeSeconds) -- about 95% of the way in fadeSeconds
 		duckLevel += ((if ducked then cue.duck else 1) - duckLevel) * math.min(1, k * 4) -- ducking is quicker than a crossfade
 		for key, sound in tracks do
-			local target = if key == want then cue.volume * duckLevel else 0
+			local target = if key == want and not hushed then cue.volume * duckLevel else 0
 			local v = sound.Volume + (target - sound.Volume) * k
 			if math.abs(target - v) < SILENT then
 				v = target -- snap, or the tail of the fade never quite arrives

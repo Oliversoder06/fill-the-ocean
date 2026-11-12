@@ -573,6 +573,31 @@ function tests.only_unplayed_saves_are_blank(t)
 	t.expectEq(RunSave.isBlank(done), false, "finished")
 end
 
+-- The intro plays on a run nobody has played yet: a new or erased save, or one left during its intro
+-- (time played only counts once play starts, and members leaving add their entry). Never on an old
+-- save from before the intro, nor twice.
+function tests.intro_plays_until_seen_on_an_unplayed_run(t)
+	t.expectEq(RunSave.wantsIntro(RunSave.new("map1", { 1 })), true, "a new run")
+	local old = RunSave.new("map1", { 1 })
+	old.updatedAt = 50
+	t.expectEq(RunSave.wantsIntro(RunSave.blank(old, 60)), true, "an erased run")
+	local left = RunSave.new("map1", { 1 })
+	left.players["1"] = { money = 0, levels = {}, litres = 0, owned = {}, itemLevels = {}, assign = {} }
+	t.expectEq(RunSave.wantsIntro(left), true, "left during the intro")
+	local seen = RunSave.new("map1", { 1 })
+	seen.introSeen = true
+	t.expectEq(RunSave.wantsIntro(seen), false, "already seen")
+	local played = RunSave.new("map1", { 1 })
+	played.playSeconds = 2
+	t.expectEq(RunSave.wantsIntro(played), false, "played before the intro existed")
+	local filled = RunSave.new("map1", { 1 })
+	filled.current = 1
+	t.expectEq(RunSave.wantsIntro(filled), false, "water in it")
+	local done = RunSave.new("map1", { 1 })
+	done.finished = true
+	t.expectEq(RunSave.wantsIntro(done), false, "finished")
+end
+
 -- A write lands only over an older stamp: an erase's blank stamped in the same second as a late
 -- gameplay write must win.
 function tests.write_lands_only_over_an_older_stamp(t)

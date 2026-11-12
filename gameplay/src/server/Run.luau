@@ -42,6 +42,9 @@
 -- (client/Payout flies it in as coins); a purchase is announced to the rest of the team.
 -- Admins (shared/Admins) send Admin(fill fraction 0-1) to jump the ocean's fill, or Admin("reset")
 -- to start the run over for the same team and map while everyone stays (client/Admin).
+-- A run nobody has played yet (RunSave.wantsIntro) opens on the intro: phase "intro" from IntroAt
+-- (client/Intro, shared/IntroCut) until everyone has watched it or anyone skips it (Intro remote);
+-- time played counts from when play starts.
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
 -- team, and there is no party wait.
@@ -64,6 +67,7 @@ local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
 local Honeycomb = require(ReplicatedStorage.Shared.Honeycomb)
+local IntroCut = require(ReplicatedStorage.Shared.IntroCut)
 local Milestones = require(ReplicatedStorage.Shared.Milestones)
 local PourFlow = require(ReplicatedStorage.Shared.PourFlow)
 local StaffRules = require(ReplicatedStorage.Shared.StaffRules)
@@ -104,6 +108,8 @@ local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
 local LOOK_LIMIT = 80 -- degrees up or down
 local RESET_COOLDOWN = 10 -- seconds between admin run resets (each rebuilds the world and saves)
+local INTRO_LEAD = 1.5 -- seconds between the intro phase and its first frame, so every client is ready
+local INTRO_SLACK = 15 -- seconds past the intro's length after which play starts anyway
 local AUTOSAVE_SECONDS = 60
 local CLOSE_SAVE_SECONDS = 25 -- BindToClose waits this long at most for the last save (Roblox allows 30)
 local END_SAVE_SECONDS = 15 -- the ending waits this long at most for the finished run to be stored
@@ -302,7 +308,7 @@ local function setWater(current: number)
 	setGlobal("Current", current)
 	setGlobal("Target", run.target)
 	setGlobal("Fill", fill)
-	Map.setFill(ocean, fill)
+	Zones.setFill(ocean, fill)
 end
 
 -- Leaving "playing" also stops every jetpack lift and takes every hose off its tap (the gadget
@@ -678,6 +684,35 @@ local function applySaved(player: Player)
 	state.stats = teamStats()
 end
 
+-- Play starts: time played counts from here (the intro isn't play), and the HUD stopwatch with it.
+local function startPlaying()
+	run.playSince = os.clock()
+	setGlobal("RunStartedAt", workspace:GetServerTimeNow())
+	setPhase("playing")
+end
+
+-- The intro (client/Intro plays shared/IntroCut from IntroAt, server time). It ends when every
+-- player here has watched it or anyone skips it (onIntro), or INTRO_SLACK after its length; then the
+-- save remembers it (save.introSeen) and play starts.
+local intro = { at = 0, done = {} :: { [Player]: boolean } }
+
+local function endIntro()
+	if run.phase ~= "intro" then
+		return
+	end
+	(run.save :: RunSave.Save).introSeen = true
+	table.clear(intro.done)
+	startPlaying()
+	task.spawn(saveRun, "intro seen")
+end
+
+local function startIntro()
+	intro.at = workspace:GetServerTimeNow() + INTRO_LEAD
+	setGlobal("IntroAt", intro.at)
+	setPhase("intro")
+	task.delay(INTRO_LEAD + IntroCut.length + INTRO_SLACK, endIntro)
+end
+
 -- The team is in: open their run, apply it and play.
 local function startRun()
 	if run.started then
@@ -749,13 +784,16 @@ local function startRun()
 		moveToSpawn(player) -- those who spawned before the load go to the furthest open area
 	end
 	teamChanged()
-	run.playBase, run.playSince = save.playSeconds, os.clock()
+	run.playBase = save.playSeconds
 	setGlobal("PlaySeconds", save.playSeconds)
-	setGlobal("RunStartedAt", workspace:GetServerTimeNow()) -- the HUD stopwatch counts from here
 	setGlobal("Waiting", "")
-	-- The intro (phase "intro", only while save.introSeen is false) comes with the story cutscenes;
-	-- until then it is skipped.
-	setPhase("playing")
+	-- A run nobody has played opens on the intro; in Studio only with the StudioIntro attribute.
+	local wantsIntro = if RunService:IsStudio() then workspace:GetAttribute("StudioIntro") == true else RunSave.wantsIntro(save)
+	if wantsIntro then
+		startIntro()
+	else
+		startPlaying()
+	end
 	if run.key then
 		task.spawn(keepLock)
 		task.spawn(saveRun, "run opened")
@@ -1004,10 +1042,9 @@ local function resetRun()
 		moveToSpawn(player)
 	end
 	teamChanged()
-	run.playBase, run.playSince = 0, os.clock()
+	run.playBase = 0
 	setGlobal("PlaySeconds", 0)
-	setGlobal("RunStartedAt", workspace:GetServerTimeNow())
-	setPhase("playing")
+	startPlaying()
 	card("The run was reset")
 	task.spawn(saveRun, "admin reset")
 end
@@ -1033,6 +1070,28 @@ local function onAdmin(player: Player, value: unknown)
 		return
 	end
 	jumpFill(value)
+end
+
+-- Intro("done") when a client's intro has played to its end, Intro("skip") from its Skip button
+-- (which shows IntroCut.skipAfter in): a skip ends it for everyone.
+local function onIntro(player: Player, what: unknown)
+	local state = states[player]
+	if not state or run.phase ~= "intro" or not allow(state, "intro", 2) then
+		return
+	end
+	if what == "skip" then
+		if workspace:GetServerTimeNow() - intro.at >= IntroCut.skipAfter then
+			endIntro()
+		end
+	elseif what == "done" then
+		intro.done[player] = true
+		for other in states do
+			if not intro.done[other] then
+				return
+			end
+		end
+		endIntro()
+	end
 end
 
 local function rootOf(player: Player): BasePart?
@@ -1403,7 +1462,7 @@ end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build", "Staff" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build", "Staff", "Intro" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Fill", 0)
@@ -1422,6 +1481,7 @@ function Run.start(oceanModel: Model)
 	remotes.Look.OnServerEvent:Connect(onLook)
 	remotes.Admin.OnServerEvent:Connect(onAdmin)
 	remotes.Gadget.OnServerEvent:Connect(onGadget)
+	remotes.Intro.OnServerEvent:Connect(onIntro)
 	-- What the area mechanics, the vehicles, the buildings and the staff may see and do in the run.
 	local hooks = {
 		states = states,
@@ -1528,6 +1588,7 @@ function Run.start(oceanModel: Model)
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		Vehicles.leave(player)
+		intro.done[player] = nil
 		local state = states[player]
 		if state then
 			Payroll.payNow() -- the ticked pay so far goes into this save

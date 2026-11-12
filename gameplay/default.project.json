@@ -53,6 +53,9 @@
         },
         "Staff": {
           "$className": "RemoteEvent"
+        },
+        "Intro": {
+          "$className": "RemoteEvent"
         }
       }
     },
