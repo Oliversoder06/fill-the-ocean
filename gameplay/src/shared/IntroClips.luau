@@ -841,4 +841,88 @@ IntroClips.sandPlay = {
 	seed = "IntroSandPlay",
 }
 
+-- The ending's slap (client/Ending): standing behind the bacon-hair as he sits at the water's edge,
+-- the right hand swings up and over and comes down across the back of his head. The load comes from
+-- the hips (a dip and a counter-turn to the right) as the arm goes up; at the hit (marker "Hit",
+-- IntroClips.slapHit in) the hips and chest have turned through to the left and lean over him; then
+-- the follow-through, and a slower settle. Built for the body: one without forearms or a chest of its
+-- own (R6) gets none of their keys.
+IntroClips.slapHit = 0.55
+
+function IntroClips.slap(anatomy: any): any
+	local rigid = anatomy.legs[1] and anatomy.legs[1].rigid
+	local dip = if rigid then 0 else 1 -- straight legs (R6) can't bend to lower the hips
+	local tracks: { [string]: any } = {
+		hips = {
+			{ t = 0, pos = { 0, 0, 0 }, rot = { 0, 0, 0 } },
+			{ t = 0.22, pos = { 0, -0.06 * dip, 0.05 }, rot = { 0, -10, 0 } },
+			{ t = 0.4, pos = { 0, -0.09 * dip, 0.06 }, rot = { -2, -13, 0 } },
+			{ t = 0.55, pos = { 0, -0.2 * dip, -0.28 }, rot = { 8, 14, 0 }, ease = "snap" },
+			{ t = 0.66, pos = { 0, -0.22 * dip, -0.32 }, rot = { 9, 17, 0 } },
+			{ t = 1.15, pos = { 0, -0.08 * dip, -0.12 }, rot = { 3, 7, 0 } },
+			{ t = 2.1, pos = { 0, 0, 0 }, rot = { 0, 3, 0 } },
+		},
+		chest = {
+			{ t = 0, rot = { 0, 0, 0 } },
+			{ t = 0.22, rot = { -4, -10, 0 } },
+			{ t = 0.4, rot = { -6, -15, 0 } },
+			{ t = 0.55, rot = { 14, 18, 0 }, ease = "snap" },
+			{ t = 0.66, rot = { 16, 21, 0 } },
+			{ t = 1.15, rot = { 6, 8, 0 } },
+			{ t = 2.1, rot = { 2, 2, 0 } },
+		},
+		rightArm = {
+			{ t = 0, rot = { 0, 0, 0 } },
+			{ t = 0.12, rot = { 52, 0, 12 } },
+			{ t = 0.24, rot = { 122, 0, 6 } },
+			{ t = 0.42, rot = { 152, 0, 4 } },
+			{ t = 0.55, rot = { 72, 0, -12 }, ease = "snap" },
+			{ t = 0.67, rot = { 42, 0, -26 } },
+			{ t = 1.2, rot = { 16, 0, -10 } },
+			{ t = 2.1, rot = { 4, 0, -3 } },
+		},
+		-- two frames behind the upper arm
+		rightForearm = {
+			{ t = 0, rot = { 0, 0, 0 } },
+			{ t = 0.3, rot = { 62, 0, 0 } },
+			{ t = 0.48, rot = { 88, 0, 0 } },
+			{ t = 0.61, rot = { 12, 0, 0 }, ease = "snap" },
+			{ t = 0.73, rot = { 20, 0, 0 } },
+			{ t = 1.26, rot = { 22, 0, 0 } },
+			{ t = 2.1, rot = { 10, 0, 0 } },
+		},
+		leftArm = {
+			{ t = 0, rot = { 0, 0, 0 } },
+			{ t = 0.3, rot = { 14, 0, -10 } },
+			{ t = 0.55, rot = { -10, 0, -14 } },
+			{ t = 0.7, rot = { -14, 0, -15 } },
+			{ t = 1.3, rot = { 4, 0, -6 } },
+			{ t = 2.1, rot = { 2, 0, -3 } },
+		},
+		head = { -- a frame behind the chest
+			{ t = 0, rot = { -8, 0, 0 } },
+			{ t = 0.26, rot = { -12, 6, 0 } },
+			{ t = 0.44, rot = { -14, 9, 0 } },
+			{ t = 0.59, rot = { -22, -10, 0 }, ease = "snap" },
+			{ t = 0.73, rot = { -18, -16, 0 } },
+			{ t = 1.4, rot = { -6, -4, 0 } },
+			{ t = 2.1, rot = { -4, 0, 0 } },
+		},
+	}
+	if not anatomy.parts.rightForearm then -- an arm that doesn't bend (R6)
+		tracks.rightForearm = nil
+	end
+	if anatomy.chest == nil or anatomy.chest == anatomy.body then -- one-piece torso (R6): the hips turn it
+		tracks.chest = nil
+	end
+	return {
+		name = "EndSlap",
+		length = 2.1,
+		units = "studs",
+		tracks = tracks,
+		markers = { { t = IntroClips.slapHit, name = "Hit" } },
+		seed = "EndSlap",
+	}
+end
+
 return IntroClips

@@ -258,6 +258,19 @@ function tests.the_lie_down_ends_on_the_cushion(t)
 	end
 end
 
+-- The ending's slap lints clean on any body (its forearm and chest keys only where they exist), and
+-- lands on its Hit marker.
+function tests.the_slap_lints_clean_on_any_body(t)
+	for _, body in { { "R15", r15 }, { "tall R15", tall }, { "R6", r6 } } do
+		local clip = IntroClips.slap(body[2])
+		clean(t, `slap ({body[1]})`, clip, body[2])
+		t.expectEq(clip.markers[1].name, "Hit")
+		t.expectEq(clip.markers[1].t, IntroClips.slapHit)
+	end
+	t.expectEq(IntroClips.slap(r6).tracks.rightForearm, nil, "no forearm on R6")
+	t.expectEq(IntroClips.slap(r15).tracks.rightForearm ~= nil, true, "a forearm on R15")
+end
+
 -- The yawn's sound comes as the stretch's yawn does.
 function tests.the_yawn_lines_up_with_the_cut(t)
 	local stand, lie = lieFor(r15)

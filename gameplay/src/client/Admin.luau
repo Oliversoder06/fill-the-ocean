@@ -1,13 +1,14 @@
 -- Admin window (F2), only for the user ids in shared/Admins: jump the ocean's fill (0%, 50%, 95%,
 -- 100%), Reset run (Body.ResetRun, pressed twice within CONFIRM_SECONDS: the run starts over for
--- the same team and map), or Preview intro (Body.PreviewIntro: the intro cutscene on this client
--- only, client/Intro). Built in Studio as StarterGui.Hud.Admin. The server re-checks the id and
--- only acts while playing.
+-- the same team and map), or Preview intro / Preview ending (Body.PreviewIntro, Body.PreviewEnding:
+-- the cutscene on this client only, client/Intro and client/Ending). Built in Studio as
+-- StarterGui.Hud.Admin. The server re-checks the id and only acts while playing.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Admins = require(ReplicatedStorage.Shared.Admins)
+local Ending = require(script.Parent.Ending)
 local Hud = require(script.Parent.Hud)
 local Intro = require(script.Parent.Intro)
 local Window = require(script.Parent.Window)
@@ -73,14 +74,16 @@ function Admin.start()
 		end
 		refresh()
 	end)
-	Hud.find(root, "Body.PreviewIntro").Activated:Connect(function()
-		local problem = Intro.preview()
-		if problem then
-			status.Text = problem
-		else
-			setOpen(false)
-		end
-	end)
+	for _, preview in { { "Body.PreviewIntro", Intro.preview }, { "Body.PreviewEnding", Ending.preview } } do
+		Hud.find(root, preview[1]).Activated:Connect(function()
+			local problem = preview[2]()
+			if problem then
+				status.Text = problem
+			else
+				setOpen(false)
+			end
+		end)
+	end
 	ReplicatedStorage:GetAttributeChangedSignal("Fill"):Connect(refresh)
 	ReplicatedStorage:GetAttributeChangedSignal("Phase"):Connect(refresh)
 	refresh()

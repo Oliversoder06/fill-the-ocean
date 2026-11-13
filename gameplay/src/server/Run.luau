@@ -44,7 +44,8 @@
 -- to start the run over for the same team and map while everyone stays (client/Admin).
 -- A run nobody has played yet (RunSave.wantsIntro) opens on the intro: phase "intro" from IntroAt
 -- (client/Intro, shared/IntroCut) until everyone has watched it or anyone skips it (Intro remote);
--- time played counts from when play starts.
+-- time played counts from when play starts. A full ocean plays the ending: phase "ending" from
+-- EndingAt (client/Ending, shared/EndCut), the same way; then everyone goes to the lobby.
 -- Session: in a reserved server the lobby's ticket gives the map, the save key and the party; in
 -- Studio, workspace attribute StudioMap (default map1), the players present at the start are the
 -- team, and there is no party wait.
@@ -65,6 +66,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Format = require(ReplicatedStorage.Shared.Format)
 local Ladder = require(ReplicatedStorage.Shared.Ladder)
 local Boosts = require(ReplicatedStorage.Shared.Boosts)
+local EndCut = require(ReplicatedStorage.Shared.EndCut)
 local Gadgets = require(ReplicatedStorage.Shared.Gadgets)
 local Honeycomb = require(ReplicatedStorage.Shared.Honeycomb)
 local IntroCut = require(ReplicatedStorage.Shared.IntroCut)
@@ -108,8 +110,8 @@ local TICKET_WAIT = 10 -- seconds to keep looking for the lobby's ticket
 local LOOK_INTERVAL = 0.1 -- seconds between accepted Look updates per player (clients send less often)
 local LOOK_LIMIT = 80 -- degrees up or down
 local RESET_COOLDOWN = 10 -- seconds between admin run resets (each rebuilds the world and saves)
-local INTRO_LEAD = 1.5 -- seconds between the intro phase and its first frame, so every client is ready
-local INTRO_SLACK = 15 -- seconds past the intro's length after which play starts anyway
+local INTRO_LEAD = 1.5 -- seconds between a cutscene's phase and its first frame, so every client is ready
+local INTRO_SLACK = 15 -- seconds past a cutscene's length after which it is over anyway
 local AUTOSAVE_SECONDS = 60
 local CLOSE_SAVE_SECONDS = 25 -- BindToClose waits this long at most for the last save (Roblox allows 30)
 local END_SAVE_SECONDS = 15 -- the ending waits this long at most for the finished run to be stored
@@ -600,15 +602,17 @@ local function addRun(userId: number)
 	end
 end
 
--- The ocean is full: store the finished run, pay every member the map's Raindrops and send everyone
--- back to the lobby. The run stays finished here even if the store is slow (later saves carry it).
+-- The ocean is full: store the finished run and pay every member the map's Raindrops at once, while
+-- the ending cutscene plays (client/Ending); once it is over (everyone watched it, anyone skipped it
+-- or INTRO_SLACK after its length), everyone goes back to the lobby. The run stays finished here even
+-- if the store is slow (later saves carry it).
 -- Each member is paid once per run (Progress.clearMap), so an ending that runs again (the finished
 -- save never landed) can't pay twice; a member whose payment fails here is paid on their next lobby
 -- join (lobby/Profiles).
+local ending = { at = 0, done = {} :: { [Player]: boolean }, watched = false }
+
 local function endRun()
 	endBoost()
-	card("The ocean is full!")
-	local shownUntil = os.clock() + CARD_SECONDS
 	run.playBase, run.playSince = playSeconds(), nil
 	local save = run.save :: RunSave.Save
 	local map = run.map :: Maps.Map
@@ -627,14 +631,19 @@ local function endRun()
 			addRun(userId)
 		end)
 	end
-	task.wait(math.max(0, shownUntil - os.clock()))
+	local over = ending.at + EndCut.length + INTRO_SLACK
+	while not ending.watched and workspace:GetServerTimeNow() < over do
+		task.wait(0.25)
+	end
 	setPhase("done")
 	sendToLobby(Players:GetPlayers(), "ocean full")
 end
 
 local function checkFull()
 	if run.phase == "playing" and run.current >= run.target - 1e-6 then
-		setPhase("ending") -- stops further pours; endRun stores and ends the run
+		ending.at = workspace:GetServerTimeNow() + INTRO_LEAD
+		setGlobal("EndingAt", ending.at)
+		setPhase("ending") -- stops further pours; endRun stores the run and ends it after the cutscene
 		task.spawn(endRun)
 	end
 end
@@ -1072,25 +1081,35 @@ local function onAdmin(player: Player, value: unknown)
 	jumpFill(value)
 end
 
--- Intro("done") when a client's intro has played to its end, Intro("skip") from its Skip button
--- (which shows IntroCut.skipAfter in): a skip ends it for everyone.
+-- Intro("done") when a client's cutscene (the intro, or the ending) has played to its end,
+-- Intro("skip") from its Skip button (which shows the cut's skipAfter in): a skip ends it for everyone.
 local function onIntro(player: Player, what: unknown)
 	local state = states[player]
-	if not state or run.phase ~= "intro" or not allow(state, "intro", 2) then
+	local cut = if run.phase == "intro" then { at = intro.at, done = intro.done, skipAfter = IntroCut.skipAfter, over = endIntro }
+		elseif run.phase == "ending" then {
+			at = ending.at,
+			done = ending.done,
+			skipAfter = EndCut.skipAfter,
+			over = function()
+				ending.watched = true
+			end,
+		}
+		else nil
+	if not state or not cut or not allow(state, "intro", 2) then
 		return
 	end
 	if what == "skip" then
-		if workspace:GetServerTimeNow() - intro.at >= IntroCut.skipAfter then
-			endIntro()
+		if workspace:GetServerTimeNow() - cut.at >= cut.skipAfter then
+			cut.over()
 		end
 	elseif what == "done" then
-		intro.done[player] = true
+		cut.done[player] = true
 		for other in states do
-			if not intro.done[other] then
+			if not cut.done[other] then
 				return
 			end
 		end
-		endIntro()
+		cut.over()
 	end
 end
 
@@ -1589,6 +1608,7 @@ function Run.start(oceanModel: Model)
 	Players.PlayerRemoving:Connect(function(player)
 		Vehicles.leave(player)
 		intro.done[player] = nil
+		ending.done[player] = nil
 		local state = states[player]
 		if state then
 			Payroll.payNow() -- the ticked pay so far goes into this save

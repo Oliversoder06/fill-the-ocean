@@ -60,7 +60,8 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     stand-in for the fat ball until
     `art/models/story/BaconHairFat.glb` is imported: the rig x20 with a `Belly` ball, a Motor6D `Neck`
     in the model's own axes and an Attachment `Mouth`; pivot at its feet), `Straw` and `Puddle`
-    (cylinders along X), `StarterGui.Cutscene`, `Lighting.IntroBlur` and `Audio.Intro*`,
+    (cylinders along X), `StarterGui.Cutscene`, `Lighting.IntroBlur`, `Audio.Intro*` and
+    `Audio.EndSmack` (the ending's slap),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects, `ChannelWave` included) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
     Clouds.
@@ -75,8 +76,9 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
   `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins put into the
   team's wallet) and `StudioFill` (a fraction 0-1:
   jumps the fill) and `StudioGolden` (true: starts a golden spring now) and `StudioIntro` (true: the
-  run opens on the intro, whatever the save) and `StudioIntroAt` (seconds: the intro holds on that
-  frame, for framing shots). Teleports and saving need the published game / Studio API access.
+  run opens on the intro, whatever the save) and `StudioIntroAt` / `StudioEndingAt` (seconds: the
+  intro or the ending holds on that frame, for framing shots; `StudioFill` 1 plays the real ending).
+  Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.
 

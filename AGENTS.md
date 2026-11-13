@@ -43,7 +43,10 @@ Server (`src/server/`):
   (`Act` remote), buying, publishing attributes. Most gameplay changes land here. A run nobody has
   played (`RunSave.wantsIntro`; in Studio only with `StudioIntro`) opens on the intro: phase `intro`
   from `IntroAt` until everyone is `done` or anyone skips (`Intro` remote), then `introSeen` and
-  play; time played counts from when play starts (`startPlaying`).
+  play; time played counts from when play starts (`startPlaying`). A full ocean (`checkFull`) plays
+  the ending: phase `ending` from `EndingAt`; the finished run is stored and paid at once, and once
+  everyone is `done` or anyone skips (the same `Intro` remote; at most `EndCut.length` + slack) the
+  phase is `done` and everyone goes to the lobby.
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it, on a `HeldGrip`
   Motor6D (hand to tool) that client `Bodies` turns to suit the carry pose.
 - `Map.luau`: checks the baked ocean model (the water itself moves by `shared/Zones.setFill`).
@@ -145,7 +148,8 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Admin.luau`: the admin window (F2), only for user ids in `shared/Admins.luau`: buttons jump the
   ocean's fill (`Hud.Admin.Body.Fill0` / `Fill50` / `Fill95` / `Fill100`, `Admin` remote),
   `Hud.Admin.Body.ResetRun` (pressed twice) starts the run over (`Admin "reset"`) and
-  `Hud.Admin.Body.PreviewIntro` plays the intro on the admin's own screen (`Intro.preview`).
+  `Hud.Admin.Body.PreviewIntro` / `PreviewEnding` play a cutscene on the admin's own screen
+  (`Intro.preview`, `Ending.preview`).
 - `Purchase.luau`: the purchase moment's sounds and coins, `Purchase.landed` (from `Honeycomb`):
   a sting climbing per level of an upgrade, coins fly from the honeycomb's money into the hex, a chime
   and "NEW!" stamp (`Templates.BoughtStamp`) on a first; `Purchase.deny` shakes a button; new-tool
@@ -163,29 +167,41 @@ Client (`src/client/`, all started from `init.client.luau`):
 - `Music.luau`: the map's track, a faster final-push track (last 5% of the ocean) and a calm
   track for waiting (`Cues.musicTrack`); crossfades, ducks under cards and purchases
   (`Music.duck`), plays through `SoundService.Music`; `Music.hush` silences it (the intro).
-- `Intro.luau`: the intro cutscene (`shared/IntroCut`, `shared/IntroClips`) while Phase is `intro`,
-  on the server's clock from `IntroAt`: a local scene in `workspace.IntroScene`: a copy of your
-  avatar walks up the beach on its own walk animation (its Animator, stepped by the distance
-  walked: no foot slide), stretches, sits and lies down on a copy of the lounger turned to the sea
-  (the place's one hidden; `IntroClips.lie`'s two clips); the normal-size `Story.BaconRig` strolls
+- `Cutscene.luau`: the story cutscenes' player: `Cutscene.start({ Intro.def, Ending.def })` plays a
+  scene's cut (shared data: shots, sounds, shakes, lids, blur, black, logo, music) while Phase is its
+  phase, on the server's clock from its start attribute; the shared pieces in `workspace.<Name>Scene`
+  (a copy of your avatar, the lounger turned to the sea, `Story.BaconRig`), the camera (a spline take
+  or eased keys, a level horizon), sounds, overlays, Skip, the screen taken (HUD, chat, prompts,
+  touch controls off; every character hidden every frame: teammates who spawn, stream in or load
+  accessories late never show; your character anchored at `IntroCut.places.stand`, R6 standing on
+  its legs: `HipHeight` is only an offset there), helpers (`walk`, `curve`, `along`, `follow`,
+  `setWater`, `bake`, `copyStory`, `copyPart`). A cut starts once the beach under it has streamed in
+  (`StreamingEnabled`); the ground is never guessed (no ground errors loudly). A cut with a
+  `handover` gives the game its view back there; one without ends on black and holds it (15 s at
+  most) for the lobby. Its end or Skip tells the server (`Intro` remote); the phase leaving the cut's
+  ends it. `Cutscene.preview(def)` (the admin window) plays one from now on this client only.
+  Studio: the scene's hold attribute (`StudioIntroAt`, `StudioEndingAt`) holds it on one second.
+- `Intro.luau`: the intro scene (`Intro.def`, `shared/IntroCut`, `shared/IntroClips`), played by
+  `Cutscene` while Phase is `intro` from `IntroAt`: your copy walks up the beach on its own walk
+  animation (its Animator, stepped by the distance walked: no foot slide), stretches, sits and lies
+  down on the lounger (`IntroClips.lie`'s two clips); the normal-size `Story.BaconRig` strolls
   onto the beach on the R6 walk, sits and plays in the sand (`Story.SandPile` grows); one spline
   camera take ends in your eyes as they close (your copy's head fades as the camera goes in). The
   water is full, then dry, by `Zones.setFill`; `Story.BaconFat` drinks the `Puddle` through a
   bendy `Straw`, turns to you, burps (the whole sound, plain: `Audio.IntroBurp` has no effects),
   rolls for the beach faster and faster and its slope throws him past you and off over the island
-  (`IntroCut.flight`); you sit up and lean out to follow him, then turn back to the sea. `StarterGui.Cutscene`
-  (eyelids, logo, Skip), `Lighting.IntroBlur`, `Audio.Intro*`; the HUD, chat, prompts, touch
-  controls and every character are off meanwhile (re-hidden every frame: teammates who spawn,
-  stream in or load accessories late never show; only your own copy does) and your character
-  waits anchored at `IntroCut.places.stand` (R6 stands on its legs: `HipHeight` is only an offset
-  there). It starts once the beach under the scene has streamed in (`StreamingEnabled`); the ground
-  it stands on is never guessed (no ground errors loudly). At `IntroCut.handover` the camera becomes the game's own first-person
-  view at that exact spot (focus and zoom measured off the camera at the start), the HUD comes back
-  and the tool swings up (`Viewmodel.swingIn`); play starts at `IntroCut.length`. Its end or Skip
-  tells the server; the phase leaving `intro` tears it down. `Intro.preview()` (the admin window)
-  plays it from now on this client only while the run goes on: the server is never told, and your
-  character and view go back to where they were. Studio: `StudioIntroAt` holds the cut on one
-  second (the server still ends the intro phase on its own clock).
+  (`IntroCut.flight`); you sit up and lean out to follow him, then turn back to the sea.
+  `StarterGui.Cutscene` (eyelids, logo, Skip), `Lighting.IntroBlur`, `Audio.Intro*`. At
+  `IntroCut.handover` the camera becomes the game's own first-person view at that exact spot (focus
+  and zoom measured off the camera at the start), the HUD comes back and the tool swings up
+  (`Viewmodel.swingIn`); play starts at `IntroCut.length`.
+- `Ending.luau`: the ending scene (`Ending.def`, `shared/EndCut`), played by `Cutscene` while Phase is
+  `ending` from `EndingAt`: you lie on the lounger by the full ocean watching the bacon-hair stroll
+  down to the water's edge, sit (`IntroClips.sandSit`) and dip a straw in (`Story.Straw`, thinned);
+  you get up (the lie-down backwards, `EndCut.getUp`), march over on your own walk and slap him
+  (`IntroClips.slap`, `Audio.EndSmack`); he flies past the camera and out over the sea
+  (`EndCut.flown`, real gravity) and is gone under it far out; the view rises over your full ocean;
+  black and the logo, held until the lobby takes over.
 - `Window.luau`: the shared window open/close (frame pops in, then parts marked `Reveal` pop in
   layer by layer; timing in `shared/Reveal.luau`).
 - `Hotbar.luau`: icon-only slots (no boxes, no glow; the ones not in hand sit at
@@ -303,14 +319,18 @@ Shared (`src/shared/`, pure unless noted):
   and music tracks, `sounds`, `shakes`, `handover`, and `value` / `segment` / `shot` / `walked` /
   `puddleLeft` / `rolled`, and his roll and flight: `rideHeight` (a ball resting on the measured
   `places.shore` profile), `flight(radius, gravity)` (the run-up, then rolling physics up the shore
-  and a free flight under `Workspace.Gravity`; energy never grows) and `ballAt`. `IntroClips.luau` (pure, tested): the walks (Roblox's own: your avatar's
+  and a free flight under `Workspace.Gravity`; energy never grows) and `ballAt`. `EndCut.luau` (pure,
+  tested): the ending as data in IntroCut's shape (`beats`, `places`, `shots`, tracks, `sounds`,
+  `shakes`, no `handover`), getting up (`getUp`, `getUpTimes`: the lie-down backwards through its own
+  moments), his launch (`launch`, `flown`: real gravity). `IntroClips.luau` (pure, tested): the walks (Roblox's own: your avatar's
   and the R6 one, with the pace their feet match), the tired `slump` layer, `lie(anatomy, seat,
   watch)` (two clips built for your body: the stand (stretch, yawn, step round) and the lie (sit,
   legs up, lie back, watch, doze); their hips and legs solved by hand in 3D (`solved`) for any
   hip-knee-ankle leg, whichever way the runtime reads the foot, or a leg that can't bend (R6:
   swung whole at the hip, its foot kept on the sand or the cushion): planted feet stay flat on the sand,
   steps lift over an arc, the legs swing up over the cushion and the heels rest on it, sized from
-  the foot part's box), and the bacon-hair's `sandSit` / `sandPlay`; `tests/IntroClips.spec` lints
+  the foot part's box), the bacon-hair's `sandSit` / `sandPlay`, and the ending's `slap(anatomy)`
+  (a Hit at `slapHit`; no forearm or chest keys on a body without them); `tests/IntroClips.spec` lints
   them on R15 (also a tall R15 and an R15 on tall block feet, read as a plain chain) and R6 (the
   lie-down too: `an_r6_avatar_lies_down_too`), and
   checks the feet stay flat and never go into the sand or the cushion, and that they line up with
@@ -365,7 +385,8 @@ The server publishes state as attributes; the client only reads them.
   decorations the run's milestones brought back), `RocksBroken` (`"1,3"`), `Golden`
   (area id of the golden spring, 0 for none) and `GoldenEndsAt`, `LastPour`
   (`"<areaId>@<litres>@<serverTime>"`, set on every accepted `Act` pour; `shared/PourFlow`), `IntroAt`
-  (server time of the intro's first frame, `shared/IntroCut`); vent parts carry `VentState`
+  (server time of the intro's first frame, `shared/IntroCut`) and `EndingAt` (the ending's,
+  `shared/EndCut`); vent parts carry `VentState`
   (`warn` / `burst`) and `VentAt`. `Sweeps` is published with the
   boost applied. `BuildingLevel_<id>` (the team's upgrades per building, nil until built); a placed
   building (`Plots.PlotN.Building`) carries `Clogged`; `Town.Aqueduct_<side>` carries `Flowing`.
@@ -404,9 +425,9 @@ The server publishes state as attributes; the client only reads them.
   while on foot within reach of your own truck by the water; rate-limited), `Look` (camera pitch in degrees, range-checked and
   rate-limited), `Admin` (a fill fraction 0-1, or `"reset"`: the run starts over live for the same
   team and map, at most once per 10 s; the server checks `shared/Admins` and only acts
-  while Phase is `playing`), `Intro` (`"done"` at the cut's end, `"skip"` from Skip: only while
-  Phase is `intro`, a skip only from `IntroCut.skipAfter`, and it ends the intro for everyone;
-  rate-limited), `Card` (server to client).
+  while Phase is `playing`), `Intro` (a story cutscene's `"done"` at its end, `"skip"` from Skip:
+  only while Phase is `intro` or `ending`, a skip only from the cut's `skipAfter`, and it ends the
+  cutscene for everyone; rate-limited), `Card` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish` (a player's) or `publishTeam` (the team's). A new remote: add it to
   `default.project.json` AND to the `remote(...)` list in `Run.start`, validate its arguments, and
   tell the owner to restart `rojo serve` (a running Rojo does not reload the project file; the
