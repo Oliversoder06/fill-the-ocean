@@ -70,6 +70,60 @@ function tests.funnel_fields_listed(t)
 	t.expectEq(Analytics.validFields(Config, Analytics.FUNNEL_FIELDS.Honeycomb_v1, { Source = "Mouse", Stage = "F0" }), false)
 end
 
+-- The lobby journey branches (host / join, new / saved run); Roblox takes 2-10 stages of 1-10 nodes,
+-- names without commas or quotes, node names not starting with "__".
+function tests.journeys_fit_roblox_rules(t)
+	for id, stages in Analytics.JOURNEYS do
+		t.expectEq(#stages >= 2 and #stages <= 10, true, `{id}: 2-10 stages`)
+		t.expectEq(id:match("^[%w%.%-_]+$") ~= nil and #id <= 50 and id:sub(1, 1) ~= "_", true, `{id}: a valid name`)
+		for _, nodes in stages do
+			t.expectEq(#nodes >= 1 and #nodes <= 10, true, `{id}: 1-10 nodes a stage`)
+			for _, node in nodes do
+				t.expectEq(node:find("[,\"'\n]") == nil and node:sub(1, 2) ~= "__" and #node <= 50, true, `{id}.{node}: a valid node name`)
+			end
+		end
+	end
+	local lobby = Analytics.JOURNEYS.Lobby_v1
+	t.expectEq(table.concat(lobby[2], ","), "Hosted,JoinedParty")
+	t.expectEq(table.concat(lobby[3], ","), "NewRun,LoadedRun,InParty")
+end
+
+function tests.journey_stage_of_a_node(t)
+	t.expectEq(Analytics.journeyStage("Lobby_v1", "LobbyLoaded"), 1)
+	t.expectEq(Analytics.journeyStage("Lobby_v1", "JoinedParty"), 2)
+	t.expectEq(Analytics.journeyStage("Lobby_v1", "InParty"), 3)
+	t.expectEq(Analytics.journeyStage("Lobby_v1", "PartyStarted"), 5)
+	t.expectEq(Analytics.journeyStage("Lobby_v1", "Nope"), nil)
+	t.expectEq(Analytics.journeyStage("Nope", "LobbyLoaded"), nil)
+end
+
+function tests.lobby_events_listed(t)
+	t.expectEq(Analytics.valid(Config, "PartyLaunched", { PartySize = "2", RunKind = "Continue" }), true)
+	t.expectEq(Analytics.valid(Config, "PartyLaunched", { PartySize = "9", RunKind = "New" }), false)
+	t.expectEq(Analytics.valid(Config, "CountdownCancelled", { PartySize = "1", CancelWhy = "LeftGame" }), true)
+	t.expectEq(Analytics.valid(Config, "RunDeleted", { RunTeam = "Team" }), true)
+	t.expectEq(Analytics.valid(Config, "SessionEnd", { Where = "Lobby", Doing = "Choosing", Stage = "Lobby" }), true)
+	t.expectEq(Analytics.valid(Config, "SessionEnd", { Where = "Lobby", Doing = "Countdown", Stage = "Lobby" }), true)
+end
+
+function tests.economy_fields_listed(t)
+	t.expectEq(table.concat(Analytics.ECONOMY_FIELDS, ","), "Stage")
+	t.expectEq(Analytics.validFields(Config, Analytics.ECONOMY_FIELDS, { Stage = "Guide:4" }), true)
+end
+
+function tests.field_values_stay_far_under_roblox_limit(t)
+	local total, seen = 0, {}
+	for _, list in Analytics.fieldValues(Config) do
+		for _, value in list do
+			if not seen[value] then
+				seen[value] = true
+				total += 1
+			end
+		end
+	end
+	t.expectEq(total < 1000, true, `{total} distinct values (Roblox groups past 8,000 as Other)`)
+end
+
 function tests.every_field_value_is_listed(t)
 	local values = Analytics.fieldValues(Config)
 	for name, fields in Analytics.EVENTS do

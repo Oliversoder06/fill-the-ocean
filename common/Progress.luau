@@ -13,9 +13,15 @@ export type Data = {
 	-- Analytics (common/Analytics): the highest step sent per one-time funnel. Nil for a profile
 	-- that predates the funnels: it is never entered (only a brand-new one is, enterAnalytics).
 	funnels: { [string]: number }?,
+	-- os.time() a step of each funnel last rose: Roblox forgets a funnel after FUNNEL_EXPIRY without
+	-- an event in it (expiredFunnels).
+	funnelsAt: { [string]: number }?,
 }
 
 local Progress = {}
+
+-- Roblox: a player with no event in a funnel for 180 days counts as new in it again.
+Progress.FUNNEL_EXPIRY = 180 * 24 * 3600
 
 -- Owner decision D5: no expiry, at most this many saved runs per player; the oldest drops off.
 Progress.MAX_RUNS = 10
@@ -80,6 +86,15 @@ function Progress.sanitize(raw: any): Data
 				end
 			end
 			data.funnels = funnels
+			if type(raw.funnelsAt) == "table" then
+				local at = {}
+				for id, time in raw.funnelsAt do
+					if type(id) == "string" and funnels[id] and type(time) == "number" and time == time then
+						at[id] = time
+					end
+				end
+				data.funnelsAt = at
+			end
 		end
 	end
 	return data
@@ -164,9 +179,10 @@ function Progress.enterAnalytics(raw: any): Data
 end
 
 -- The funnel steps sent (funnel id -> highest step), merged by the highest: a stale lower count
--- from another place never lowers one. A player never entered stays out. Returns a new table and
--- whether anything rose (false: nothing to write).
-function Progress.advanceFunnels(raw: any, steps: { [string]: number }): (Data, boolean)
+-- from another place never lowers one. A player never entered stays out. `now` (os.time()): stamps
+-- each funnel that rose (funnelsAt). Returns a new table and whether anything rose (false: nothing
+-- to write).
+function Progress.advanceFunnels(raw: any, steps: { [string]: number }, now: number?): (Data, boolean)
 	local data = Progress.sanitize(raw)
 	local funnels = data.funnels
 	if not funnels then
@@ -177,9 +193,26 @@ function Progress.advanceFunnels(raw: any, steps: { [string]: number }): (Data, 
 		if type(step) == "number" and step % 1 == 0 and step > (funnels[id] or 0) then
 			funnels[id] = step
 			changed = true
+			if now then
+				data.funnelsAt = data.funnelsAt or {}
+				data.funnelsAt[id] = now
+			end
 		end
 	end
 	return data, changed
+end
+
+-- The funnels whose last step is older than FUNNEL_EXPIRY at `now`: Roblox counts the player as new in
+-- them, so their later steps would fill in fake earlier ones; they get no more steps. A funnel without
+-- a stamp never expires.
+function Progress.expiredFunnels(raw: any, now: number): { [string]: boolean }
+	local expired = {}
+	for id, at in Progress.sanitize(raw).funnelsAt or {} do
+		if now - at > Progress.FUNNEL_EXPIRY then
+			expired[id] = true
+		end
+	end
+	return expired
 end
 
 return Progress

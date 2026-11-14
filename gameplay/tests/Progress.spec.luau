@@ -245,4 +245,27 @@ function tests.sanitize_repairs_bad_funnel_steps(t)
 	t.expectEq(type(Progress.sanitize({ funnels = "x" }).funnels), "nil", "broken: treated as never entered")
 end
 
+-- Roblox forgets a player's funnel after 180 days without an event in it and counts them as new
+-- (filling in the earlier steps). Each funnel remembers when a step last rose, so we stop there.
+function tests.advance_funnels_stamps_what_rose(t)
+	local data = Progress.advanceFunnels(Progress.enterAnalytics(nil), { Onboarding = 3, Tool_v1 = 1 }, 1000)
+	local at = data.funnelsAt :: any
+	t.expectEq(at.Onboarding, 1000)
+	t.expectEq(at.Tool_v1, 1000)
+	local later = Progress.advanceFunnels(data, { Onboarding = 3, Tool_v1 = 2 }, 5000)
+	t.expectEq((later.funnelsAt :: any).Onboarding, 1000, "no new step: no new stamp")
+	t.expectEq((later.funnelsAt :: any).Tool_v1, 5000)
+	t.expectEq(Progress.sanitize(later).funnelsAt.Tool_v1, 5000, "kept by sanitize")
+end
+
+function tests.expired_funnels_after_180_days(t)
+	local day = 24 * 3600
+	local data = Progress.advanceFunnels(Progress.enterAnalytics(nil), { Onboarding = 3, Tool_v1 = 1 }, 0)
+	data = Progress.advanceFunnels(data, { Tool_v1 = 2 }, 100 * day)
+	local expired = Progress.expiredFunnels(data, 200 * day)
+	t.expectEq(expired.Onboarding, true, "no step for 200 days")
+	t.expectEq(expired.Tool_v1, nil, "a step 100 days ago")
+	t.expectEq(next(Progress.expiredFunnels(Progress.enterAnalytics({ funnels = { Onboarding = 2 } }), 999 * day)), nil, "no stamp yet: never expired")
+end
+
 return tests

@@ -61,6 +61,42 @@ Analytics.FUNNEL_FIELDS = {
 	Honeycomb_v1 = { "Source", "Stage" },
 }
 
+-- Journeys (Roblox's branching funnels: a Sankey of the paths players take). Each journey must ALSO be
+-- created in Creator Hub > Analytics > Journeys with exactly these stages and nodes (docs/analytics.md
+-- has the config); a node Roblox doesn't know advances nothing. Stages in order, each stage's nodes are
+-- alternatives meaning equal progress. One session per lobby visit; the Users view shows each player's
+-- first time through.
+--   Lobby_v1: where a new player gets lost between loading the lobby and starting a run.
+--     LobbyLoaded -> Hosted (first on an empty pad) | JoinedParty (got on someone's party)
+--     -> NewRun (the host set up a new party) | LoadedRun (the host loaded a saved run) | InParty (joined
+--        a set-up party) -> CountdownStarted -> PartyStarted (the teleport goes)
+Analytics.JOURNEYS = {
+	Lobby_v1 = {
+		{ "LobbyLoaded" },
+		{ "Hosted", "JoinedParty" },
+		{ "NewRun", "LoadedRun", "InParty" },
+		{ "CountdownStarted" },
+		{ "PartyStarted" },
+	},
+}
+
+-- The stage of `node` in journey `id`, or nil when it isn't one of its nodes.
+function Analytics.journeyStage(id: string, node: string): number?
+	local stages = Analytics.JOURNEYS[id]
+	if not stages then
+		return nil
+	end
+	for index, nodes in stages do
+		if table.find(nodes, node) then
+			return index
+		end
+	end
+	return nil
+end
+
+-- Economy events' fields: where the player was when the coins moved.
+Analytics.ECONOMY_FIELDS = { "Stage" }
+
 -- Custom events and their fields, in field order (Roblox's CustomField01..03). Every value comes from
 -- fieldValues: never a name, a raw number or anything a client typed.
 --   SessionEnd (minutes): once per player per place visit, unless they teleported on (not a quit).
@@ -69,6 +105,9 @@ Analytics.FUNNEL_FIELDS = {
 --   Blocked (1): a press that bought nothing, why. UpgradeShort (share of the price missing).
 --   ItemBought, BuildingBuilt, VehicleCalled (1): automation and gear adoption.
 --   LoadTime (seconds), SaveUnavailable (1; must stay 0), ClientFps (average fps).
+--   PartyLaunched (1, per member as the teleport goes): the party's size and whether it starts a new
+--   run, continues a saved one or starts one over. CountdownCancelled (1): someone left during the
+--   3-2-1. RunDeleted (1): a Saved Runs Delete (a solo run erased, or leaving a team's).
 Analytics.EVENTS = {
 	SessionEnd = { "Where", "Doing", "Stage" },
 	TripEnd = { "Outcome", "Area", "Stage" },
@@ -84,6 +123,9 @@ Analytics.EVENTS = {
 	LoadTime = { "Place", "Band", "WaitedOn" },
 	SaveUnavailable = { "Place" },
 	ClientFps = { "Band" },
+	PartyLaunched = { "PartySize", "RunKind" },
+	CountdownCancelled = { "PartySize", "CancelWhy" },
+	RunDeleted = { "RunTeam" },
 }
 
 -- Events that may never be crowded out by a flood of others (Rules.allowed).
@@ -97,7 +139,10 @@ Analytics.BANDS = {
 	teamSize = { edges = { 2, 3, 4 }, labels = { "1", "2", "3", "4+" } } :: Bands,
 }
 
-Analytics.DOING = { "Loading", "Intro", "Ending", "Idle", "Honeycomb", "Driving", "Hosing", "Scooping", "Pouring", "Carrying", "Roaming", "Party" }
+-- What a player was doing. In the lobby: Roaming (on no pad), Choosing (hosting, the pad screen open),
+-- Waiting (in a party not yet going), Countdown (the 3-2-1 or the launch), Loading (no profile yet).
+-- "Party" is the lobby's value before those (2026-11-13), kept so old SessionEnds still read.
+Analytics.DOING = { "Loading", "Intro", "Ending", "Idle", "Honeycomb", "Driving", "Hosing", "Scooping", "Pouring", "Carrying", "Roaming", "Party", "Choosing", "Waiting", "Countdown" }
 Analytics.SOURCES = { "Key", "Button", "Goal" } -- how the honeycomb was opened (Honeycomb_v1 step 1)
 Analytics.REASONS = { "CantAfford", "Locked", "GateLocked", "NotBuilt" } -- Blocked
 Analytics.WAITED_ON = { "Data", "Party", "Save", "None" } -- LoadTime: what the join waited on
@@ -150,6 +195,10 @@ function Analytics.fieldValues(config: any): { [string]: { string } }
 		Band = bands,
 		WaitedOn = Analytics.WAITED_ON,
 		Source = Analytics.SOURCES,
+		PartySize = Analytics.BANDS.teamSize.labels,
+		RunKind = { "New", "Continue", "Restart" },
+		CancelWhy = { "LeftPad", "LeftGame" },
+		RunTeam = { "Solo", "Team" },
 	}
 end
 

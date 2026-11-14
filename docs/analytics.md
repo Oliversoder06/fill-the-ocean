@@ -18,7 +18,7 @@ Two sinks:
 | `common/TelemetryCore.luau` | The only caller of AnalyticsService, for both places. Checks names, spends the rate budget, echoes in Studio, keeps and writes the record, saves funnel steps, counts server errors. |
 | `gameplay/src/server/Telemetry.luau` | The run's facts. `Run`, `Buildings` and `Vehicles` tell it the moments; it polls each player once a second. |
 | `gameplay/src/client/Telemetry.luau` | Client reports: fps, device, errors and warnings. `Honeycomb` and `Guide` report through it. |
-| `lobby/src/server/Telemetry.luau` | The first onboarding steps, lobby LoadTime, SaveUnavailable and SessionEnd. |
+| `lobby/src/server/Telemetry.luau` | The first onboarding steps, the Lobby_v1 journey, PartyLaunched, CountdownCancelled, RunDeleted, lobby LoadTime, SaveUnavailable and SessionEnd. `Queue` tells it the pad moments. |
 | `gameplay/tools/analytics.luau`, `AnalyticsReport.luau` | The report (Open Cloud pull + pure report, spec'd in `tests/AnalyticsReport.spec`). |
 
 Analytics never breaks the game: every public Telemetry function catches its own errors and warns.
@@ -66,6 +66,42 @@ moment the guide ends.
 Roblox keeps only each player's 10 most recent recurring-funnel sessions. Honeycomb totals come from
 the record, not the funnel.
 
+Roblox forgets a player's funnel after **180 days** with no event in it and counts them as new
+(filling in the earlier steps). Each one-time funnel remembers when its step last rose
+(`Progress.funnelsAt`); past 180 days that funnel gets no more steps (`Progress.expiredFunnels`).
+
+## Journeys (branching paths)
+A journey is a funnel that can branch: Creator Hub shows a Sankey diagram of the paths players took
+and where each path stops. One journey so far, sent from the lobby once per visit:
+
+| Journey | Stages (nodes in a stage are alternatives) |
+|---|---|
+| Lobby_v1 | LobbyLoaded → Hosted / JoinedParty → NewRun / LoadedRun / InParty → CountdownStarted → PartyStarted |
+
+- **Hosted**: first on an empty pad. **JoinedParty**: got on someone's party.
+- **NewRun**: the host set up a new party. **LoadedRun**: the host loaded a saved run. **InParty**: a
+  joiner (sent with JoinedParty).
+
+Use the **Users** view filtered to new users for first-timers, and the **Sessions** view for every
+lobby visit.
+
+**Owner step (once):** done 2026-11-14 (created in Creator Hub on "Save the Ocean", universe
+10776414287; Journeys is in beta). A journey only counts once it exists in Creator Hub with exactly
+these names. To make another: Analytics → Journeys → Create, with the stages and nodes in order.
+`Lobby_v1`'s `JourneysConfig` value, for reference:
+
+```json
+{ "stages": [
+  { "stage_index": 1, "nodes": [{ "node_name": "LobbyLoaded" }] },
+  { "stage_index": 2, "nodes": [{ "node_name": "Hosted" }, { "node_name": "JoinedParty" }] },
+  { "stage_index": 3, "nodes": [{ "node_name": "NewRun" }, { "node_name": "LoadedRun" }, { "node_name": "InParty" }] },
+  { "stage_index": 4, "nodes": [{ "node_name": "CountdownStarted" }] },
+  { "stage_index": 5, "nodes": [{ "node_name": "PartyStarted" }] }
+] }
+```
+
+Editing a journey in Creator Hub makes a new version; players keep the version they started on.
+
 ## Custom events
 
 | Event | Value | Fields | Answers |
@@ -82,14 +118,22 @@ the record, not the funnel.
 | LoadTime | seconds | Place, Band, WaitedOn | slow joins |
 | SaveUnavailable | 1 | Place | **must be 0**; alert on it |
 | ClientFps | average fps | Band | stuttering devices (a silent quit) |
+| PartyLaunched | 1 (per member) | PartySize (1/2/3/4+), RunKind (New/Continue/Restart) | do new players go solo; do players come back to saved runs |
+| CountdownCancelled | 1 | PartySize, CancelWhy (LeftPad/LeftGame) | parties falling apart in the 3-2-1 |
+| RunDeleted | 1 | RunTeam (Solo/Team) | players throwing saves away |
 
 **Stage** goes on most events: `Lobby`, `Loading`, `Intro`, `Guide:1` … `Guide:6` while the guide
-shows, then fill bands `F0` … `F100`. **Doing** is `Loading`, `Intro`, `Ending`, `Idle` (60 s still),
-`Honeycomb`, `Driving`, `Hosing`, `Scooping`, `Pouring`, `Carrying`, `Roaming` or `Party` (lobby pad).
+shows, then fill bands `F0` … `F100`. **Doing** in a run is `Loading`, `Intro`, `Ending`, `Idle` (60 s
+still), `Honeycomb`, `Driving`, `Hosing`, `Scooping`, `Pouring`, `Carrying` or `Roaming`. In the lobby
+it is `Loading`, `Roaming`, `Idle`, or a pad state: `Choosing` (hosting, the pad screen open),
+`Waiting` (in a party not yet going) or `Countdown`. `Party` is the lobby's value from the first
+release (before the pad states).
 
 ## Economy
 One currency, `Coins` (the team's wallet). Robux is left to Roblox's Monetization pages. A money
-move is reported only with a named reason; that is the transaction type.
+move is reported only with a named reason; that is the transaction type. Every economy event carries
+**Stage** (where the player was when the coins moved), so sources and sinks break down by guide step
+and fill band.
 - **Sources** (summed per player, sent every 5 minutes and on leave):
   - Pour, Hose and Vehicle: the acting player's own income.
   - Staff and Buildings: the team's income. It has no player, so it goes out as the present member
@@ -135,6 +179,9 @@ release.
 2. Broken? The Error Report, then `errors` and each session's errors and warnings.
 3. New players leaving? The report's "gone within 60 s / 180 s" and onboarding reach, the Onboarding
    funnel's steepest drop, and SessionEnd filtered to Stage `Guide:*` (which guide step they quit on).
+   Lost before PartyStarted: the Lobby_v1 journey (Users view, new users) shows which path stops, and
+   SessionEnd with Stage `Lobby` by Doing says whether they never reached a pad (Roaming/Idle), stalled
+   on the pad screen (Choosing) or waited for a party that never went (Waiting).
 4. The core loop? TripEnd by Outcome (many Quit = carrying is a chore at that stage) and TripEnd
    seconds by Area.
 5. Progress stalling? Tool_v1, Progression_v1, Milestones_v1, GateOpened and Milestone minutes
@@ -148,3 +195,14 @@ release.
 - Live: Creator Hub → Analytics → "View Events" shows events arriving within minutes (custom event
   charts take up to a day).
 - A new event, field value or step: add it to `common/Analytics` first, or the core warns and drops it.
+
+## Reading the dashboards right
+- **Cohorts:** funnels and journeys count a player on the day they **entered** (step 1), not the day
+  of each step. After changing a funnel or releasing a fix, start the date range on that day, or old
+  and new players mix.
+- **Funnel filters** (device, new user, custom fields) only use step 1.
+- **Roblox deletes event data 90 days after it last arrived.** Long-term trends come from the session
+  record.
+- **Limits** (checked by `tests/Analytics.spec`): 10 funnels (we use 5), 100 custom events (17), 3
+  fields an event, 8,000 field values in total before "Other" (about 140), 20 transaction types (10),
+  100 SKUs (33), 120 + 20 × players events a minute (we spend at most 60%).

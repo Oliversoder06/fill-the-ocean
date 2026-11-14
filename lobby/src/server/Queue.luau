@@ -206,9 +206,18 @@ local function padOf(player: Player): Pad?
 	return nil
 end
 
--- Whether the player stands in a party on a pad (lobby Telemetry's SessionEnd Doing).
-function Queue.inParty(player: Player): boolean
-	return padOf(player) ~= nil
+-- What the player is doing on a pad, for lobby Telemetry's SessionEnd Doing: "Countdown" (the 3-2-1 or
+-- the launch), "Choosing" (hosting, the pad screen open), "Waiting" (in a set-up party); nil off the pads.
+function Queue.doingOf(player: Player): string?
+	local pad = padOf(player)
+	if not pad then
+		return nil
+	elseif pad.counting or pad.launching then
+		return "Countdown"
+	elseif pad.host == player and not pad.settings and not pad.roster then
+		return "Choosing"
+	end
+	return "Waiting"
 end
 
 local function reset(pad: Pad)
@@ -471,6 +480,7 @@ local function countdown(pad: Pad, party: { Player }, title: string): boolean
 	local endsAt = workspace:GetServerTimeNow() + SessionRules.COUNTDOWN
 	pad.counting = true
 	publish(pad, endsAt)
+	Telemetry.countdown(party)
 	for _, p in party do
 		sendState(p, { kind = "countdown", title = title, endsAt = endsAt })
 	end
@@ -492,6 +502,7 @@ local function countdown(pad: Pad, party: { Player }, title: string): boolean
 	pad.counting = false
 	publish(pad)
 	if gone then
+		Telemetry.countdownCancelled(party, gone)
 		for _, p in pad.members do
 			if p.Parent and p ~= gone then
 				tell(p, `Countdown stopped: {gone.DisplayName} left.`)
@@ -511,12 +522,14 @@ end
 -- before the teleport, and it rides the hop. A launch that doesn't go keeps the party on the pad,
 -- held (no launch on full until the members change or the host presses Start; their next state
 -- opens the screen again); one that goes puts out whoever is still here after COOLDOWN. A stopped
--- countdown isn't held: the party changed.
+-- countdown isn't held: the party changed. `kind`: what the launch starts (analytics: New, Continue
+-- or Restart), read once prepare has decided it.
 local function launch(
 	pad: Pad,
 	party: { Player },
 	title: string,
-	prepare: () -> (RunTicket.Ticket?, string?, Arrival?, (() -> string?)?)
+	prepare: () -> (RunTicket.Ticket?, string?, Arrival?, (() -> string?)?),
+	kind: () -> string
 )
 	pad.launching = true
 	publish(pad)
@@ -539,7 +552,7 @@ local function launch(
 		end
 	end
 	if ticket then
-		Telemetry.partyStarted(party)
+		Telemetry.partyStarted(party, kind())
 		local screen = arrival :: Arrival
 		for _, p in party do
 			if p.Parent then
@@ -634,6 +647,7 @@ local function launchParty(pad: Pad)
 	local host = pad.host
 	local party = table.clone(pad.members)
 	local members = userIds(party)
+	local kind = "New"
 	launch(pad, party, mapName(settings.mapId), function()
 		local key = RunSave.key(settings.mapId, members)
 		local save, err = RunStore.load(key)
@@ -685,7 +699,10 @@ local function launchParty(pad: Pad)
 			end
 		end
 		local opens = if key == replaceKey then nil else save
+		kind = if key == replaceKey then "Restart" elseif played then "Continue" else "New"
 		return { mapId = settings.mapId, key = key, members = members }, nil, arrivalOf(opens, settings.mapId), commit
+	end, function()
+		return kind
 	end)
 end
 
@@ -712,6 +729,8 @@ local function launchSaved(pad: Pad, key: string)
 			return nil, problem
 		end
 		return { mapId = save.mapId, key = key, members = save.members }, nil, arrivalOf(save, save.mapId)
+	end, function()
+		return "Continue"
 	end)
 end
 
@@ -749,6 +768,7 @@ local function deleteRun(pad: Pad, player: Player, key: string)
 		return
 	end
 	tell(player, if solo then "Run deleted." else "You left that run. It stays saved for the others.")
+	Telemetry.runDeleted(player, solo)
 	if pad.host == player and pad.saved then
 		for i, run in pad.saved do
 			if run.key == key then
@@ -781,6 +801,7 @@ local function openParty(pad: Pad, player: Player, settings: SessionRules.Settin
 		then { members = replaced.members, percent = math.floor(math.clamp(fillOf(replaced, map), 0, 1) * 100) }
 		else nil
 	pad.offered = nil
+	Telemetry.lobby(player, "NewRun")
 	if settings.maxPlayers == 1 then
 		tell(player, "Starting your solo run!")
 	end
@@ -926,10 +947,13 @@ local function update(pad: Pad, touching: { Player })
 				pad.members = { p }
 				pad.settings = nil
 				pad.told[p] = "host"
+				Telemetry.lobby(p, "Hosted")
 				loadSaved(pad, p)
 			else
 				table.insert(pad.members, p)
 				pad.held = false
+				Telemetry.lobby(p, "JoinedParty")
+				Telemetry.lobby(p, "InParty")
 				local host = (pad.host :: Player).DisplayName
 				local settings = pad.settings
 				local percent = startsOverFor(pad, p)
@@ -1100,9 +1124,11 @@ local function onAction(player: Player, action: unknown, payload: unknown)
 		elseif not table.find(save.members, player.UserId) then
 			tell(player, "Only that run's team can load it.")
 		elseif #save.members == 1 then
+			Telemetry.lobby(player, "LoadedRun")
 			task.spawn(launchSaved, pad, payload :: string)
 		else
 			-- a team run: the pad opens to its team only, and launches once they are all on it
+			Telemetry.lobby(player, "LoadedRun")
 			pad.roster = { key = payload :: string, mapId = save.mapId, members = table.clone(save.members) }
 			local _, missing = SessionRules.loadError(save.members, { player.UserId })
 			tell(player, `Your team can get on the pad now. Waiting for {namesOf(missing)}.`)

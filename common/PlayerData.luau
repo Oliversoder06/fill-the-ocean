@@ -109,11 +109,11 @@ function PlayerData.enterAnalytics(userId: number): (Progress.Data?, string?)
 	end)
 end
 
--- The funnel steps sent this visit (Progress.advanceFunnels): one write as the player leaves, none
--- when nothing rose or they were never entered.
-function PlayerData.saveFunnels(userId: number, steps: { [string]: number }): (Progress.Data?, string?)
+-- The funnel steps sent this visit (Progress.advanceFunnels, stamped `now`): one write as the player
+-- leaves, none when nothing rose or they were never entered.
+function PlayerData.saveFunnels(userId: number, steps: { [string]: number }, now: number): (Progress.Data?, string?)
 	return update(userId, "save funnels", function(old)
-		local data, changed = Progress.advanceFunnels(old, steps)
+		local data, changed = Progress.advanceFunnels(old, steps, now)
 		return if changed then data else nil
 	end)
 end

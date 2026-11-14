@@ -11,6 +11,7 @@ local Admins = require(ReplicatedStorage.Shared.Admins)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Analytics = require(ReplicatedStorage.Common.Analytics)
 local PlayerData = require(ReplicatedStorage.Common.PlayerData)
+local Progress = require(ReplicatedStorage.Common.Progress)
 local TelemetryCore = require(ReplicatedStorage.Common.TelemetryCore)
 
 local POLL = 1 -- seconds between fact checks
@@ -226,7 +227,7 @@ function Telemetry.playerIn(player: Player)
 			return
 		end
 		if player.Parent then
-			TelemetryCore.track(player, isNew, data.funnels)
+			TelemetryCore.track(player, isNew, data.funnels, Progress.expiredFunnels(data, os.time()))
 		end
 	end)
 end
@@ -437,6 +438,10 @@ function Telemetry.start(runHooks: Hooks, remote: RemoteEvent)
 		config = Config,
 		admins = Admins,
 		balance = hooks.wallet,
+		stageOf = function(player: Player?): string
+			-- the team's coins (staff, buildings): the run's fill, no one's guide step
+			return if player and facts[player] then stage(player) else Analytics.stage(hooks.phase(), 0, hooks.fill())
+		end,
 		farewell = Telemetry.playerOut,
 	})
 	remote.OnServerEvent:Connect(onReport)

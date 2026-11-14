@@ -431,7 +431,8 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   launch runs `prepare` (checks; may ask the host), then `countdown` (SessionState `"countdown"`
   with `endsAt`; Leave is the one action taken meanwhile and stops it), then `commit` (New Game's
   erase, never before the count is done), then the teleport. `Profiles`, `Telemetry`: profiles and
-  analytics.
+  analytics (Queue tells Telemetry the pad moments for the `Lobby_v1` journey, PartyLaunched with the
+  launch's `kind`, CountdownCancelled, RunDeleted; `Queue.doingOf` gives SessionEnd's pad Doing).
 - `src/client/` (started from `init.client.luau`): `Session` (the pad screen, Confirm, HostBar;
   sunbaked-sea), and the feel, every number in `src/shared/LobbyCues.luau` (pure, tested from
   `gameplay/tests/LobbyCues.spec`): `Sfx` (one-shots from `ReplicatedStorage.Audio`: `need` at

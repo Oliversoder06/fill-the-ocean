@@ -37,6 +37,7 @@ export type Options = {
 	config: any, -- gameplay's Config (the lists in common/Analytics are built from it)
 	admins: { [number]: boolean },
 	balance: () -> number, -- the team's wallet, for economy events (the lobby has none: 0)
+	stageOf: (Player?) -> string, -- the Stage field for an economy event (nil: the team's)
 	farewell: (Player) -> (), -- the place's own leave (it calls TelemetryCore.leave); BindToClose runs it for whoever is left
 }
 
@@ -48,11 +49,13 @@ type Visit = {
 	counted: boolean, -- not an admin on the live game (whose events go nowhere): may stand in for the team
 	saves: boolean, -- writes the record and the funnels (a real account; never an admin on live)
 	tracked: boolean, -- in the one-time funnels (Progress.funnels)
+	closed: { [string]: boolean }, -- one-time funnels Roblox has forgotten them in (Progress.expiredFunnels): no more steps
 	sent: { [string]: number }, -- one-time funnel -> highest step sent
 	raised: boolean, -- a one-time step went out this visit (save the funnels on leave)
 	recurring: { [string]: { id: string, step: number } }, -- open recurring-funnel sessions
+	journeys: { [string]: { id: string, stage: number } }, -- this visit's journey sessions
 	cooldowns: { [string]: number },
-	income: { [string]: number }, -- reason -> coins not yet sent
+	income: { [string]: number }, -- "<reason>|<stage>" -> coins not yet sent
 	teleporting: boolean,
 	left: boolean,
 }
@@ -64,7 +67,7 @@ local values: { [string]: { string } } = {}
 local steps: { [string]: { string } } = {} -- funnel id -> steps (Onboarding too)
 local recurring: { [string]: boolean } = {}
 local visits: { [Player]: Visit } = {}
-local teamIncome: { [string]: number } = {} -- coins earned by no one player (staff, buildings)
+local teamIncome: { [string]: number } = {} -- "<reason>|<stage>" -> coins earned by no one player (staff, buildings)
 local window = { at = 0, normal = 0, protected = 0, held = 0 }
 local serverErrors: { [string]: number } = {}
 local serverErrorCount = 0
@@ -185,9 +188,11 @@ function TelemetryCore.join(player: Player, new: boolean, funnels: { [string]: n
 			counted = RunService:IsStudio() or not admin,
 			saves = real and not (admin and not RunService:IsStudio()),
 			tracked = funnels ~= nil,
+			closed = {},
 			sent = if funnels then table.clone(funnels) else {},
 			raised = false,
 			recurring = {},
+			journeys = {},
 			cooldowns = {},
 			income = {},
 			teleporting = false,
@@ -196,8 +201,9 @@ function TelemetryCore.join(player: Player, new: boolean, funnels: { [string]: n
 	end)
 end
 
--- The player's funnels became known after join (a profile that loaded late): enter them.
-function TelemetryCore.track(player: Player, new: boolean, funnels: { [string]: number }?)
+-- The player's funnels became known after join (a profile that loaded late): enter them. `expired`:
+-- funnels Roblox has forgotten them in (Progress.expiredFunnels), which get no more steps.
+function TelemetryCore.track(player: Player, new: boolean, funnels: { [string]: number }?, expired: { [string]: boolean }?)
 	guard("track", function()
 		local visit = visits[player]
 		if not visit then
@@ -209,6 +215,9 @@ function TelemetryCore.track(player: Player, new: boolean, funnels: { [string]: 
 			for id, step in funnels do
 				visit.sent[id] = math.max(visit.sent[id] or 0, step)
 			end
+		end
+		for id in expired or {} do
+			visit.closed[id] = true
 		end
 	end)
 end
@@ -233,7 +242,7 @@ function TelemetryCore.advance(player: Player, funnel: string, facts: { [string]
 		local visit = visits[player]
 		local list = steps[funnel]
 		assert(list and not recurring[funnel], `unknown one-time funnel {funnel}`)
-		if not (visit and visit.tracked) then
+		if not (visit and visit.tracked) or visit.closed[funnel] then
 			return
 		end
 		local from = visit.sent[funnel] or 0
@@ -304,6 +313,33 @@ function TelemetryCore.closeRecurring(player: Player, funnel: string)
 	end
 end
 
+-- Journey `id` (Analytics.JOURNEYS): the player reached `node`. One session per visit; a node of a
+-- stage already reached is not sent again (Roblox would ignore it, but it would spend the budget).
+function TelemetryCore.journey(player: Player, id: string, node: string)
+	guard(`journey {id}`, function()
+		local stage = Analytics.journeyStage(id, node)
+		assert(stage, `{node} isn't a node of journey {id} in common/Analytics`)
+		local visit = visits[player]
+		if not visit then
+			return
+		end
+		local open = visit.journeys[id]
+		if not open then
+			open = { id = HttpService:GenerateGUID(false), stage = 0 }
+			visit.journeys[id] = open
+		end
+		if stage <= open.stage or not spend(true) then
+			return
+		end
+		open.stage = stage
+		local session = open.id
+		send(visit, `journey {id} {stage} {node}`, function()
+			AnalyticsService:LogJourneyEvent(player, id, node, session)
+		end)
+		trail(visit, { k = "journey", s = `{id}:{node}`, m = true })
+	end)
+end
+
 -- Custom event `name` (Analytics.EVENTS) with `value` and its fields. `cooldown`: a key; the same
 -- key for this player goes once per Analytics.BLOCKED_COOLDOWN. `milestone`: kept in the trail
 -- whatever else it drops.
@@ -337,9 +373,14 @@ function TelemetryCore.event(player: Player, name: string, value: number, fields
 	end) == true
 end
 
-local function economy(visit: Visit, reason: string, amount: number, sku: string?)
+local function economy(visit: Visit, reason: string, amount: number, stage: string, sku: string?)
 	local flow = Analytics.MONEY[reason]
 	if not flow or not (amount > 0) then
+		return
+	end
+	local fields = { Stage = stage }
+	if not Analytics.validFields(options.config, Analytics.ECONOMY_FIELDS, fields, values) then
+		warn(`[Telemetry] economy Stage {stage} isn't listed in common/Analytics`)
 		return
 	end
 	amount = math.min(amount, Analytics.AMOUNT_MAX)
@@ -348,11 +389,15 @@ local function economy(visit: Visit, reason: string, amount: number, sku: string
 		return
 	end
 	local flowType = if flow == "source" then Enum.AnalyticsEconomyFlowType.Source else Enum.AnalyticsEconomyFlowType.Sink
-	send(visit, `money {flow} {reason} {amount}{if sku then ` {sku}` else ""}`, function()
-		AnalyticsService:LogEconomyEvent(visit.player, flowType, Analytics.CURRENCY, amount, balance, reason, sku or "")
+	send(visit, `money {flow} {reason} {amount}{if sku then ` {sku}` else ""} Stage={stage}`, function()
+		AnalyticsService:LogEconomyEvent(visit.player, flowType, Analytics.CURRENCY, amount, balance, reason, sku or "", toFields(Analytics.ECONOMY_FIELDS, fields))
 	end)
-	trail(visit, { k = "money", s = reason, v = amount, f = if sku then { sku = sku } else nil, m = flow == "sink" })
+	trail(visit, { k = "money", s = reason, v = amount, f = if sku then { sku = sku, Stage = stage } else { Stage = stage }, m = flow == "sink" })
 	Record.count(visit.session, if flow == "source" then "earned" else "spent", amount)
+end
+
+local function stageOf(player: Player?): string
+	return guard("stage", options.stageOf, player) or "Loading"
 end
 
 -- Coins spent (Analytics.MONEY sink reasons) by `player`, sent at once.
@@ -366,12 +411,13 @@ function TelemetryCore.spent(player: Player, reason: string, coins: number, sku:
 			warn(`[Telemetry] spend reason {reason} / sku {sku} isn't listed in common/Analytics`)
 			return
 		end
-		economy(visit, reason, coins, sku)
+		economy(visit, reason, coins, stageOf(player), sku)
 	end)
 end
 
--- Coins earned (a source reason): summed and sent every Analytics.INCOME_FLUSH seconds. `player`
--- nil: the team's (staff, buildings), sent as one present member's.
+-- Coins earned (a source reason): summed per reason and the Stage they were earned at, and sent every
+-- Analytics.INCOME_FLUSH seconds. `player` nil: the team's (staff, buildings), sent as one present
+-- member's.
 function TelemetryCore.earned(player: Player?, reason: string, coins: number)
 	guard("earned", function()
 		if Analytics.MONEY[reason] ~= "source" then
@@ -382,16 +428,22 @@ function TelemetryCore.earned(player: Player?, reason: string, coins: number)
 		end
 		local into = if player then (visits[player] and visits[player].income) else teamIncome
 		if into then
-			into[reason] = (into[reason] or 0) + coins
+			local key = `{reason}|{stageOf(player)}`
+			into[key] = (into[key] or 0) + coins
 		end
 	end)
 end
 
-local function flushIncome(visit: Visit)
-	for reason, coins in visit.income do
-		visit.income[reason] = nil
-		economy(visit, reason, coins)
+local function flushInto(visit: Visit, income: { [string]: number })
+	for key, coins in income do
+		income[key] = nil
+		local reason, stage = key:match("^(.-)|(.*)$")
+		economy(visit, reason :: string, coins, stage :: string)
 	end
+end
+
+local function flushIncome(visit: Visit)
+	flushInto(visit, visit.income)
 end
 
 -- The team's income goes out as one present member's whose events count: the lowest user id, so it
@@ -406,10 +458,7 @@ local function flushTeam()
 	if not into then
 		return
 	end
-	for reason, coins in teamIncome do
-		teamIncome[reason] = nil
-		economy(into, reason, coins)
-	end
+	flushInto(into, teamIncome)
 end
 
 -- Record-only facts: the session's `key` set to `value` (device, fps, load...).
@@ -481,7 +530,7 @@ end
 
 local function saveFunnels(visit: Visit)
 	pending += 1
-	local saved, err = PlayerData.saveFunnels(visit.player.UserId, visit.sent)
+	local saved, err = PlayerData.saveFunnels(visit.player.UserId, visit.sent, os.time())
 	pending -= 1
 	if not saved then
 		warn(`[Telemetry] funnel steps of {visit.player.UserId} not saved: {err}`)
