@@ -94,6 +94,11 @@ Cues.guide = {
 	belowCamera = 2.5,
 	handBob = 10,
 	handSpeed = 1.6,
+	faceSeconds = 0.6, -- the camera's turn toward a new lane goal (client/CameraFeel.face)
+	dimDarkness = 0.65, -- Hud.GuideDim's opacity around the button the hand taps
+	dimPad = 10, -- clear pixels around that button
+	dimOpen = 160, -- pixels wider the hole starts as it fades in, then closes in on the button
+	dimEase = 9, -- how quickly the dim fades and its hole follows the button
 }
 
 -- Windows opening and closing (client/Window): one whoosh, a little lower on close.

@@ -237,6 +237,13 @@ end
 -- up coin by coin instead of jumping when the server pays.
 Hud.walletHold = 0
 
+-- The waiting room's words (the HUD's Waiting line, client/Arrival's screen): the server's Waiting
+-- text is a party count ("2/3") or a message.
+function Hud.waitingText(): string
+	local waitText = ReplicatedStorage:GetAttribute("Waiting")
+	return if type(waitText) ~= "string" or waitText == "" then "Get ready..." elseif waitText:match("^%d+/%d+$") then `Waiting for your friends... {waitText}` else waitText
+end
+
 -- client/Intro is on screen (the team's intro or an admin's preview, which plays while the run does):
 -- acting, the honeycomb, staff bodies, stand signs and the guide's lane stand down meanwhile.
 Hud.cutscene = false
@@ -254,6 +261,35 @@ local hudScale: UIScale? = nil
 -- The HUD's scale: code that turns screen pixels (AbsolutePosition, input) into offsets divides by it.
 function Hud.uiScale(): number
 	return if hudScale then hudScale.Scale else 1
+end
+
+-- Offset pixels a full-screen cover overhangs its ScreenGui by: more than any top bar, notch or
+-- rounded corner at any HUD scale (MIN_SCALE shrinks the gui's units, so it's generous).
+Hud.BLEED = 4000
+
+-- Makes a full-screen cover in a safe-area ScreenGui (the Hud) reach every physical edge: the
+-- gui's default insets stop "full size" under the top bar and short of a phone's notch, and its
+-- ClipToDeviceSafeArea cuts any overhang off, so turn the clipping off and overhang by BLEED.
+function Hud.bleed(cover: GuiObject)
+	local screen = cover:FindFirstAncestorWhichIsA("ScreenGui")
+	assert(screen, `{cover:GetFullName()} is not in a ScreenGui`)
+	screen.ClipToDeviceSafeArea = false
+	cover.AnchorPoint = Vector2.zero
+	cover.Position = UDim2.fromOffset(-Hud.BLEED, -Hud.BLEED)
+	cover.Size = UDim2.new(1, Hud.BLEED * 2, 1, Hud.BLEED * 2)
+end
+
+-- Paints a keycap (a `Key` frame, the dark lip, over its `Text` label, the white face; built in
+-- Studio, sized by AutomaticSize) from the theme, so a key to press reads as a key.
+function Hud.paintKey(key: Instance)
+	local face = Hud.find(key, "Text") :: TextLabel
+	local outline = key:FindFirstChildOfClass("UIStroke")
+	assert(key:IsA("GuiObject") and outline, `{key:GetFullName()} must be a keycap Frame with a UIStroke`)
+	key.BackgroundColor3 = Theme.colors.shadow
+	outline.Color = Theme.colors.shadow
+	face.BackgroundColor3 = Theme.colors.text
+	face.TextColor3 = Theme.colors.shadow
+	face.FontFace = Theme.fonts.title
 end
 
 -- What the player plays with, for words and key tags: the last input, but always touch on a
@@ -365,10 +401,9 @@ function Hud.start()
 		end
 		shownMoney = money
 
-		-- Waiting room: the server's Waiting text is a party count ("2/3") or a message
-		local waitText = ReplicatedStorage:GetAttribute("Waiting")
+		-- Waiting room (the server's Waiting text, Hud.waitingText)
 		set(waiting, "Visible", phase == "loading")
-		set(waiting, "Text", if type(waitText) ~= "string" or waitText == "" then "Get ready..." elseif waitText:match("^%d+/%d+$") then `Waiting for your friends... {waitText}` else waitText)
+		set(waiting, "Text", Hud.waitingText())
 
 		-- Run panel: the map's name and how many areas are open, how full the ocean is (inside the
 		-- bar), stopwatch (time played on this save) (hidden under the honeycomb's full-screen cover)

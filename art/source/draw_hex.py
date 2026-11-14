@@ -461,6 +461,91 @@ def clear_tide_outlined():
 	white(hexagon(rim)).save(os.path.join(CT_OUT, "ct_hexRim_thick.png"))
 
 
+# The lobby's Pad screen: trash (delete a run), plus and minus (party size), a person (one per
+# party member) and two friends (Friends only), white with the same dark outline as
+# clear_tide_outlined's icons.
+def clear_tide_lobby():
+	from PIL import ImageChops
+
+	os.makedirs(CT_OUT, exist_ok=True)
+	cs = 256
+	big = cs * SS
+
+	def grow(mask, px):
+		out = mask
+		r = px
+		while r > 0:
+			steps = max(8, round(2 * math.pi * r / SS))
+			for i in range(steps):
+				a = 2 * math.pi * i / steps
+				out = ImageChops.lighter(out, ImageChops.offset(mask, round(r * math.cos(a)), round(r * math.sin(a))))
+			r -= 2 * SS
+		return out
+
+	def outlined(mask, name):
+		art = Image.new("RGBA", mask.size, (255, 255, 255, 0))
+		art.putalpha(mask)
+		fit = round(big * CT_OL_FIT)
+		placed = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+		placed.alpha_composite(art.resize((fit, fit), Image.LANCZOS), ((big - fit) // 2, (big - fit) // 2))
+		edge = Image.new("RGBA", (big, big), CT_OL_DARK + (0,))
+		edge.putalpha(grow(placed.getchannel("A"), CT_OL_WIDTH * SS))
+		edge.alpha_composite(placed)
+		edge.resize((cs, cs), Image.LANCZOS).save(os.path.join(CT_OUT, name + "_ol.png"))
+
+	def canvas():
+		img = Image.new("L", (big, big), 0)
+		return img, ImageDraw.Draw(img)
+
+	def s(*v):
+		return [n * SS for n in v]
+
+	def bar(d, x0, y0, x1, y1, stroke):
+		d.line(s(x0, y0, x1, y1), fill=255, width=stroke * SS)
+		for x, y in ((x0, y0), (x1, y1)):
+			d.ellipse(s(x - stroke / 2, y - stroke / 2, x + stroke / 2, y + stroke / 2), fill=255)
+
+	# Trash can: a handle on the lid, a body with three slots cut through.
+	img, d = canvas()
+	d.rounded_rectangle(s(96, 18, 160, 66), radius=16 * SS, fill=255)
+	d.rounded_rectangle(s(114, 36, 142, 66), radius=6 * SS, fill=0)
+	d.rounded_rectangle(s(30, 56, 226, 88), radius=16 * SS, fill=255)
+	d.rounded_rectangle(s(50, 100, 206, 244), radius=24 * SS, fill=255)
+	for x in (92, 128, 164):
+		d.rounded_rectangle(s(x - 9, 128, x + 9, 216), radius=9 * SS, fill=0)
+	outlined(img, "ct_trash")
+
+	img, d = canvas()
+	bar(d, 56, 128, 200, 128, 52)
+	bar(d, 128, 56, 128, 200, 52)
+	outlined(img, "ct_plus")
+
+	img, d = canvas()
+	bar(d, 56, 128, 200, 128, 52)
+	outlined(img, "ct_minus")
+
+	# A head over rounded shoulders, k times the full-size one (top at `top`, centred on cx).
+	def person(cx, top, k):
+		img, d = canvas()
+		hr = 54 * k
+		hy = top + hr
+		d.ellipse(s(cx - hr, hy - hr, cx + hr, hy + hr), fill=255)
+		y0 = hy + hr + 12 * k
+		half = 92 * k
+		dome, dd = canvas()
+		dd.ellipse(s(cx - half, y0, cx + half, y0 + 2 * half), fill=255)
+		box, db = canvas()
+		db.rounded_rectangle(s(cx - half, y0, cx + half, y0 + 106 * k), radius=28 * k * SS, fill=255)
+		return ImageChops.lighter(img, ImageChops.multiply(dome, box))
+
+	outlined(person(128, 18, 1), "ct_person")
+
+	# Two friends: the one behind is cut back around the front one, so the outline draws between them.
+	front = person(100, 50, 0.82)
+	back = ImageChops.subtract(person(162, 26, 0.74), grow(front, 12 * SS))
+	outlined(ImageChops.lighter(back, front), "ct_friends")
+
+
 if __name__ == "__main__":
 	import sys
 
@@ -474,5 +559,7 @@ if __name__ == "__main__":
 		clear_tide_lane_tile()
 	elif sys.argv[1:] == ["clear-tide-outlined"]:
 		clear_tide_outlined()
+	elif sys.argv[1:] == ["clear-tide-lobby"]:
+		clear_tide_lobby()
 	else:
 		main()

@@ -56,12 +56,20 @@
         },
         "Intro": {
           "$className": "RemoteEvent"
+        },
+        "Telemetry": {
+          "$className": "RemoteEvent"
         }
       }
     },
     "ServerScriptService": {
       "Server": {
         "$path": "src/server"
+      }
+    },
+    "ReplicatedFirst": {
+      "Arrival": {
+        "$path": "src/first/Arrival.client.luau"
       }
     },
     "StarterPlayer": {

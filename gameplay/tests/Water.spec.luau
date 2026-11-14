@@ -88,6 +88,25 @@ function tests.stretches_grow_at_their_own_pace(t)
 	end
 end
 
+-- The ocean's water surface above its floor (shared/Zones.setFill): a step at a time, at least one
+-- step for any water, none when dry.
+function tests.surface_moves_a_step_at_a_time(t)
+	t.expectEq(Water.surface(0, 29.4, 0.1), nil, "dry")
+	t.expectEq(Water.surface(-0.2, 29.4, 0.1), nil, "never below dry")
+	t.expectEq(Water.surface(1e-6, 29.4, 0.1), 0.1, "any water shows a step")
+	t.expectEq(Water.surface(0.5, 10, 1), 5)
+	t.expectEq(Water.surface(0.54, 10, 1), 5, "rounded to the nearest step")
+	t.expectEq(Water.surface(0.56, 10, 1), 6)
+	t.expectNear(Water.surface(0.5, 29.4, 0.1), 14.7, 1e-9)
+end
+
+function tests.surface_is_the_depth_when_full(t)
+	t.expectEq(Water.surface(1, 29.4, 0.1), 29.4)
+	t.expectEq(Water.surface(1.5, 29.4, 0.1), 29.4, "never past full")
+	t.expectEq(Water.surface(1, 10, 3), 10, "full even when the depth isn't a whole number of steps")
+	t.expectEq(Water.surface(0.99, 10, 3), 9, "short of full stays a step below it")
+end
+
 -- A tool keeps the coin value of what it holds, so water scooped in two areas pays each one's rate.
 function tests.mix_pays_each_area(t)
 	t.expectEq(Water.mix(0, 10, 10), 100, "an empty tool takes the new water's value")

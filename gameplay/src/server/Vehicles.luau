@@ -29,6 +29,7 @@ local Zones = require(ReplicatedStorage.Shared.Zones)
 local Areas = require(ReplicatedStorage.Common.Areas)
 local Items = require(ReplicatedStorage.Common.Items)
 local Map = require(script.Parent.Map)
+local Telemetry = require(script.Parent.Telemetry)
 
 local TICK = 0.25 -- seconds between fills, sprays and attribute updates
 local CALL_COOLDOWN = 2 -- seconds between accepted calls per player (exploits can fire prompts)
@@ -292,6 +293,7 @@ local function onCall(player: Player, prompt: ProximityPrompt)
 	end
 	spawn(player, item)
 	hooks.tell(player, `Your {item.name} is out front!`)
+	Telemetry.vehicleCalled(player, item.id)
 end
 
 local function setSpray(player: Player, v: Out, on: boolean)

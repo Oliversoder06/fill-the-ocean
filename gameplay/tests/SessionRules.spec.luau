@@ -109,4 +109,49 @@ function tests.next_host_is_earliest_remaining(t)
 	t.expectEq(SessionRules.nextHost({}, 11), nil)
 end
 
+local function pad(overrides: { [string]: any })
+	local p: { [string]: any } = { host = true, saved = false, maxPlayers = 4, friendsOnly = false, count = 1, counting = false, launching = false }
+	for k, v in overrides do
+		p[k] = v
+	end
+	return p :: any
+end
+
+function tests.pad_state_open_without_host(t)
+	t.expectEq(SessionRules.padState({ host = false, saved = false, friendsOnly = false, count = 0, counting = false, launching = false }), "open")
+end
+
+function tests.pad_state_setup_while_host_chooses(t)
+	-- no maxPlayers: the host hasn't created a party yet
+	t.expectEq(SessionRules.padState({ host = true, saved = false, friendsOnly = false, count = 1, counting = false, launching = false }), "setup")
+end
+
+function tests.pad_state_party_while_joinable(t)
+	t.expectEq(SessionRules.padState(pad({ count = 2 })), "party")
+end
+
+function tests.pad_state_closed_when_friends_only_or_full(t)
+	t.expectEq(SessionRules.padState(pad({ friendsOnly = true })), "closed")
+	t.expectEq(SessionRules.padState(pad({ count = 4 })), "closed")
+end
+
+function tests.pad_state_saved_for_a_saved_team(t)
+	t.expectEq(SessionRules.padState(pad({ saved = true, maxPlayers = 3 })), "saved")
+end
+
+function tests.pad_state_counting_beats_everything(t)
+	t.expectEq(SessionRules.padState(pad({ counting = true, launching = true })), "counting")
+	t.expectEq(SessionRules.padState(pad({ counting = true, saved = true, launching = true })), "counting")
+end
+
+function tests.pad_state_launching_beats_the_rest(t)
+	t.expectEq(SessionRules.padState(pad({ launching = true })), "launching")
+	t.expectEq(SessionRules.padState(pad({ launching = true, saved = true })), "launching")
+end
+
+function tests.countdown_is_a_few_seconds(t)
+	t.expectEq(type(SessionRules.COUNTDOWN), "number")
+	t.expectEq(SessionRules.COUNTDOWN >= 2 and SessionRules.COUNTDOWN <= 5, true)
+end
+
 return tests

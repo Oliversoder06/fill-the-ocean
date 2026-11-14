@@ -49,7 +49,8 @@ Server (`src/server/`):
   phase is `done` and everyone goes to the lobby.
 - `HeldTools.luau`: puts each player's tool model in their hand so others see it, on a `HeldGrip`
   Motor6D (hand to tool) that client `Bodies` turns to suit the carry pose.
-- `Map.luau`: checks the baked ocean model (the water itself moves by `shared/Zones.setFill`).
+- `Map.luau`: checks the baked ocean model (the water itself is Roblox terrain water written by
+  `shared/Zones`: the server's over the seabed, each client's open sea by client/Sea).
 - `Mechanics.luau`: area mechanics (steam vents and their knockback, snow, the drifting cloud, the
   rocks in front of the deeper pools, the golden spring); `Run` starts it with hooks and asks it for
   `rocksBroken` and `goldenId` when it credits a scoop.
@@ -67,10 +68,20 @@ Server (`src/server/`):
   present and playing) at half the post's hand pay, 2x while any member works that area
   (`state.workArea`, set in `onAct`), Lifeguard walk bonus (`state.nearLifeguard`), Plumbers into
   `Buildings.setPlumber`.
-- `Payroll.luau`: ticked pay (buildings and staff, `owe`) paid into the team's wallet in batches;
+- `Payroll.luau`: ticked pay (buildings and staff, `owe(coins, reason)`: the analytics income
+  reason "Buildings" / "Staff") paid into the team's wallet in batches;
   `Run` calls `Payroll.payNow()` before a leave, at the run's end, on close and before a reset.
+- `Telemetry.luau`: the run's analytics (`docs/analytics.md`): `Run`, `Buildings` and `Vehicles`
+  tell it the moments (`scooped`, `poured`, `earned`/`spent` with a reason from
+  `common/Analytics.MONEY`, `blocked`, `gateOpened`, `milestone`, `introEnded`, `playerIn`/`playerOut`);
+  it polls each player once a second for the one-time funnels' facts and takes the client's
+  `Telemetry` reports. Sends through `common/TelemetryCore`; never throws into the run.
 
 Client (`src/client/`, all started from `init.client.luau`):
+- `Telemetry.luau`: analytics reports to the server (`Telemetry` remote, names in
+  `common/Analytics.CLIENT`): fps per minute of play, device, first distinct errors and warnings;
+  `Telemetry.report(name, arg)` for the rest (`Honeycomb`: hcOpen with its Source, hcView, hcClose,
+  short; `Guide`: its step, guideSkip).
 - `Hud.luau`: fills `StarterGui.Hud` (wallet, waiting text, card, the top-right `Progress`
   panel: `Area` (map name), `AreaSub` ("AREAS 2/5 OPEN"), the pill `Bar` with `Fill`, `Label`
   (`shared/Format.fill`, two decimals below 10%) and `Litres` (Current / Target) inside it, `Goal`
@@ -90,8 +101,9 @@ Client (`src/client/`, all started from `init.client.luau`):
   print (`Bar.Litres`, `AreaSub`). `Hud.input()` ("touch" / "gamepad" / "mouse"; always touch on a
   touch-only device) picks key words and tags: hints, the Upgrades `Key`, hotbar key numbers, Close.
 - `Action.luau`: scoop and pour input (near a Source / Pour / the ocean + hold E / LMB / RT / touch
-  button; aiming is optional: a look that misses still acts, owner 2026-11-11), one
-  full sweep or pour per action, the `ActHint` text. The touch button is sized and placed by code
+  button, or on touch a tap anywhere on the world (`TouchTapInWorld`, not on UI); aiming is optional: a look that misses still acts, owner 2026-11-11), one
+  full sweep or pour per action, the `ActHint` (a Frame just under the crosshair, placed by code:
+  a keycap `Key` ("TAP" on touch) and one short word `Text`, "E Scoop"). The touch button is sized and placed by code
   (bigger than Jump, left of it, showing the thing in hand's icon). Viewmodel and Feel read `Action.current()`.
 - `Feel.luau`: sounds and splashes for scoop and pour (own and other players'), from `Cues`;
   `Feel.splash` is shared with `Channels`.
@@ -181,13 +193,23 @@ Client (`src/client/`, all started from `init.client.luau`):
   most) for the lobby. Its end or Skip tells the server (`Intro` remote); the phase leaving the cut's
   ends it. `Cutscene.preview(def)` (the admin window) plays one from now on this client only.
   Studio: the scene's hold attribute (`StudioIntroAt`, `StudioEndingAt`) holds it on one second.
+  `Cutscene.cover()` holds black from joining until a cut or play takes it; it tells `Arrival` when
+  its black is up and drops it at once when play starts under the arrival screen.
+- `Arrival.luau`: the teleport screen you arrive behind (`common/Transition`; started first). The
+  lobby covered itself with it and sent it with the teleport; `ReplicatedFirst.Arrival`
+  (`src/first`) put it back up as `PlayerGui.Arrival` instead of Roblox's loading screen. `fresh`
+  (the run opens on the intro): black, gone once the cover's black is up. `return`: the underwater
+  card (bubbles, `Status` = `Hud.waitingText()`); when play starts the water drains down onto the
+  world, or onto the cover's black if the run opens on the intro after all. Studio:
+  `StudioTransition` puts up a copy of `ReplicatedStorage.Transition`.
 - `Intro.luau`: the intro scene (`Intro.def`, `shared/IntroCut`, `shared/IntroClips`), played by
   `Cutscene` while Phase is `intro` from `IntroAt`: your copy walks up the beach on its own walk
   animation (its Animator, stepped by the distance walked: no foot slide), stretches, sits and lies
   down on the lounger (`IntroClips.lie`'s two clips); the normal-size `Story.BaconRig` strolls
   onto the beach on the R6 walk, sits and plays in the sand (`Story.SandPile` grows); one spline
   camera take ends in your eyes as they close (your copy's head fades as the camera goes in). The
-  water is full, then dry, by `Zones.setFill`; `Story.BaconFat` drinks the `Puddle` through a
+  water is full, then dry (`Cutscene.setWater` holds client/Sea's sea; server/Run does the same to
+  the seabed's on the cut's clock); `Story.BaconFat` drinks the `Puddle` through a
   bendy `Straw`, turns to you, burps (the whole sound, plain: `Audio.IntroBurp` has no effects),
   rolls for the beach faster and faster and its slope throws him past you and off over the island
   (`IntroCut.flight`); you sit up and lean out to follow him, then turn back to the sea.
@@ -221,8 +243,11 @@ Client (`src/client/`, all started from `init.client.luau`):
   `Start`/`End` and a textured Beam whose texture carries the rails and the sliding chevrons, cut
   cleanly at both ends; maths in `shared/GuideTrail`,
   numbers in `Cues.guide`) and a click hand (clone of `Hud.Templates.ClickHand`) tapping the button
-  to press. `Guide.pointTo(position?, model?)` leads the lane anywhere once the tutorial isn't
-  showing (nil hides it) and outlines `model` with a clone of `Vfx.GuideHighlight`.
+  to press, with `Hud.GuideDim` (frames `Top` / `Bottom` / `Left` / `Right`) darkening the screen
+  around it (a hole that closes in and follows the button). Each new lane goal turns the camera to
+  face it once (`CameraFeel.face`). `Guide.pointTo(position?, model?)` leads the lane anywhere once
+  the tutorial isn't showing (nil hides it), turns the camera to a new place and outlines `model`
+  with a clone of `Vfx.GuideHighlight`.
 - `Jetpack.luau`: with the Jetpack Tank out, holding jump asks the server to fly (`Gadget "fly"`).
 - `Vehicles.luau`: drives your own vehicle while seated (sets its `Drive` / `Turn` constraints from
   the VehicleSeat's throttle and steer; bomber up/down on E/Q, R1/L1, touch), `driving` (seated in
@@ -247,8 +272,12 @@ Client (`src/client/`, all started from `init.client.luau`):
   poses), held by a copy of the player's own right
   hand and forearm, with walk wobble and turn sway; `Viewmodel.swingIn()` swings it up into view
   the next time it shows (the intro's handover). `CameraFeel.luau`: first-person camera bob and
-  tilt (`CameraFeel.walk()` shares the walk cycle); third person (Classic, zoom 20-30) while
+  tilt (`CameraFeel.walk()` shares the walk cycle; `CameraFeel.face(at, seconds)` turns the view
+  toward a place, cancelled by the player's own camera input); third person (Classic, zoom 20-30) while
   driving your own vehicle, and `Hud`'s cursor code frees the mouse then. `Mood.luau`: lighting.
+- `Sea.luau`: this client's own terrain water over the whole ocean at `Fill` (`Zones.setOpenSea`),
+  out to the horizon (the server's only streams in near you); mended every `MEND_SECONDS` where
+  streaming out took it (`Zones.mendOpenSea`); `Sea.hold` keeps a cutscene's full or dry sea.
 
 Shared (`src/shared/`, pure unless noted):
 - `Config.luau`: every run number: the one ocean (`Config.ocean`: flat `coinsPerLitre`, the fill
@@ -290,7 +319,7 @@ Shared (`src/shared/`, pure unless noted):
   re-pays on open, `Progress.payMilestones` keeps it once each), `card` (the team's toast), the
   `Milestone` attribute's `encode` / `decode`.
 - `Cues.luau`: every feel number (sounds, volumes, pitches, splash sizes). Tune feel here.
-- `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
+- `Water.luau` (the fill curve: `fill`, `litresAt`; `pourAmount`, `scoopAmount`; `surface`, the ocean's height in steps), `ToolView.luau`, `Session.luau`, `Ease.luau`, `CoinBurst.luau`,
   `Reveal.luau`, `Steps.luau`, `Gadgets.luau` (jetpack fuel), `AreaRules.luau` (vent timing, ice hits, deep pools, snow, rock tool,
   golden spring), `BodyPose.luau` (carry styles per tool, arm IK, walk/lean/look
   numbers for `Bodies`), `BuildingRules.luau` (building pay, output, clogs, the build check with an
@@ -300,8 +329,12 @@ Shared (`src/shared/`, pure unless noted):
 - `VehicleRules.luau` (pure, tested): `best` owned vehicle, `fill`, `spray`, `plausible` (could it
   have got there from its last fill), `skims` (bomber over a pool), `payArea` (refill bays pay the
   vehicle's own area). Numbers in `Config.vehicle`; `Water.share` splits a tank's value.
-- `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). `Zones.setFill` sets the
-  water's height for a fill fraction (server/Run; client/Intro for its own); `Zones.channelPath` reads
+- `Zones.luau`, `ToolModels.luau`: touch the place (not pure, not tested). The ocean is Roblox
+  terrain water: `Zones.setFill` (server/Run) writes it down to the floor where there is ground
+  under the sea (seabed, shore), `Zones.setOpenSea` (client/Sea) a sheet a cell or two
+  deep over the whole footprint; both 64-stud squares at a time over frames (never a hitch), the
+  surface in 0.1-stud steps (`Water.surface`, `Zones.level`); the `Water` tiles only mark the
+  footprint and stay hidden. Rays that want the ground set `IgnoreWater`. `Zones.channelPath` reads
   an area's `Channel.Path` (server/Map checks it, client/Channels follows it). `Zones.stand`,
   `Zones.shop` and `Zones.standPrompt` find stands for the server (`Map`) and the client (`Stands`).
 - `Icons.luau` (pure, tested): each model's UI image by model name (`Icons.of`); `tests/Icons.spec`
@@ -370,10 +403,45 @@ Common (`common/`, mapped to `ReplicatedStorage.Common` in both places):
   `reset`: an admin's profile reset;
   `payMilestones`: a run's milestone Raindrops, each milestone once per run, `paidMilestones`).
 - `RunTicket.luau`: the lobby's ticket for a reserved server (`mapId`, run key, members).
+- `Transition.luau` (client, both places): the teleport screen (`ReplicatedStorage.Transition`):
+  `fresh` (a run that opens on the intro: the screen floods, whirlpools down a plughole, black) or
+  `return` (a wave sweeps in an underwater card: logo, map, fill). The lobby's client/Session plays
+  `out` on SessionState `"teleporting"` (lobby server/Queue picks the look with `RunSave.wantsIntro`
+  and waits `OUT_SECONDS` before the teleport) and hands it to `SetTeleportGui`; gameplay's
+  client/Arrival plays `rest`, `idle` and `reveal`. Scripts don't run during the hop: each look
+  ends on a still frame.
 - `SessionRules.luau` (pure): lobby pad rules (create, join, load only with the same team, and
-  `newTeam` / `savedFor`: the save a new party would start over, one per map per team).
+  `newTeam` / `savedFor`: the save a new party would start over, one per map per team), `COUNTDOWN`
+  (the launch's 3-2-1) and `padState` (what a pad shows: open / setup / party / closed / saved /
+  counting / launching; the pad Model's `State` attribute).
 - `Places.luau`: the two place IDs. `Retry.luau`: retries DataStore, MemoryStore and Teleport
   calls, warning on every failure.
+- `Analytics.luau` (pure, tested): every analytics name (funnels, steps, events and their field
+  values, money reasons, bands, the rate budget, client reports) and the rules (`advance`,
+  `bucket`, `stage`, `doing`, `allowed`, `checkReport`). Names are permanent once live: add, never
+  rename (`docs/analytics.md`). `AnalyticsRecord.luau` (pure, tested): the session record.
+  `TelemetryCore.luau`: the only AnalyticsService caller, for both places (Studio echoes instead;
+  admins are skipped live), the session record's DataStore (`AnalyticsSessions_v1`) and the funnel
+  steps saved per leave (`PlayerData.saveFunnels`). `Progress.funnels` is nil for profiles from
+  before analytics: only a brand-new profile enters the one-time funnels (lobby/Telemetry).
+
+## Code map (lobby/)
+- `src/server/Queue.luau`: the pads and parties. Each pad Model carries `State`
+  (`SessionRules.padState`) and `LaunchAt` (server time, 0 when none), written by `publish`. A
+  launch runs `prepare` (checks; may ask the host), then `countdown` (SessionState `"countdown"`
+  with `endsAt`; Leave is the one action taken meanwhile and stops it), then `commit` (New Game's
+  erase, never before the count is done), then the teleport. `Profiles`, `Telemetry`: profiles and
+  analytics.
+- `src/client/` (started from `init.client.luau`): `Session` (the pad screen, Confirm, HostBar;
+  sunbaked-sea), and the feel, every number in `src/shared/LobbyCues.luau` (pure, tested from
+  `gameplay/tests/LobbyCues.spec`): `Sfx` (one-shots from `ReplicatedStorage.Audio`: `need` at
+  start, `play` never yields), `Music` (`duck`, `fadeOut`, `resume`), `Ambience`, `Footsteps`
+  (third person, everyone's; a part's `Footstep` attribute beats its material, `LobbyCues.surface`
+  matches gameplay's `Steps`), `UiSounds` (Session's `juice` / `deny` / `show` and the toast call
+  it), `Pads` (pad colour, light, pulse, Ripple, bubbles and the countdown's rising water from
+  `State` / `LaunchAt`; splashes when anyone steps on or off; `Pads.padOf`), `Countdown`
+  (`LobbyHud.Countdown`: 3-2-1, GO!, the cancel), `World` (palm sway, gulls; `World.folder()` is the
+  client-only `workspace.LobbyScenery`) and `Horizon` (the bacon-hair drinking the sea).
 
 ## Server ↔ client contract
 The server publishes state as attributes; the client only reads them.
@@ -427,7 +495,9 @@ The server publishes state as attributes; the client only reads them.
   team and map, at most once per 10 s; the server checks `shared/Admins` and only acts
   while Phase is `playing`), `Intro` (a story cutscene's `"done"` at its end, `"skip"` from Skip:
   only while Phase is `intro` or `ending`, a skip only from the cut's `skipAfter`, and it ends the
-  cutscene for everyone; rate-limited), `Card` (server to client).
+  cutscene for everyone; rate-limited), `Telemetry` (`name, arg`: an analytics report, only names in
+  `common/Analytics.CLIENT`, one per its gap, the argument checked by `Analytics.checkReport`;
+  server/Telemetry), `Card` (server to client).
 - A new attribute: set it in `Run.luau`'s `publish` (a player's) or `publishTeam` (the team's). A new remote: add it to
   `default.project.json` AND to the `remote(...)` list in `Run.start`, validate its arguments, and
   tell the owner to restart `rojo serve` (a running Rojo does not reload the project file; the
@@ -435,7 +505,8 @@ The server publishes state as attributes; the client only reads them.
 
 ## UI
 - All UI is built in Studio under `StarterGui.Hud` (Scale (the HUD's UIScale), Wallet, Hotbar, Honeycomb, Card, Waiting,
-  Progress, Admin, BuildPicker; `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
+  Progress, Admin, BuildPicker, GuideDim (ZIndex 22: over the honeycomb, under `Guide` and the
+  hand); `Templates.StandSign` is the stands' BillboardGui, `Templates.Hex`
   the honeycomb's piece: a transparent ImageButton hit area over `Glow` (1.25x, lowest; hidden by
   code), `Body`
   (+ UIGradient `Shade`), `Outline` (the rim), `Water.Fill`, `Name`, `Icon`, `Level`
@@ -443,9 +514,17 @@ The server publishes state as attributes; the client only reads them.
   ImageLabels), `Select`, `Press`; `Bottom` is hidden and unused; `Templates.Bridge` is no longer used). `Hud.Honeycomb` is a full-screen
   cover (no window frame): `Backdrop`, `Board.Canvas`, `Title`, `BackButton` (hidden by code),
   `CloseButton`, `Wallet`, `Tooltip`; with `Lighting.HoneycombBlur` (a BlurEffect at Size 0).
-  `StarterGui.Cutscene` is the intro's own ScreenGui (DisplayOrder 50, IgnoreGuiInset, off until
+  `StarterGui.Cutscene` is the intro's own ScreenGui (DisplayOrder 50, ScreenInsets `None`, no
+  clipping or SafeAreaCompatibility: client/Cutscene enforces it so the black and lids reach a
+  phone's notch and the top bar; it keeps `Skip` inside the device safe area; off until
   the intro): `Scale`, `TopLid` / `BottomLid` (black, each with a soft `Edge` gradient), `Logo`
   (UIScale `Pop`), `Black`, `Skip` (`Label`, `Chevron`, UIScale `Press`).
+  A full-screen cover inside `Hud` (a safe-area gui: "full size" stops under the top bar and short
+  of the notch) goes through `Hud.bleed(cover)`: Hud clipping off, the cover overhanging every
+  edge by `Hud.BLEED` (`Honeycomb.Backdrop`, `GuideDim`).
+  A key to press shows as a keycap: a Frame `Key` (dark lip: UICorner, UIPadding bottom 3, UIStroke,
+  AutomaticSize) holding a TextLabel `Text` (the white face, AutomaticSize X), painted from the
+  theme by `Hud.paintKey` (`UpgradesButton.Key`, `ActHint.Key`).
   Code never builds new UI (it only clones hidden templates like `Hud.Templates`); it finds
   elements by name with `Hud.find` and fills them. Renaming or removing an
   element breaks the client with "Hud is missing ...". New UI elements are an Owner step.
@@ -487,6 +566,9 @@ The server publishes state as attributes; the client only reads them.
 - `Templates.Hex` has a child called `Name`: `hex.Name` is the property, so find it with
   `Hud.find(hex, "Name")`.
 - Never trust the client: `Equip`, `Buy` and `Act` are all re-checked on the server.
+- Never key a weak table (`__mode = "k"`) by an Instance: Roblox can collect the Lua wrapper while
+  the Instance lives, so the entry vanishes (the lobby's pad water "remembered" its rest place
+  again every few frames and climbed). Use a plain table and clear it when the Instance goes.
 
 ## Hard rules (never break these)
 - **Never edit, delete, skip, weaken or special-case a test** to make it pass. If a test looks wrong,
@@ -511,7 +593,7 @@ needs a Studio play test).
 - Rojo owns code only. The map, terrain and scenery live in the Studio place; the owner saves and
   publishes it in Studio.
 - `gameplay/src/shared/` and `common/` modules that tests cover (Config, Ladder, Water, ToolView,
-  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal, Honeycomb, Cues, Items, Icons) must stay
+  Session, RunSave, Maps, Progress, SessionRules, Format, NextGoal, Honeycomb, Cues, Items, Icons, Analytics, AnalyticsRecord) must stay
   **pure**: no `require` of other modules, no `game`, no Roblox types, so Lune can run them.
   Lune tests live in `gameplay/tests/*.spec.luau` and are listed in `gameplay/tests/run.luau`.
 - Server-authoritative: the server owns money, water, purchases. Validate every remote argument

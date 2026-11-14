@@ -11,6 +11,7 @@ export type Settings = { maxPlayers: number, mapId: string, friendsOnly: boolean
 local SessionRules = {}
 
 SessionRules.MAX_PLAYERS = 10
+SessionRules.COUNTDOWN = 3 -- seconds from a launch's checks to its teleport; leaving the pad meanwhile stops it
 
 local function wholeIn(value: any, low: number, high: number): boolean
 	return type(value) == "number" and value == value and value % 1 == 0 and value >= low and value <= high
@@ -60,7 +61,7 @@ function SessionRules.loadError(saveMembers: { number }, padMembers: { number })
 end
 
 -- The team a new party would be for, as far as the pad shows it (padIds: the host first): the host
--- alone for a solo party, or everyone on the pad when 2 to maxPlayers stand there; nil otherwise.
+-- alone for a solo party, or everyone on the pad when 2 to maxPlayers are on it; nil otherwise.
 function SessionRules.newTeam(maxPlayers: number, padIds: { number }): { number }?
 	if #padIds == 0 then
 		return nil
@@ -109,6 +110,37 @@ function SessionRules.nextHost(members: { number }, leaving: number): number?
 		end
 	end
 	return nil
+end
+
+-- What a pad shows (the lobby's client/Pads colours it by this; Queue publishes it as the pad's State
+-- attribute): "counting" (its launch countdown), "launching" (the checks or the teleport), "open" (no
+-- host), "saved" (a saved team's pad), "setup" (the host is choosing), "closed" (friends only, or
+-- full) or "party" (anyone may join). maxPlayers is nil until the host has created a party.
+function SessionRules.padState(pad: {
+	host: boolean,
+	saved: boolean,
+	maxPlayers: number?,
+	friendsOnly: boolean,
+	count: number,
+	counting: boolean,
+	launching: boolean,
+}): string
+	if pad.counting then
+		return "counting"
+	elseif pad.launching then
+		return "launching"
+	elseif not pad.host then
+		return "open"
+	elseif pad.saved then
+		return "saved"
+	end
+	local maxPlayers = pad.maxPlayers
+	if not maxPlayers then
+		return "setup"
+	elseif pad.friendsOnly or pad.count >= maxPlayers then
+		return "closed"
+	end
+	return "party"
 end
 
 return SessionRules

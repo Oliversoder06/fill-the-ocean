@@ -197,4 +197,52 @@ function tests.changes_return_new_tables(t)
 	t.expectEq(raw.mapsCleared.map1, nil)
 end
 
+-- Analytics: one-time funnels count new players only. Only a brand-new profile is entered
+-- (enterAnalytics); a save from before the funnels has no `funnels` and never gets one.
+function tests.funnels_absent_for_old_saves(t)
+	t.expectEq(Progress.sanitize({ raindrops = 5 }).funnels, nil)
+	t.expectEq(Progress.default().funnels, nil)
+	local data, changed = Progress.advanceFunnels({ raindrops = 5 }, { Onboarding = 4 })
+	t.expectEq(changed, false, "an old save stays out")
+	t.expectEq(data.funnels, nil)
+end
+
+function tests.enter_analytics_only_once(t)
+	local entered = Progress.enterAnalytics(nil)
+	t.expectEq(type(entered.funnels), "table")
+	t.expectEq(next(entered.funnels :: any), nil)
+	local advanced = Progress.advanceFunnels(entered, { Onboarding = 3 })
+	local again = Progress.enterAnalytics(advanced)
+	t.expectEq((again.funnels :: any).Onboarding, 3, "entering again keeps the progress")
+end
+
+function tests.advance_funnels_is_monotonic(t)
+	local data = Progress.advanceFunnels(Progress.enterAnalytics(nil), { Onboarding = 5, Tool_v1 = 2 })
+	local later, changed = Progress.advanceFunnels(data, { Onboarding = 3, Tool_v1 = 4 })
+	t.expectEq((later.funnels :: any).Onboarding, 5, "a stale lower count never lowers it")
+	t.expectEq((later.funnels :: any).Tool_v1, 4)
+	t.expectEq(changed, true)
+	local _, same = Progress.advanceFunnels(later, { Onboarding = 5 })
+	t.expectEq(same, false, "nothing new: no write")
+end
+
+function tests.advance_funnels_keeps_the_rest(t)
+	local data = Progress.addRun(Progress.enterAnalytics({ raindrops = 7 }), "map1_1")
+	local advanced = Progress.advanceFunnels(data, { Onboarding = 2 })
+	t.expectEq(advanced.raindrops, 7)
+	t.expectEq(advanced.runs[1], "map1_1")
+	t.expectEq((Progress.addRun(advanced, "map1_2").funnels :: any).Onboarding, 2, "other changes keep the funnels")
+end
+
+function tests.sanitize_repairs_bad_funnel_steps(t)
+	local s = Progress.sanitize({ funnels = { Onboarding = 3, Tool_v1 = 2.5, Bad = -1, [4] = 2, Zero = 0 } })
+	local funnels = s.funnels :: any
+	t.expectEq(funnels.Onboarding, 3)
+	t.expectEq(funnels.Tool_v1, nil, "not whole")
+	t.expectEq(funnels.Bad, nil)
+	t.expectEq(funnels[4], nil, "keys are funnel ids")
+	t.expectEq(funnels.Zero, nil, "0 is the same as never")
+	t.expectEq(type(Progress.sanitize({ funnels = "x" }).funnels), "nil", "broken: treated as never entered")
+end
+
 return tests

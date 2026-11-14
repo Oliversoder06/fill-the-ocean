@@ -127,7 +127,7 @@ local function tick(dt: number)
 		local litres = rateOf(hire) * dt * bonusAt(post, now)
 		local taken = if litres > 0 then hooks.fill(litres) else 0
 		if taken > 0 then
-			Payroll.owe(taken * StaffRules.payPerLitre(Config, Areas.byId(Config, post)))
+			Payroll.owe(taken * StaffRules.payPerLitre(Config, Areas.byId(Config, post)), "Staff")
 		end
 	end
 	setPlumbers(boosts)

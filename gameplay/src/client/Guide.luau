@@ -6,8 +6,11 @@
 -- inside the player, just below the camera, leads to the place (a clone of ReplicatedStorage.Vfx.GuideLane:
 -- a textured Beam whose texture carries the rails and the sliding chevrons, cut cleanly at both
 -- ends; shared/GuideTrail), a click hand (a clone of Hud.Templates.ClickHand) taps the button to press, and
--- Action's ActHint says which key. Skip hides it for the session. Once it is done, Guide.pointTo
--- leads the lane anywhere and outlines the stand, gate or plot there (a clone of Vfx.GuideHighlight).
+-- Action's ActHint says which key. Each new lane goal turns the camera to face it (CameraFeel.face),
+-- and while the hand taps a button Hud.GuideDim darkens the screen around it (four frames framing a
+-- hole that follows the button). Skip hides it for the session. Once it is done, Guide.pointTo
+-- leads the lane anywhere, turns the camera there and outlines the stand, gate or plot there (a
+-- clone of Vfx.GuideHighlight).
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -17,8 +20,10 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local GuideTrail = require(ReplicatedStorage.Shared.GuideTrail)
 local Theme = require(ReplicatedStorage.Kit.UI.Themes["clear-tide"])
+local CameraFeel = require(script.Parent.CameraFeel)
 local Honeycomb = require(script.Parent.Honeycomb)
 local Hud = require(script.Parent.Hud)
+local Telemetry = require(script.Parent.Telemetry)
 
 local player = Players.LocalPlayer
 local set = Hud.set
@@ -26,6 +31,7 @@ local set = Hud.set
 local CUE = Cues.guide
 local STEPS = 6
 local DONE_SECONDS = 3
+local REPORT_GAP = 0.3 -- seconds between guide step reports (the server takes one per 0.25)
 local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
 local Guide = {}
@@ -38,6 +44,9 @@ local pointedModel: Instance? = nil
 -- Lead the ground lane to `position` (nil hides it) and outline `model` there (a stand, gate or
 -- plot; optional). The first-minute guide's own goals win while it shows.
 function Guide.pointTo(position: Vector3?, model: Instance?)
+	if position and position ~= pointed then
+		CameraFeel.face(position, CUE.faceSeconds)
+	end
 	pointed, pointedModel = position, if position then model else nil
 end
 
@@ -104,6 +113,14 @@ function Guide.start()
 	local hand = handTemplate:Clone() :: GuiObject
 	hand.Visible = false
 	hand.Parent = gui
+	local dim = Hud.find(gui, "GuideDim") :: GuiObject
+	Hud.bleed(dim) -- its sides reach past the top bar and a phone's notch; the hole is measured from it
+	local dimSides = {}
+	for _, name in { "Top", "Bottom", "Left", "Right" } do
+		local side = Hud.find(dim, name) :: GuiObject
+		side.BackgroundColor3 = Theme.colors.shadow
+		dimSides[name] = side
+	end
 	local vfx = ReplicatedStorage:WaitForChild("Vfx", 10)
 	assert(vfx, "ReplicatedStorage.Vfx is missing (the effects are baked into the place)")
 	local laneTemplate = vfx:WaitForChild(CUE.lane, 10)
@@ -124,6 +141,11 @@ function Guide.start()
 	local finished = false
 	local doneUntil: number? = nil
 	local shownStep = 0
+	local facedStep = 0 -- the last step whose lane goal the camera turned to
+	local dimShown = 0 -- 0 clear .. 1 fully dimmed
+	local holeFrom: Vector2?, holeTo: Vector2? = nil, nil -- the dim's clear rectangle, in Hud offsets
+	local reportedStep = 0 -- the step the server's analytics last heard (its Stage "Guide:<n>"; 0: hidden)
+	local reportedAt = -math.huge
 
 	local function finish(thanks: boolean)
 		finished = true
@@ -131,6 +153,7 @@ function Guide.start()
 	end
 	Hud.pressable(skip, Hud.find(skip, "Press"))
 	skip.Activated:Connect(function()
+		Telemetry.report("guideSkip")
 		finish(false)
 	end)
 
@@ -222,7 +245,53 @@ function Guide.start()
 		set(hand, "Position", UDim2.fromOffset(math.round(at.X), math.round(at.Y + tap)))
 	end
 
-	RunService.RenderStepped:Connect(function()
+	-- Darkens everything but `button` (nil fades the dim out). The hole starts wide and closes in,
+	-- then glides from button to button.
+	local function dimAround(button: GuiObject?, dt: number)
+		local shown = button ~= nil and onScreen(button)
+		local follow = 1 - math.exp(-CUE.dimEase * dt)
+		dimShown += ((if shown then 1 else 0) - dimShown) * follow
+		local scale = Hud.uiScale()
+		if shown then
+			local b = button :: GuiObject
+			local pad = Vector2.one * CUE.dimPad
+			local from = (b.AbsolutePosition - dim.AbsolutePosition) / scale - pad
+			local to = from + b.AbsoluteSize / scale + pad * 2
+			if not (holeFrom and holeTo) then
+				holeFrom, holeTo = from - Vector2.one * CUE.dimOpen, to + Vector2.one * CUE.dimOpen
+			end
+			holeFrom = (holeFrom :: Vector2):Lerp(from, follow)
+			holeTo = (holeTo :: Vector2):Lerp(to, follow)
+		end
+		if dimShown < 0.01 and not shown then
+			dimShown, holeFrom, holeTo = 0, nil, nil
+			set(dim, "Visible", false)
+			return
+		end
+		if not (holeFrom and holeTo) then
+			return
+		end
+		set(dim, "Visible", true)
+		local size = dim.AbsoluteSize / scale
+		local x0, y0 = math.round(math.clamp(holeFrom.X, 0, size.X)), math.round(math.clamp(holeFrom.Y, 0, size.Y))
+		local x1, y1 = math.round(math.clamp(holeTo.X, x0, size.X)), math.round(math.clamp(holeTo.Y, y0, size.Y))
+		local w, h = math.round(size.X), math.round(size.Y)
+		local place = {
+			Top = { 0, 0, w, y0 },
+			Bottom = { 0, y1, w, math.max(h - y1, 0) },
+			Left = { 0, y0, x0, y1 - y0 },
+			Right = { x1, y0, math.max(w - x1, 0), y1 - y0 },
+		}
+		local transparency = 1 - CUE.dimDarkness * dimShown
+		for name, side in dimSides do
+			local p = place[name]
+			set(side, "Position", UDim2.fromOffset(p[1], p[2]))
+			set(side, "Size", UDim2.fromOffset(p[3], p[4]))
+			set(side, "BackgroundTransparency", transparency)
+		end
+	end
+
+	RunService.RenderStepped:Connect(function(dt: number)
 		local levels = Hud.levels()
 		if levels and isNew == nil then
 			isNew = not boughtAny(levels)
@@ -255,6 +324,21 @@ function Guide.start()
 		set(highlight, "Adornee", outline)
 		set(highlight, "Parent", if outline then workspace.CurrentCamera else nil)
 		pointHand(click)
+		dimAround(click, dt)
+		-- A step that leads somewhere new turns the camera there once (not again as the player
+		-- flickers in and out of reach of the same goal).
+		if goal and step ~= facedStep then
+			facedStep = step
+			CameraFeel.face(goal, CUE.faceSeconds)
+		end
+		-- The step showing goes to analytics on change, at most one per CLIENT gap (a step flickering
+		-- at a reach edge settles first).
+		local report = if active and not thanks then step else 0
+		local now = os.clock()
+		if report ~= reportedStep and now - reportedAt >= REPORT_GAP then
+			reportedStep, reportedAt = report, now
+			Telemetry.report("guide", report)
+		end
 		if not active then
 			return
 		end

@@ -91,6 +91,7 @@ local Map = require(script.Parent.Map)
 local Mechanics = require(script.Parent.Mechanics)
 local Payroll = require(script.Parent.Payroll)
 local Staff = require(script.Parent.Staff)
+local Telemetry = require(script.Parent.Telemetry)
 local Vehicles = require(script.Parent.Vehicles)
 
 local START_DELAY = 5 -- no party (Studio): start this long after the first player spawns
@@ -362,8 +363,9 @@ local function teamChanged()
 end
 
 -- `coins` go into the team's wallet. `player`: whose own income it is (their pour, hose or vehicle):
--- it also counts in their Earned, which client/Payout flies in as coins.
-local function earn(player: Player?, coins: number)
+-- it also counts in their Earned, which client/Payout flies in as coins. `reason`: the analytics
+-- income reason (common/Analytics.MONEY); nil (Studio and admin coins) is never reported.
+local function earn(player: Player?, coins: number, reason: string?)
 	team.wallet += coins
 	setGlobal("Wallet", team.wallet)
 	local state = player and states[player]
@@ -371,12 +373,17 @@ local function earn(player: Player?, coins: number)
 		state.earned += coins
 		player:SetAttribute("Earned", state.earned)
 	end
+	if reason then
+		Telemetry.earned(player, coins, reason)
+	end
 end
 
--- `coins` (already checked with Items.affords) leave the team's wallet.
-local function spend(coins: number)
+-- `coins` (already checked with Items.affords) leave the team's wallet, spent by `player` for
+-- analytics `reason` (common/Analytics.MONEY) on `sku` (the track, item or gate id).
+local function spend(coins: number, player: Player, reason: string, sku: string)
 	team.wallet = math.max(0, team.wallet - coins)
 	setGlobal("Wallet", team.wallet)
+	Telemetry.spent(player, coins, reason, sku)
 end
 
 -- Tells the rest of the team what `buyer` bought with the team's coins.
@@ -451,6 +458,9 @@ local function checkMilestones(before: number, after: number)
 		end
 	end
 	publishRevived()
+	for _, index in new do
+		Telemetry.milestone(index)
+	end
 	if next(raindrops) then
 		payRaindrops(raindrops)
 	end
@@ -470,6 +480,7 @@ local function sendToLobby(players: { Player }, reason: string)
 		warn(`[Run] would teleport {#players} player(s) to the lobby ({reason}); teleports don't run in Studio`)
 		return
 	end
+	Telemetry.teleporting(players)
 	local ok, err = Retry.run("teleport to lobby", function()
 		TeleportService:TeleportAsync(Places.LOBBY, players)
 	end, 3, 1)
@@ -663,6 +674,7 @@ local function openRun(key: string, mapId: string, members: { number }, replaceF
 	local problem = nil
 	if loadErr then
 		warn(`[Run] couldn't load run {key}: {loadErr}`)
+		Telemetry.saveUnavailable()
 		problem = "Couldn't load your run. Please try again."
 	elseif save and (save.mapId ~= mapId or not RunSave.sameTeam(save, members)) then
 		warn(`[Run] run {key} belongs to another team or map; not loaded`)
@@ -701,24 +713,36 @@ local function startPlaying()
 end
 
 -- The intro (client/Intro plays shared/IntroCut from IntroAt, server time). It ends when every
--- player here has watched it or anyone skips it (onIntro), or INTRO_SLACK after its length; then the
--- save remembers it (save.introSeen) and play starts.
+-- player here has watched it or anyone skips it (onIntro: `skipped`), or INTRO_SLACK after its
+-- length; then the save remembers it (save.introSeen) and play starts.
 local intro = { at = 0, done = {} :: { [Player]: boolean } }
 
-local function endIntro()
+local function endIntro(skipped: boolean?)
 	if run.phase ~= "intro" then
 		return
 	end
 	(run.save :: RunSave.Save).introSeen = true
+	Telemetry.introEnded(skipped == true)
 	table.clear(intro.done)
+	Zones.setFill(ocean, fillOf(run.current)) -- the run's water back (startIntro)
 	startPlaying()
 	task.spawn(saveRun, "intro seen")
 end
 
+-- The water here follows the cut too (full, then dry from its swap), so the terrain water streaming
+-- in to players while it plays is the sea their cut shows (client/Cutscene.setWater).
 local function startIntro()
 	intro.at = workspace:GetServerTimeNow() + INTRO_LEAD
+	Telemetry.introStarted(intro.at)
 	setGlobal("IntroAt", intro.at)
 	setPhase("intro")
+	Zones.setFill(ocean, 1)
+	local at = intro.at
+	task.delay(INTRO_LEAD + IntroCut.beats.swap, function()
+		if run.phase == "intro" and intro.at == at then
+			Zones.setFill(ocean, 0)
+		end
+	end)
 	task.delay(INTRO_LEAD + IntroCut.length + INTRO_SLACK, endIntro)
 end
 
@@ -880,6 +904,7 @@ local function onPlayerAdded(player: Player)
 		return
 	end
 	states[player] = newState()
+	Telemetry.playerIn(player)
 	if run.save then
 		applySaved(player)
 	end
@@ -933,6 +958,7 @@ local function onBuy(player: Player, id: unknown, bought: unknown)
 	if gate then
 		if bought == 0 and openGate(player, gate, false) then
 			player:SetAttribute("LastBuy", Honeycomb.encodeBuy(id, 1, workspace:GetServerTimeNow()))
+			Telemetry.boughtInHoneycomb(player)
 		end
 		return
 	end
@@ -943,6 +969,7 @@ local function onBuy(player: Player, id: unknown, bought: unknown)
 	local have = counts[id] or (if isTrack then 0 else -1)
 	local function publishBuy()
 		player:SetAttribute("LastBuy", Honeycomb.encodeBuy(id, have + 1, workspace:GetServerTimeNow()))
+		Telemetry.boughtInHoneycomb(player)
 	end
 	if bought < have then
 		remotes.Card:FireClient(player, "A teammate just bought that", CARD_SECONDS)
@@ -958,9 +985,14 @@ local function onBuy(player: Player, id: unknown, bought: unknown)
 	local level, status = Items.tabOffer(Config, team.levels, team, save.buildings, id, openAreas(), Ladder.helps(Config, team.levels, id))
 	local cost = if status == "buy" then price(level.cost) else 0
 	if status ~= "buy" or not Items.affords(team.wallet, cost) then
+		if status == "buy" then
+			Telemetry.blocked(player, "CantAfford", id)
+		elseif status == "locked" then
+			Telemetry.blocked(player, "Locked", id)
+		end
 		return
 	end
-	spend(cost)
+	spend(cost, player, "Upgrade", id)
 	counts[id] = have + 1
 	teamChanged()
 	publishBuy()
@@ -1100,7 +1132,7 @@ local function onIntro(player: Player, what: unknown)
 	end
 	if what == "skip" then
 		if workspace:GetServerTimeNow() - cut.at >= cut.skipAfter then
-			cut.over()
+			cut.over(true)
 		end
 	elseif what == "done" then
 		cut.done[player] = true
@@ -1206,12 +1238,12 @@ local function raise(litres: number)
 end
 
 -- `litres` worth `value` coins (before the tip and boosts) land in the ocean: the team earns them as
--- `player`'s income and the water rises. Callers check that the ocean takes them
--- (Water.pourAmount) and then checkFull.
-local function pourIn(player: Player, litres: number, value: number)
+-- `player`'s income (analytics `reason`: Pour, Hose or Vehicle) and the water rises. Callers check
+-- that the ocean takes them (Water.pourAmount) and then checkFull.
+local function pourIn(player: Player, litres: number, value: number, reason: string)
 	local state = states[player]
 	state.litres += litres
-	earn(player, value * boosted(state).coinBonus)
+	earn(player, value * boosted(state).coinBonus, reason)
 	raise(litres)
 end
 
@@ -1225,7 +1257,7 @@ local function creditPour(player: Player): boolean
 	local value = Water.share(state.carriedValue, state.carried, litres)
 	state.carried -= litres
 	state.carriedValue = if state.carried > 0 then state.carriedValue - value else 0
-	pourIn(player, litres, value)
+	pourIn(player, litres, value, "Pour")
 	return true
 end
 
@@ -1278,6 +1310,7 @@ local function onAct(player: Player, kind: unknown)
 			publishAct(player, kind)
 			setGlobal("LastPour", PourFlow.encode(poured, before - state.carried, workspace:GetServerTimeNow()))
 			publish(player)
+			Telemetry.poured(player)
 			checkFull()
 		end
 		return
@@ -1292,6 +1325,7 @@ local function onAct(player: Player, kind: unknown)
 		end
 		creditScoop(state, area, deep)
 		publish(player)
+		Telemetry.scooped(player, area.id)
 	end)
 end
 
@@ -1311,15 +1345,17 @@ openGate = function(player: Player, area, reach: boolean): boolean
 	end
 	local cost = price(area.gate.price)
 	if status ~= "buy" or not Items.affords(team.wallet, cost) then
+		Telemetry.blocked(player, if status == "buy" then "CantAfford" else "GateLocked", Areas.gateId(area.id))
 		return false
 	end
 	if reach and not inReach(player, Map.gatePrompt(Map.gate(ocean, area))) then
 		return false
 	end
-	spend(cost)
+	spend(cost, player, "Gate", Areas.gateId(area.id))
 	table.insert(save.gatesOpen, area.id)
 	Map.openGate(ocean, area)
 	publishGates()
+	Telemetry.gateOpened(player, area.id)
 	card(`{player.DisplayName} opened {area.name} for the team!`)
 	task.spawn(saveRun, `gate {area.id} opened`)
 	return true
@@ -1349,13 +1385,17 @@ local function onStand(player: Player, area, prompt: ProximityPrompt, stand: str
 	if status ~= "buy" then
 		local why = Format.standCard(item, status, team.wallet, item and Areas.byId(Config, item.area), fillOf(run.current), price)
 		remotes.Card:FireClient(player, why, CARD_SECONDS)
+		if item and (status == "money" or status == "locked") then
+			Telemetry.blocked(player, if status == "money" then "CantAfford" else "Locked", item.id)
+		end
 		return
 	end
-	spend(price(item.price))
+	spend(price(item.price), player, "Item", item.id)
 	table.insert(team.owned, item.id)
 	team.itemLevels[item.id] = 0
 	standBuys[key] = { at = now, by = player, name = item.name }
 	teamChanged()
+	Telemetry.itemBought(player, item.id)
 	local bought = if item.kind == "staff" then `You hired a {item.name} for the team! Assign them in TAB (Staff)` else `You bought the {item.name} for the team!`
 	remotes.Card:FireClient(player, bought, CARD_SECONDS)
 	announce(player, `the {item.name}`)
@@ -1443,7 +1483,7 @@ local function tickHose(player: Player, state, dt: number)
 	local litres = Water.pourAmount(rate * hose.due, run.current, run.target)
 	hose.due = 0
 	if litres > 0 then
-		pourIn(player, litres, litres * Config.ocean.coinsPerLitre * hose.area.payMultiplier)
+		pourIn(player, litres, litres * Config.ocean.coinsPerLitre * hose.area.payMultiplier, "Hose")
 		publish(player)
 		checkFull()
 	end
@@ -1481,7 +1521,7 @@ end
 
 function Run.start(oceanModel: Model)
 	ocean = oceanModel
-	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build", "Staff", "Intro" } do
+	for _, name in { "Buy", "Card", "Equip", "Act", "Look", "Admin", "Gadget", "Vehicle", "Build", "Staff", "Intro", "Telemetry" } do
 		remotes[name] = remote(name)
 	end
 	setGlobal("Fill", 0)
@@ -1509,8 +1549,8 @@ function Run.start(oceanModel: Model)
 		end,
 		price = price,
 		spend = spend,
-		pay = function(coins)
-			earn(nil, coins)
+		pay = function(coins, reason)
+			earn(nil, coins, reason)
 		end,
 		playing = function()
 			return run.phase == "playing"
@@ -1540,7 +1580,7 @@ function Run.start(oceanModel: Model)
 			return run.current, run.target
 		end,
 		pour = function(player, litres, value, areaId)
-			pourIn(player, litres, value)
+			pourIn(player, litres, value, "Vehicle")
 			worked(states[player], areaId) -- running the vehicle's loop speeds up the Firefighters on it
 			publish(player)
 			checkFull()
@@ -1563,6 +1603,93 @@ function Run.start(oceanModel: Model)
 		end,
 		vehicle = remotes.Vehicle,
 	}
+	-- What the run's analytics may read (server/Telemetry).
+	Telemetry.start({
+		states = states,
+		phase = function()
+			return run.phase
+		end,
+		loaded = function()
+			return run.save ~= nil
+		end,
+		started = function()
+			return run.started
+		end,
+		partyRun = function()
+			return run.session ~= nil and run.session.mode == "party"
+		end,
+		fill = function()
+			return fillOf(run.current)
+		end,
+		teamSize = function()
+			return run.teamSize
+		end,
+		wallet = function()
+			return team.wallet
+		end,
+		cheapest = function()
+			local save = run.save
+			if not save then
+				return nil
+			end
+			local best = nil
+			for _, track in Config.tracks do
+				local level, status = Items.tabOffer(Config, team.levels, team, save.buildings, track.id, openAreas(), Ladder.helps(Config, team.levels, track.id))
+				if status == "buy" then
+					best = math.min(best or math.huge, price(level.cost))
+				end
+			end
+			return best
+		end,
+		boughtAny = function()
+			for _, level in team.levels do
+				if level > 0 then
+					return true
+				end
+			end
+			return false
+		end,
+		gatesOpen = gatesOpen,
+		milestones = function()
+			return if run.save and run.save.milestones then run.save.milestones else {}
+		end,
+		toolLevel = function()
+			return team.levels.tool or 0
+		end,
+		playSeconds = playSeconds,
+		whereOf = function(player)
+			local root = rootOf(player)
+			local nearest, best = "None", math.huge
+			if root then
+				for _, id in reachableIds() do
+					local distance = (areaPart(Areas.byId(Config, id), "Source").Position - root.Position).Magnitude
+					if distance < best then
+						nearest, best = `Area{id}`, distance
+					end
+				end
+			end
+			return nearest
+		end,
+		nearSource = function(player)
+			return (openSpot(player, "Source")) ~= nil
+		end,
+		shortOf = function(id)
+			local save = run.save
+			if not save then
+				return nil
+			end
+			local gate = Areas.fromGateId(Config, id)
+			if gate then
+				return if Areas.gateOffer(Config, save.gatesOpen, fillOf(run.current), gate.id) == "buy" then price(gate.gate.price) else nil
+			end
+			local level, status = Items.tabOffer(Config, team.levels, team, save.buildings, id, openAreas(), Ladder.helps(Config, team.levels, id))
+			if status == "buy" then
+				return price(level.cost)
+			end
+			local item = Items.get(Config, id)
+			return if item and not table.find(team.owned, item.id) and item.kind ~= "building" then price(item.price) else nil
+		end,
+	}, remotes.Telemetry)
 	Payroll.start(hooks)
 	Mechanics.start(ocean, hooks)
 	Vehicles.start(ocean, hooks)
@@ -1606,6 +1733,7 @@ function Run.start(oceanModel: Model)
 		onPlayerAdded(player)
 	end
 	Players.PlayerRemoving:Connect(function(player)
+		Telemetry.playerOut(player) -- first: it reads the player's state
 		Vehicles.leave(player)
 		intro.done[player] = nil
 		ending.done[player] = nil

@@ -1,6 +1,6 @@
 -- Scoop and pour. Stand by an open area's Source (the cove's is the well) to scoop, and by an open
 -- area's Pour or anywhere next to where the water will be (shared/Zones.nearFlood) to pour, aim at
--- the water and press E, left mouse, RT or the touch button. A scoop is one sweep (the tool fills over
+-- the water and press E, left mouse, RT, the touch button or (touch) tap anywhere on the world. A scoop is one sweep (the tool fills over
 -- `Sweeps` of them); each press does one sweep, and holding keeps sweeping only once the player owns
 -- the Hold upgrade. A pour is one quick tip that empties the tool. An action that has started always
 -- plays to the end. The server re-checks and credits each action (server/Run onAct). Viewmodel and
@@ -15,6 +15,8 @@
 -- Area mechanics (shared/AreaRules): a deep pool behind a broken rock and, with the Cloud Net, the
 -- drifting cloud from the net's range are scooped like a Source (Hud.scoopSpot); at the Glacier's
 -- Source each sweep chips the ice block (IceHits); Heat Gloves shorten sweeps in hot pools.
+-- The hint (Hud.ActHint) sits just under the crosshair: a keycap (Hud.paintKey; "TAP" on touch,
+-- where a tap anywhere on the world presses too) and one short word, so it can't be missed.
 local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,6 +42,7 @@ local SPRAY_RESEND_SECONDS = 0.25 -- while the server's Spraying disagrees with 
 local BUTTON_SCALE = 1.15
 local BUTTON_GAP = 14
 local BUTTON_RISE = 0.35
+local HINT_BELOW = 18 -- HUD pixels from the crosshair's middle down to the hint's top
 
 export type Kind = "scoop" | "pour"
 export type Current = { kind: Kind, id: number, started: number, duration: number, hit: Vector3 }
@@ -69,20 +72,22 @@ local function emit(listeners: { (Current) -> () }, action: Current)
 	end
 end
 
-local function keyName(): string
+-- The key the act input is on, for the hint's keycap (touch: a tap anywhere on the world, or the
+-- big button).
+local function keyName(): string?
 	local input = Hud.input()
 	if input == "touch" then
-		return "the button"
+		return "TAP"
 	elseif input == "gamepad" then
 		return "RT"
 	end
 	return "E"
 end
 
-local function jumpName(): string
+local function jumpName(): string?
 	local input = Hud.input()
 	if input == "touch" then
-		return "the jump button"
+		return nil
 	elseif input == "gamepad" then
 		return "A"
 	end
@@ -94,7 +99,12 @@ function Action.start()
 	local gadgetRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Gadget") :: RemoteEvent
 	local vehicleRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Vehicle") :: RemoteEvent
 	local gui = player:WaitForChild("PlayerGui"):WaitForChild("Hud")
-	local hint = Hud.find(gui, "ActHint")
+	local hint = Hud.find(gui, "ActHint") :: GuiObject
+	local hintText = Hud.find(hint, "Text") :: TextLabel
+	local hintKey = Hud.find(hint, "Key") :: GuiObject
+	local hintKeyText = Hud.find(hintKey, "Text") :: TextLabel
+	Hud.paintKey(hintKey)
+	local crosshair = Hud.find(player.PlayerGui:WaitForChild("Cursor"), "Cursor") :: GuiObject
 	local honeycomb = Hud.find(gui, "Honeycomb")
 
 	local seeParams = RaycastParams.new()
@@ -130,6 +140,14 @@ function Action.start()
 	-- A key released while the window is unfocused never sends End.
 	UserInputService.WindowFocusReleased:Connect(function()
 		held = false
+	end)
+	-- On touch a tap anywhere on the world is a press too (the button still works): the act happens
+	-- only if the look is on the water, like any press. Taps on UI (joystick, jump, hotbar, windows)
+	-- and camera drags never fire this.
+	UserInputService.TouchTapInWorld:Connect(function(_, processedByUI)
+		if not processedByUI then
+			tapped = true
+		end
 	end)
 
 	-- Where the aim enters `part` (a Source, DeepPool, cloud or Pour) grown by AIM_MARGIN sideways and
@@ -243,30 +261,32 @@ function Action.start()
 		emit(startedListeners, action)
 	end
 
-	-- `ice`: the scoop chips an ice block (the Glacier's Source).
-	local function hintText(kind: Kind?, aimed: boolean, ocean: Model?, ice: boolean): string?
+	-- `ice`: the scoop chips an ice block (the Glacier's Source). Returns the hint's word and its key.
+	local function hintFor(kind: Kind?, aimed: boolean, ice: boolean): (string?, string?)
 		if not kind or current then
-			return nil
+			return nil, nil
 		end
 		local carried = player:GetAttribute("Carried") or 0
 		local capacity = player:GetAttribute("Capacity") or 0
 		if kind == "scoop" and carried >= capacity * (1 - 1e-6) then
-			return `Full! Pour it into the {if ocean then ocean.Name:lower() else "water"}`
+			return "Full! Go pour", nil
 		elseif kind == "pour" and carried <= 0 then
-			return "Empty! Scoop more at the well"
+			return "Empty! Go scoop", nil
 		elseif not aimed then
-			return "Aim at the water"
+			return "Aim at the water", nil
 		end
-		local verb = if kind == "scoop" and player:GetAttribute("Hold") then "Hold" else "Press"
 		if ice then
 			local needed = AreaRules.iceHits(Config, Items.gadgetStat(Config, Hud.items(), "icePick", "hits"))
-			return `{verb} {keyName()} to chip the ice ({player:GetAttribute("IceHits") or 0}/{needed})`
+			return `Chip the ice {player:GetAttribute("IceHits") or 0}/{needed}`, keyName()
 		end
-		return `{verb} {keyName()} to {kind}`
+		if kind == "scoop" then
+			return if player:GetAttribute("Hold") then "Hold to scoop" else "Scoop", keyName()
+		end
+		return "Pour", keyName()
 	end
 
 	-- The Garden Hose: a press by a Tap clips it there; once clipped it sprays while the input is held
-	-- aimed at the water. Returns the hint and the touch button's title.
+	-- aimed at the water. Returns the hint, the touch button's title and the hint's key.
 	-- A hose's spraying is compared with the server's (`attribute`) and resent while they differ: a
 	-- toggle the server's rate limit drops must not leave it stuck on or off.
 	local function sprayToggle(remote: RemoteEvent, attribute: string): (boolean) -> ()
@@ -281,40 +301,60 @@ function Action.start()
 	end
 	local setSpray = sprayToggle(gadgetRemote, "Spraying")
 	local setTruckSpray = sprayToggle(vehicleRemote, "VehicleSpraying")
-	local function hoseStep(ocean: Model, root: BasePart, character: Model, camera: Camera): (string, string?)
+	local function hoseStep(ocean: Model, root: BasePart, character: Model, camera: Camera): (string, string?, string?)
 		if (player:GetAttribute("HoseArea") or 0) == 0 then
 			if not Hud.openSpot(ocean, "Tap", root.Position) then
-				return "Take the hose to a tap by a pour spot", nil
+				return "Find a tap by a pour spot", nil, nil
 			end
 			if tapped then
 				gadgetRemote:FireServer("clip")
 			end
-			return `Press {keyName()} to clip the hose to the tap`, "Clip"
+			return "Clip the hose", "Clip", keyName()
 		end
 		local reach = Items.gadgetStat(Config, Hud.items(), "gardenHose", "reach")
 		local _, hit = target(ocean, root, character, camera, reach, true)
 		local want = held and hit ~= nil
 		setSpray(want)
 		if not hit then
-			return "Aim the hose at the water", "Spray"
+			return "Aim at the water", "Spray", nil
 		end
-		return if want then "Spraying!" else `Hold {keyName()} to spray`, "Spray"
+		if want then
+			return "Spraying!", "Spray", nil
+		end
+		return "Spray", "Spray", keyName()
 	end
 
 	-- The truck's hose (the caller checked Vehicles.hoseReady): sprays from the tank while the input is
 	-- held aimed at the water.
-	local function truckStep(ocean: Model, root: BasePart, character: Model, camera: Camera): (string, string?)
+	local function truckStep(ocean: Model, root: BasePart, character: Model, camera: Camera): (string, string?, string?)
 		local _, hit = target(ocean, root, character, camera, nil, true)
 		local want = held and hit ~= nil
 		setTruckSpray(want)
 		if not hit then
-			return "Aim the truck's hose at the water", "Spray"
+			return "Aim at the water", "Spray", nil
 		end
-		return if want then "Spraying!" else `Hold {keyName()} to spray from the truck`, "Spray"
+		if want then
+			return "Spraying!", "Spray", nil
+		end
+		return "Spray from the truck", "Spray", keyName()
 	end
 
 	local shownTitle: string? = nil
 	local shownIcon: string? = nil
+	-- The touch button, fetched off the frame loop: GetButton waits until Roblox has made it (it may
+	-- never, e.g. before the touch controls exist), and a wait there would stall every act on touch.
+	local actButton: GuiObject? = nil
+	local buttonAskedAt = -math.huge
+	local function fetchButton(now: number)
+		if (actButton and actButton.Parent) or not UserInputService.TouchEnabled or now - buttonAskedAt < 1 then
+			return
+		end
+		buttonAskedAt = math.huge -- one ask at a time
+		task.spawn(function()
+			actButton = ContextActionService:GetButton(ACTION_NAME)
+			buttonAskedAt = os.clock()
+		end)
+	end
 	-- The touch button: big, left of Jump, showing the thing in hand (shared/Icons).
 	local function fitButton(button: GuiObject, gadget: any)
 		local touchGui = player.PlayerGui:FindFirstChild("TouchGui")
@@ -367,14 +407,14 @@ function Action.start()
 			and camera
 			and not windowOpen
 		local kind, hit, area, deep = nil, nil, nil, false
-		local text, title = nil, nil
+		local text, title, key = nil, nil, nil
 		local toolFull = player:GetAttribute("Equipped") ~= false and (player:GetAttribute("Carried") or 0) > 0
 		if ready and gadget == "gardenHose" then
 			setTruckSpray(false)
-			text, title = hoseStep(ocean, root, character, camera)
+			text, title, key = hoseStep(ocean, root, character, camera)
 		elseif ready and not toolFull and Vehicles.hoseReady(root.Position) and Hud.nearPour(ocean, root.Position) then
 			setSpray(false)
-			text, title = truckStep(ocean, root, character, camera)
+			text, title, key = truckStep(ocean, root, character, camera)
 		else
 			setSpray(false)
 			setTruckSpray(false)
@@ -384,18 +424,30 @@ function Action.start()
 				title = if kind == "scoop" then "Scoop" elseif kind then "Pour" else nil
 			end
 			local ice = kind == "scoop" and not deep and area.mechanic == "ice"
-			text = hintText(kind, hit ~= nil, ocean, ice)
+			text, key = hintFor(kind, hit ~= nil, ice)
 			if ready and gadget == "jetpackTank" then
-				text = if (player:GetAttribute("Fuel") or 0) > 0 then `Hold {jumpName()} to fly` else "Out of fuel: land to refill"
+				if (player:GetAttribute("Fuel") or 0) > 0 then
+					text, key = "Fly", jumpName()
+				else
+					text, key = "Out of fuel: land to refill", nil
+				end
 			end
 		end
 
 		Hud.set(hint, "Visible", text ~= nil)
 		if text then
-			Hud.set(hint, "Text", text)
+			Hud.set(hintText, "Text", text)
+			Hud.set(hintKey, "Visible", key ~= nil)
+			if key then
+				Hud.set(hintKeyText, "Text", key)
+			end
+			-- Just under the crosshair (its own ScreenGui; AbsolutePosition is shared screen space).
+			local middle = (crosshair.AbsolutePosition + crosshair.AbsoluteSize / 2 - gui.AbsolutePosition) / Hud.uiScale()
+			Hud.set(hint, "Position", UDim2.fromOffset(math.round(middle.X), math.round(middle.Y + HINT_BELOW)))
 		end
-		local button = ContextActionService:GetButton(ACTION_NAME)
-		if button then
+		fetchButton(now)
+		local button = actButton
+		if button and button.Parent then
 			Hud.set(button, "Visible", title ~= nil)
 			if title then
 				fitButton(button, gadget)

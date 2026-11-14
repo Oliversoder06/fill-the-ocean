@@ -54,6 +54,19 @@ function Water.litresAt(fraction: number, ocean: Curve, players: number): number
 	return litres
 end
 
+-- The ocean's water surface for a fill fraction, in studs above its floor: `depth` when full, else
+-- the nearest whole number of `step`s (the terrain water is rewritten only when it moves a step;
+-- one step for any water at all); nil when dry.
+function Water.surface(fraction: number, depth: number, step: number): number?
+	if fraction <= 0 then
+		return nil
+	elseif fraction >= 1 then
+		return depth
+	end
+	local steps = math.max(1, math.floor(fraction * depth / step + 0.5))
+	return math.min(depth, steps * step)
+end
+
 -- One pour empties the tool, but never past the target; the rest stays carried.
 function Water.pourAmount(carried: number, current: number, target: number): number
 	return math.max(0, math.min(carried, target - current))

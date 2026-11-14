@@ -1,6 +1,8 @@
 --!strict
 -- Parts of the ocean and area models (the map contract in server/Map.luau), and distance checks.
 
+local Water = require(script.Parent.Water)
+
 local Zones = {}
 
 -- Studs from a Source or Pour / from where the water will be within which a player scoops or pours.
@@ -147,6 +149,7 @@ local GROUND_PROBE = 1.5 -- studs below the feet that still count as standing
 local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Exclude
 groundParams.RespectCanCollide = true -- the ground, not invisible zones
+groundParams.IgnoreWater = true -- nor the ocean (terrain water)
 
 -- What `character` stands on (the jetpack refuels there, snow slows walking): the hit of a ray from
 -- `root` down past its feet, or nil in the air.
@@ -168,6 +171,7 @@ local SPOKES = 8
 local floodParams = RaycastParams.new()
 floodParams.FilterType = Enum.RaycastFilterType.Exclude
 floodParams.RespectCanCollide = true -- the ground, not invisible zones, leaves or the water itself
+floodParams.IgnoreWater = true -- the ocean is terrain water
 
 local function waterTiles(ocean: Model): ({ BasePart }, number)
 	local water = Zones.part(ocean, "Water")
@@ -191,25 +195,311 @@ local function inFootprint(tiles: { BasePart }, point: Vector3): boolean
 	return false
 end
 
--- Sets the visible water height for a fill fraction (0-1). An empty basin shows no water at all, so
--- a drained ocean looks drained. The server sets the run's (server/Run); client/Intro shows its own
--- for a while and then this again with the run's Fill. Each tile keeps its look in the place as its
--- attribute BaseTransparency (set by the first call, on the server).
-function Zones.setFill(ocean: Model, fraction: number)
-	local tiles, fullY = waterTiles(ocean)
-	local depth = Zones.part(ocean, "Water"):GetAttribute("Depth") :: number
-	local height = math.max(0.05, depth * math.clamp(fraction, 0, 1))
-	local y = fullY - depth + height / 2
-	for _, tile in tiles do
-		local base = tile:GetAttribute("BaseTransparency")
-		if type(base) ~= "number" then
-			base = tile.Transparency
-			tile:SetAttribute("BaseTransparency", base)
+local CELL = 4 -- studs per terrain voxel; voxel regions sit on a grid of them
+local PIECE = 64 -- studs a side: the sea is written a square at a time, on the grid terrain streams by
+local WATER_STEP = 0.1 -- studs the surface moves at a time: each move rewrites a layer of the sea
+local FRAME_BUDGET = 0.004 -- seconds of terrain work per frame: a change spreads over frames, never a hitch
+local DRY = -math.huge
+
+type Piece = { x0: number, z0: number, x1: number, z1: number }
+type Row = { x0: number, z0: number, x1: number, z1: number, pieces: { Piece } } -- a Water tile's row of pieces
+
+-- One side's share of the water: `ground` the server's (Zones.setFill), else a client's
+-- (Zones.setOpenSea). `written` is the surface it last gave the sea (DRY: none; nil: not known yet),
+-- `bottom` the lowest a client's sheet goes, `wanted` the fill asked for and not written yet, `mend`
+-- a client's sheet to put back where it went (Zones.mendOpenSea); `refilled` the pieces the last
+-- mend refilled and `land` those still dry after that (ground above the water), until the next change.
+type Writer = {
+	ground: boolean,
+	written: number?,
+	bottom: number,
+	wanted: number?,
+	mend: boolean,
+	busy: boolean,
+	refilled: { [Piece]: boolean },
+	land: { [Piece]: boolean },
+}
+
+local writers: { [Model]: { [string]: Writer } } = {}
+local rowsOf: { [Model]: { Row } } = {}
+local groundAt: { [Piece]: boolean } = {} -- the server's: its terrain is all there and never moves
+
+local function cellBelow(y: number): number
+	return math.floor(y / CELL) * CELL
+end
+
+local function cellAbove(y: number): number
+	return math.ceil(y / CELL) * CELL
+end
+
+-- A function to call between pieces of work: it waits a frame once this one's FRAME_BUDGET is used.
+local function pacer(): () -> ()
+	local started = os.clock()
+	return function()
+		if os.clock() - started >= FRAME_BUDGET then
+			task.wait()
+			started = os.clock()
 		end
-		tile.Size = Vector3.new(tile.Size.X, height, tile.Size.Z)
-		tile.Position = Vector3.new(tile.Position.X, y, tile.Position.Z)
-		tile.Transparency = if fraction <= 0 then 1 else base :: number
 	end
+end
+
+-- The ocean's Water tiles cut along the world's PIECE grid, row by row (the tiles are unturned with
+-- their edges on the terrain grid, server/Map).
+local function grid(ocean: Model, parts: { BasePart }): { Row }
+	local cached = rowsOf[ocean]
+	if cached then
+		return cached
+	end
+	local rows: { Row } = {}
+	for _, part in parts do
+		local p, size = part.Position, part.Size
+		local x0, z0, x1, z1 = p.X - size.X / 2, p.Z - size.Z / 2, p.X + size.X / 2, p.Z + size.Z / 2
+		local z = math.floor(z0 / PIECE) * PIECE
+		while z < z1 do
+			local row: Row = { x0 = x0, z0 = math.max(z, z0), x1 = x1, z1 = math.min(z + PIECE, z1), pieces = {} }
+			local x = math.floor(x0 / PIECE) * PIECE
+			while x < x1 do
+				table.insert(row.pieces, { x0 = math.max(x, x0), z0 = row.z0, x1 = math.min(x + PIECE, x1), z1 = row.z1 })
+				x += PIECE
+			end
+			table.insert(rows, row)
+			z += PIECE
+		end
+	end
+	rowsOf[ocean] = rows
+	return rows
+end
+
+-- One channel of the voxels along a row from `bottom` up `cells` cells, between `z0` and `z1` (within
+-- the row), indexed [x][y][z] from that corner. Thin reads like this cost far less than one big one.
+local function readRow(row: Row, channel: string, bottom: number, cells: number, z0: number, z1: number): any
+	local region = Region3.new(Vector3.new(row.x0, bottom, z0), Vector3.new(row.x1, bottom + cells * CELL, z1))
+	local channels: any = workspace.Terrain:ReadVoxelChannels(region:ExpandToGrid(CELL), CELL, { channel })
+	return channels[channel]
+end
+
+-- The index of a world X or Z in voxels read from `from` along that axis.
+local function voxelIndex(at: number, from: number): number
+	return math.floor((at - from) / CELL) + 1
+end
+
+-- Finds the server's pieces (once): those with solid terrain, the seabed or the shore, at the floor.
+local function findGround(rows: { Row }, floor: number, pace: () -> ())
+	local bottom = cellBelow(floor) - CELL
+	for _, row in rows do
+		if groundAt[row.pieces[1]] ~= nil then
+			continue
+		end
+		local solid = readRow(row, "SolidOccupancy", bottom, 2, row.z0, row.z1)
+		local depth = voxelIndex(row.z1, row.z0) - 1
+		for _, piece in row.pieces do
+			local found = false
+			for x = voxelIndex(piece.x0, row.x0), voxelIndex(piece.x1, row.x0) - 1 do
+				for z = 1, depth do
+					if solid[x][1][z] > 0 or solid[x][2][z] > 0 then
+						found = true
+						break
+					end
+				end
+				if found then
+					break
+				end
+			end
+			groundAt[piece] = found
+		end
+		pace()
+	end
+end
+
+local function fillPiece(piece: Piece, from: number, to: number)
+	local centre = Vector3.new((piece.x0 + piece.x1) / 2, (from + to) / 2, (piece.z0 + piece.z1) / 2)
+	workspace.Terrain:FillBlock(CFrame.new(centre), Vector3.new(piece.x1 - piece.x0, to - from, piece.z1 - piece.z0), Enum.Material.Water)
+end
+
+-- The ocean's surface height for a fill fraction (0-1), on the step it is drawn at; the floor when dry.
+function Zones.level(ocean: Model, fraction: number): number
+	local _, fullY = waterTiles(ocean)
+	local depth = Zones.part(ocean, "Water"):GetAttribute("Depth") :: number
+	return fullY - depth + (Water.surface(fraction, depth, WATER_STEP) or 0)
+end
+
+-- Writes one change to the writer's pieces, a frame's budget at a time: the server's are those with
+-- ground, its water reaching down to the floor; a client's are all of them, nearest first, a sheet a
+-- cell or two deep (where the server's water has streamed in, the same cells come out the same).
+-- Lowering (or, for the server, not knowing what is there) clears from the cell holding the new
+-- surface up; rising fills from the cell holding the old one.
+local function write(ocean: Model, w: Writer, fraction: number)
+	local parts, fullY = waterTiles(ocean)
+	local depth = Zones.part(ocean, "Water"):GetAttribute("Depth") :: number
+	local floor = fullY - depth
+	local height = Water.surface(fraction, depth, WATER_STEP)
+	local now = if height then floor + height else DRY
+	local was = w.written
+	if was == now then
+		return
+	end
+	local base = if w.ground or now == DRY then floor else math.max(floor, cellBelow(now) - CELL)
+	local clearFrom: number?, clearTo: number? = nil, nil
+	local fillFrom = base
+	if was == nil then
+		if w.ground then
+			clearFrom, clearTo = floor, fullY
+		end
+	elseif now < was then
+		clearFrom, clearTo = if now ~= DRY then now elseif w.ground then floor else w.bottom, was
+		fillFrom = if w.ground then math.max(floor, cellBelow(now)) else base
+	elseif was ~= DRY then
+		fillFrom = math.max(floor, cellBelow(was))
+	end
+	local clearBottom = if clearFrom then cellBelow(clearFrom) else 0
+	local clearTop = if clearTo then cellAbove(clearTo) else 0
+	for _, part in parts do
+		if part.Transparency ~= 1 then
+			part.Transparency = 1
+		end
+	end
+	local pace = pacer()
+	local rows = grid(ocean, parts)
+	local list: { Piece } = {}
+	if w.ground then
+		findGround(rows, floor, pace)
+		for _, row in rows do
+			for _, piece in row.pieces do
+				if groundAt[piece] then
+					table.insert(list, piece)
+				end
+			end
+		end
+	else
+		local eye = workspace.CurrentCamera.CFrame.Position
+		local away: { [Piece]: number } = {}
+		for _, row in rows do
+			for _, piece in row.pieces do
+				away[piece] = ((piece.x0 + piece.x1) / 2 - eye.X) ^ 2 + ((piece.z0 + piece.z1) / 2 - eye.Z) ^ 2
+				table.insert(list, piece)
+			end
+		end
+		table.sort(list, function(a, b)
+			return away[a] < away[b]
+		end)
+	end
+	local terrain = workspace.Terrain
+	for _, piece in list do
+		if clearTop > clearBottom then
+			local region = Region3.new(Vector3.new(piece.x0, clearBottom, piece.z0), Vector3.new(piece.x1, clearTop, piece.z1))
+			terrain:ReplaceMaterial(region:ExpandToGrid(CELL), CELL, Enum.Material.Water, Enum.Material.Air)
+		end
+		if now > fillFrom then
+			fillPiece(piece, fillFrom, now)
+		end
+		pace()
+	end
+	w.written = now
+	w.bottom = if now == DRY then math.huge else math.min(w.bottom, fillFrom)
+	table.clear(w.refilled)
+	table.clear(w.land)
+end
+
+-- Puts a client's sheet back wherever it went (terrain streaming out takes this client's water with
+-- it): in every piece dry at its middle just under the surface. A piece still dry after that is
+-- ground above the water and left alone until the next change.
+local function mend(ocean: Model, w: Writer)
+	local now = w.written
+	if now == nil or now == DRY then
+		return
+	end
+	local parts, fullY = waterTiles(ocean)
+	local floor = fullY - (Zones.part(ocean, "Water"):GetAttribute("Depth") :: number)
+	local base = math.max(floor, cellBelow(now) - CELL)
+	local probe = cellBelow(math.max(floor, now - 0.05)) -- the cell holding the surface
+	local pace = pacer()
+	for _, row in grid(ocean, parts) do
+		local line = cellBelow((row.z0 + row.z1) / 2)
+		local liquid = readRow(row, "LiquidOccupancy", probe, 1, line, line + CELL)
+		for _, piece in row.pieces do
+			if liquid[voxelIndex((piece.x0 + piece.x1) / 2, row.x0)][1][1] > 0 then
+				w.refilled[piece] = nil
+			elseif w.refilled[piece] then
+				w.refilled[piece] = nil
+				w.land[piece] = true
+			elseif not w.land[piece] then
+				fillPiece(piece, base, now)
+				w.refilled[piece] = true
+				w.bottom = math.min(w.bottom, base)
+			end
+		end
+		pace()
+	end
+end
+
+local function writer(ocean: Model, ground: boolean): Writer
+	local mine = writers[ocean]
+	if not mine then
+		mine = {}
+		writers[ocean] = mine
+	end
+	local key = if ground then "ground" else "open"
+	local w = mine[key]
+	if not w then
+		w = { ground = ground, written = nil, bottom = math.huge, wanted = nil, mend = false, busy = false, refilled = {}, land = {} }
+		mine[key] = w
+	end
+	return w
+end
+
+-- Runs `w`'s asks over the next frames, without yielding here: the latest fill asked for (asks
+-- made meanwhile are written next), then a mend if one was asked for.
+local function work(ocean: Model, w: Writer)
+	if w.busy then
+		return
+	end
+	w.busy = true
+	task.spawn(function()
+		local ok, err = xpcall(function()
+			while w.wanted ~= nil or w.mend do
+				local fill = w.wanted
+				if fill ~= nil then
+					w.wanted = nil
+					write(ocean, w, fill)
+				else
+					w.mend = false
+					mend(ocean, w)
+				end
+			end
+		end, debug.traceback)
+		w.busy = false
+		if not ok then
+			error(`[Zones] writing the ocean's water failed: {err}`, 0)
+		end
+	end)
+end
+
+-- Sets the ocean's water for a fill fraction (0-1) where there is ground under the sea: Roblox
+-- terrain water in the Water tiles' footprint from the floor (the Basin's top) up to Zones.level, none
+-- at all when dry, around the seabed and the shore (they keep their ground). The server's
+-- (server/Run): it streams in to each player near it, with the seabed. The tiles only mark where
+-- the water goes and stay hidden. Only what moved since the last change is rewritten.
+function Zones.setFill(ocean: Model, fraction: number)
+	local w = writer(ocean, true)
+	w.wanted = fraction
+	work(ocean, w)
+end
+
+-- A client's own sea (client/Sea): a sheet at Zones.setFill's surface over the whole footprint, out
+-- to the horizon. Past the seabed the server puts no terrain, so streaming never takes it away; over
+-- the seabed the server's water streams in on top of it, and streaming out takes both
+-- (Zones.mendOpenSea puts the sheet back).
+function Zones.setOpenSea(ocean: Model, fraction: number)
+	local w = writer(ocean, false)
+	w.wanted = fraction
+	work(ocean, w)
+end
+
+-- Puts this client's open sea back where seabed it covered has streamed in and out again since.
+function Zones.mendOpenSea(ocean: Model)
+	local w = writer(ocean, false)
+	w.mend = true
+	work(ocean, w)
 end
 
 -- Whether `point` (a surface you look at) will be under water when the ocean is full.

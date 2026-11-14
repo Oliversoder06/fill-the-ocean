@@ -41,6 +41,7 @@ local Data = require(script.Parent.HoneycombData)
 local Hex = require(script.Parent.HoneycombHex)
 local Text = require(script.Parent.HoneycombText)
 local Purchase = require(script.Parent.Purchase)
+local Telemetry = require(script.Parent.Telemetry)
 local UpgradesButton = require(script.Parent.HoneycombButton)
 local Window = require(script.Parent.Window)
 
@@ -129,6 +130,7 @@ function Honeycomb.start()
 	local staffRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Staff") :: RemoteEvent
 	local root = Hud.find(gui, "Honeycomb") :: Frame
 	local backdrop = Hud.find(root, "Backdrop") :: Frame
+	Hud.bleed(backdrop) -- past the top bar and a phone's notch too
 	local closeButton = Hud.find(root, "CloseButton")
 	local closeLabel = Hud.find(closeButton, "Label") :: TextLabel
 	local title = Hud.find(root, "Title") :: TextLabel
@@ -177,6 +179,7 @@ function Honeycomb.start()
 	local onSale = false -- gateOnSale at the last refresh
 	local input: Input = "mouse"
 	local cardKey: string? = nil -- the upgrade the card shows
+	local viewed = false -- an upgrade's card showed since opening (analytics: Honeycomb_v1 Viewed)
 	local overCard = false -- the mouse is on the card
 	local canvasAt = canvas.Position -- Studio's: the canvas centre before any pan
 	local pan, userZoom = Vector2.zero, 1 -- the player's drag and wheel zoom (x the fitted zoom)
@@ -265,7 +268,7 @@ function Honeycomb.start()
 
 	local selectKey: (string?) -> ()
 	local showView: (string, string?) -> ()
-	local setOpen: (boolean, string?) -> ()
+	local setOpen: (boolean, string?, string?) -> ()
 	local clickUpgrade: (Hex.Hex, Input) -> ()
 	local actions: { [Hex.Hex]: (Input) -> () } = {} -- what a click on each hex does (gamepad A too)
 
@@ -515,6 +518,9 @@ function Honeycomb.start()
 		elseif kind == "gamepad" and Card.hiredStaff(link, view) then
 			assign()
 		elseif st.state ~= "max" then
+			if st.state == "short" then
+				Telemetry.report("short", link.id) -- a price wall: the server works out how far short
+			end
 			Purchase.deny(hex.button)
 			Card.pulse(card)
 		end
@@ -611,11 +617,16 @@ function Honeycomb.start()
 		return Enum.ContextActionResult.Sink
 	end
 
-	setOpen = function(value: boolean, pick: string?)
+	-- `source`: how it was opened (common/Analytics.SOURCES), for analytics.
+	setOpen = function(value: boolean, pick: string?, source: string?)
 		if value then
 			local was = open
 			open, isOpen = true, true
 			if not was then
+				viewed = false
+				if source then
+					Telemetry.report("hcOpen", source)
+				end
 				window.open(1)
 				TweenService:Create(backdrop, cover, { BackgroundTransparency = shade }):Play()
 				TweenService:Create(blur, cover, { Size = CUE.blur }):Play()
@@ -633,6 +644,7 @@ function Honeycomb.start()
 			end
 		elseif open then
 			open, isOpen = false, false
+			Telemetry.report("hcClose")
 			animToken += 1
 			cardKey, press = nil, nil
 			ContextActionService:UnbindAction("HoneycombBack")
@@ -648,7 +660,7 @@ function Honeycomb.start()
 
 	showId = function(id: string)
 		if inRun() then
-			setOpen(true, id)
+			setOpen(true, id, "Goal")
 		end
 	end
 
@@ -665,8 +677,8 @@ function Honeycomb.start()
 		return (v.back :: Hex.Hex).button
 	end
 
-	UpgradesButton.start(upgrades, function()
-		setOpen(not open and inRun())
+	UpgradesButton.start(upgrades, function(source: string)
+		setOpen(not open and inRun(), nil, source)
 	end)
 
 	local function onInputType()
@@ -812,6 +824,10 @@ function Honeycomb.start()
 		if key ~= cardKey then
 			cardKey = key
 			paintCard(readView())
+			if key and not viewed then
+				viewed = true
+				Telemetry.report("hcView")
+			end
 		end
 		local shown = if cardKey then v.byKey[cardKey] else nil
 		if shown and card.frame.Visible then

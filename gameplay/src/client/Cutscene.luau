@@ -27,9 +27,10 @@ local UserInputService = game:GetService("UserInputService")
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local IntroClips = require(ReplicatedStorage.Shared.IntroClips)
 local IntroCut = require(ReplicatedStorage.Shared.IntroCut)
-local Zones = require(ReplicatedStorage.Shared.Zones)
+local Arrival = require(script.Parent.Arrival)
 local Hud = require(script.Parent.Hud)
 local Music = require(script.Parent.Music)
+local Sea = require(script.Parent.Sea)
 local Staff = require(script.Parent.Staff)
 
 local STEP = "Cutscene"
@@ -48,6 +49,7 @@ local CHARACTER_WAIT = 5 -- seconds a cut waits for your character to spawn
 local STREAM_WAIT = 10 -- seconds it waits for the beach to stream in here (StreamingEnabled)
 local CURSOR_SECONDS = 2 -- the mouse cursor shows for this long after the mouse moves (for Skip)
 local HOLD_SECONDS = 15 -- a cut that ends on black holds it this long for the lobby to take over
+local COVER_FADE = TweenInfo.new(0.6) -- the black from joining fades into play when no cut comes
 
 local player = Players.LocalPlayer
 local Cutscene = {}
@@ -57,6 +59,7 @@ local AnimPlayer: any
 local kit: any = nil -- the place's pieces (Cutscene.start)
 local scene: any = nil -- the cut playing now
 local mouseMovedAt = -math.huge
+local cover = { on = false, tween = nil :: Tween?, order = 0 } -- the black from joining (Cutscene.cover)
 
 local function v3(p: { number }): Vector3
 	return Vector3.new(p[1], p[2], p[3])
@@ -73,6 +76,7 @@ Cutscene.asset = asset
 local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Exclude
 groundParams.RespectCanCollide = true
+groundParams.IgnoreWater = true -- the ocean is terrain water
 
 -- The ground's height under (x, z), past every character and the scene.
 local function groundAt(x: number, z: number, ignore: { Instance }): number
@@ -328,6 +332,7 @@ end
 local terrainParams = RaycastParams.new()
 terrainParams.FilterType = Enum.RaycastFilterType.Include
 terrainParams.FilterDescendantsInstances = { workspace.Terrain }
+terrainParams.IgnoreWater = true -- client/Sea's water is there before the sand under it streams in
 
 -- Whether the beach the cut stands on has streamed in here: the sand under its places and the lounger.
 local function beachLoaded(def): boolean
@@ -378,17 +383,15 @@ function Cutscene.follow(s, name: string, target: Vector3, lag: number, dt: numb
 	s.aim[name] = if was then was:Lerp(target, 1 - math.exp(-dt / lag)) else target
 end
 
--- The water: "full", "dry", or the run's own.
+-- The water: "full", "dry", or the run's own. The cut holds this client's open sea (client/Sea);
+-- the server's water over the seabed follows the team's cut by itself (server/Run), and a preview
+-- leaves that as it is.
 function Cutscene.setWater(s, want: "full" | "dry" | "run")
 	if s.water == want then
 		return
 	end
 	s.water = want
-	local ocean = Hud.ocean()
-	if ocean then
-		local fill = ReplicatedStorage:GetAttribute("Fill")
-		Zones.setFill(ocean, if want == "full" then 1 elseif want == "dry" then 0 elseif type(fill) == "number" then fill else 0)
-	end
+	Sea.hold(if want == "full" then 1 elseif want == "dry" then 0 else nil)
 end
 
 -- Your copy walking `d` studs along `path` on your own walk (stepped by the distance, so its feet
@@ -573,6 +576,14 @@ local function begin(def, at: number, preview: boolean)
 		camera.FieldOfView = fov
 	end)
 	local gui = kit.gui
+	if cover.tween then
+		cover.tween:Cancel()
+		cover.tween = nil
+	end
+	if cover.on then -- the cut takes the screen from the black it opens on
+		cover.on = false
+		gui.DisplayOrder = cover.order
+	end
 	gui.Scale.Scale = Hud.uiScale()
 	gui.Enabled = true
 	kit.skip.Visible = false
@@ -914,6 +925,74 @@ local function skip()
 	end
 end
 
+-- The black and the eyelids must reach every physical edge (under the top bar, the notch and rounded
+-- corners too): a fullscreen gui that Roblox neither insets, clips nor stretches.
+local function fullscreen(gui: ScreenGui)
+	gui.ScreenInsets = Enum.ScreenInsets.None
+	gui.ClipToDeviceSafeArea = false
+	gui.SafeAreaCompatibility = Enum.SafeAreaCompatibility.None
+end
+
+-- From joining, the screen is black (the Cutscene gui's Black) until a cut takes it (the intro opens
+-- on black) or the run goes on without one, when it fades into play: the world never shows for a
+-- moment before the intro. While the run loads it sits under the HUD, so its waiting text shows. The
+-- teleport screen you arrived behind (client/Arrival) sits over it: told when the black is up, and
+-- when play starts it opens onto play itself, so the black goes at once instead of fading.
+local function coverScreen(gui: ScreenGui)
+	if scene then
+		return
+	end
+	local phase = ReplicatedStorage:GetAttribute("Phase")
+	local black = Hud.find(gui, "Black") :: Frame
+	if phase == nil or phase == "loading" or phase == "intro" then
+		if cover.tween then
+			cover.tween:Cancel()
+			cover.tween = nil
+		end
+		if not cover.on then
+			cover.on = true
+			cover.order = gui.DisplayOrder
+			for _, name in { "TopLid", "BottomLid", "Skip" } do
+				(Hud.find(gui, name) :: GuiObject).Visible = false
+			end
+			(Hud.find(gui, "Logo") :: ImageLabel).ImageTransparency = 1
+			gui.Enabled = true
+		end
+		black.BackgroundTransparency = 0
+		gui.DisplayOrder = if phase == "loading" then -1 else cover.order
+		Arrival.underBlack(phase)
+	elseif cover.on then
+		cover.on = false
+		gui.DisplayOrder = cover.order
+		if Arrival.covering() then
+			black.BackgroundTransparency = 1
+			gui.Enabled = false
+			return
+		end
+		local tween = TweenService:Create(black, COVER_FADE, { BackgroundTransparency = 1 })
+		cover.tween = tween
+		tween.Completed:Connect(function(state)
+			if state == Enum.PlaybackState.Completed and cover.tween == tween then
+				cover.tween = nil
+				gui.Enabled = false
+			end
+		end)
+		tween:Play()
+	end
+end
+
+-- Puts up the black from joining; called first thing by the client, before anything else loads.
+function Cutscene.cover()
+	task.spawn(function()
+		local gui = asset(player:WaitForChild("PlayerGui"), "Cutscene", "ScreenGui")
+		fullscreen(gui)
+		coverScreen(gui)
+		ReplicatedStorage:GetAttributeChangedSignal("Phase"):Connect(function()
+			coverScreen(gui)
+		end)
+	end)
+end
+
 -- Loads the place's pieces and plays each scene's cut while the server's Phase is its phase.
 function Cutscene.start(defs: { any })
 	local animation = ReplicatedStorage:WaitForChild("Animation", 10)
@@ -940,6 +1019,18 @@ function Cutscene.start(defs: { any })
 	for _, name in { "TopLid", "BottomLid", "Black", "Logo", "Logo.Pop", "Scale" } do
 		Hud.find(gui, name)
 	end
+	-- Skip, the one thing to tap, is kept inside the device's safe area.
+	fullscreen(gui)
+	local skipAt = kit.skip.Position
+	local cutsceneScale = Hud.find(gui, "Scale") :: UIScale
+	local function keepSkipSafe()
+		local full = GuiService:GetInsetArea(Enum.ScreenInsets.None)
+		local safe = GuiService:GetInsetArea(Enum.ScreenInsets.DeviceSafeInsets)
+		local inset = (full.Max - safe.Max) / cutsceneScale.Scale -- Skip hangs from the bottom right
+		kit.skip.Position = skipAt - UDim2.fromOffset(inset.X, inset.Y)
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(keepSkipSafe)
+	keepSkipSafe()
 	local preload: { Instance } = { gui.Logo, baconWalk }
 	for _, def in defs do
 		def.load(kit)

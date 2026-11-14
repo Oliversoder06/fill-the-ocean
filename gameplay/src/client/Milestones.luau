@@ -12,6 +12,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Cues = require(ReplicatedStorage.Shared.Cues)
 local Ease = require(ReplicatedStorage.Shared.Ease)
 local MilestoneRules = require(ReplicatedStorage.Shared.Milestones)
+local Zones = require(ReplicatedStorage.Shared.Zones)
 local Honeycomb = require(script.Parent.Honeycomb)
 local CameraFeel = require(script.Parent.CameraFeel)
 local Hud = require(script.Parent.Hud)
@@ -81,8 +82,7 @@ local sighting: { model: Model, base: CFrame, height: number, at: number }? = ni
 -- A copy of the bacon-hair rises out of the water far out at sea, facing the beach, sways and sinks.
 local function sight(template: Model)
 	local ocean = Hud.ocean()
-	local water = ocean and ocean:FindFirstChild("Water")
-	if sighting or not (ocean and water and water:IsA("BasePart")) then
+	if sighting or not ocean then
 		return
 	end
 	local cue = Cues.milestone
@@ -95,7 +95,9 @@ local function sight(template: Model)
 	local box, size = model:GetBoundingBox()
 	local feet = model:GetPivot().Position.Y - (box.Position.Y - size.Y / 2) -- pivot height above its lowest point
 	local x = workspace.CurrentCamera.CFrame.Position.X
-	local at = Vector3.new(x, water.Position.Y + water.Size.Y / 2 + feet, ocean:GetPivot().Position.Z) + SEA * cue.sightingDistance
+	local fill = ReplicatedStorage:GetAttribute("Fill")
+	local surface = Zones.level(ocean, if type(fill) == "number" then fill else 0)
+	local at = Vector3.new(x, surface + feet, ocean:GetPivot().Position.Z) + SEA * cue.sightingDistance
 	local base = CFrame.lookAt(at, at - SEA)
 	model:PivotTo(base - Vector3.yAxis * size.Y)
 	model.Parent = workspace

@@ -2,7 +2,8 @@
 -- (client/Honeycomb, which shows its Badge). Holding Tab / Y / the mouse / a finger squishes it down;
 -- letting go springs it back up. Tab and Y toggle as they go down, so a release that never arrives
 -- (focus moving) can't swallow the press; the mouse and a finger toggle on release, like a button.
--- Its key tag tells keyboard and gamepad players which key does it.
+-- Its keycap (Key, painted by Hud.paintKey) tells keyboard and gamepad players which key does it. `toggle` gets how it was
+-- pressed ("Key" or "Button", for analytics: common/Analytics.SOURCES).
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -22,9 +23,10 @@ local HOLD_UP = TweenInfo.new(CUE.holdUpSeconds, Enum.EasingStyle.Back, Enum.Eas
 
 local HoneycombButton = {}
 
-function HoneycombButton.start(upgrades: GuiButton, toggle: () -> ())
+function HoneycombButton.start(upgrades: GuiButton, toggle: (string) -> ())
 	local press = Hud.find(upgrades, "Press") :: UIScale
 	local key = Hud.find(upgrades, "Key")
+	Hud.paintKey(key)
 	local keyText = Hud.find(key, "Text")
 	local held = false
 	local hovered = false
@@ -39,13 +41,13 @@ function HoneycombButton.start(upgrades: GuiButton, toggle: () -> ())
 		held = false
 		TweenService:Create(press, HOLD_UP, { Scale = if hovered then motion.hoverScale else 1 }):Play()
 		if fire then
-			toggle()
+			toggle("Button")
 		end
 	end
 	ContextActionService:BindAction("ToggleUpgrades", function(_, inputState)
 		if inputState == Enum.UserInputState.Begin then
 			hold()
-			toggle()
+			toggle("Key")
 		elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
 			release(false)
 		end

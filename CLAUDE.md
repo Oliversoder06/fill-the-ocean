@@ -1,6 +1,6 @@
 # Fill the Ocean
 
-UI style: clear-tide
+UI style: clear-tide (the lobby's pad screens, Confirm and HostBar: sunbaked-sea, owner 2026-11-14)
 Balance: follow C:\RobloxDev\library\balance\README.md; formulas come from C:\RobloxDev\shared\Lib.
 Design: check C:\RobloxDev\library\design\README.md before planning features.
 
@@ -20,18 +20,22 @@ an account level (permanent, capped perks) and a 3-month season pass (cosmetics,
 Design: `docs/design/2026-11-04-fill-the-ocean-design.md`. Build plan:
 `docs/plans/2026-11-05-save-the-ocean.md`. Its Phase 1 is done: the code runs one saved ocean per
 team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
+Analytics (funnels, events, the session record, `lune run tools/analytics`): `docs/analytics.md`.
+Its names are permanent once live: add new ones, never rename.
 
 ## Studio
 - Two places, each its own Rojo project folder:
-  - `lobby/`: Place ID 99179921994084, the start place players load into. Rojo port 34674.
-  - `gameplay/`: Place ID 96136704873524, where a run happens. Rojo port 34675.
+  - `lobby/`: Place ID 131785571407023, the start place players load into. Rojo port 34674.
+  - `gameplay/`: Place ID 128436077571697, where a run happens. Rojo port 34675.
 - In each folder, Rojo owns code only: `src/shared` -> ReplicatedStorage.Shared, `src/server` ->
   ServerScriptService.Server, `src/client` -> StarterPlayerScripts.Client, and
   `C:\RobloxDev\shared` -> ReplicatedStorage.Kit (UI and Lib). A change in Kit changes every game.
   Both projects also map `common/` -> ReplicatedStorage.Common (save progress, run
   tickets, retries, place IDs) and declare their RemoteEvents in ReplicatedStorage.Remotes.
   gameplay also maps `vendor/Animation` -> ReplicatedStorage.Animation (the owner's roblox-animation
-  runtime, vendored with its LICENSE and PROVENANCE; staff bodies use it). lobby maps gameplay's
+  runtime, vendored with its LICENSE and PROVENANCE; staff bodies use it) and `src/first/Arrival`
+  -> ReplicatedFirst.Arrival (puts the teleport screen you arrived behind up before the place
+  loads). lobby maps gameplay's
   `shared/Config`, `Water` and `Admins` into ServerStorage.GameplayShared (server only).
 - The map, StarterGui and everything else built in Studio exist only in the place. Save and
   publish in Studio, or it exists nowhere.
@@ -43,6 +47,9 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     `shared/Zones.nearFlood`; a `Tap` with an Attachment `Hose` for the Garden Hose, as in every
     area), each area's `Areas.<Name>.Channel` from its `Pour` to the ocean (`Path`: parts named
     1..N in order, a wave follows them; `Water`: parts whose Textures trickle; server/Map),
+    each area's `Areas.<Name>.Walls` (a Persistent Model of invisible walls 1500 studs high in a
+    closed loop round the area on the ridge tops, sea front and outer mountains, above the gate
+    tunnels; server/Map clears them when the gate opens),
     `ReplicatedStorage.ToolModels`
     (one Model per hero tool, and `Gadgets.<Model>` per gadget; swap placeholders for real models
     under the same name), `workspace.Map.Town.ToolShack`'s ProximityPrompt `Prompt` (sells the Water Gun),
@@ -64,20 +71,43 @@ team; the old multi-part run (stages, pool, lake, shares, difficulty) is gone.
     `Audio.EndSmack` (the ending's slap),
     `ReplicatedStorage.Audio` (Sounds) and `ReplicatedStorage.Vfx` (effects, `ChannelWave` included) named in
     `shared/Cues.luau`, SoundService SoundGroups, `StarterGui.Hud`, Lighting effects and Terrain
-    Clouds.
-  - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, sign with Title and Status labels; any
-    pad hosts a party), `StarterGui.LobbyHud` (`PadScreen` with `CreateParty`, `SavedRuns` and
-    `Confirm` side by side on one screen; `Admin.ResetProfile` for admins).
+    Clouds, and `ReplicatedStorage.Transition` (a copy of the lobby's teleport screen, for Studio
+    tests with `StudioTransition`).
+  - lobby: `workspace.Lobby.Pads.Pad1..Pad5` (Zone part, `Walls` model with four invisible
+    CanCollide walls around it (touching them joins; members stay on until Leave), sign with Title
+    and Status labels and `Art`, a capture of the gameplay map (`art/lobby/Map1Thumb.png`); any pad
+    hosts a party), `StarterGui.LobbyHud` (`PadScreen` with `CreateParty`
+    and `SavedRuns` side by side on one screen, over `PadCover` (its full-screen dark cover, faded in
+    with `Lighting.PadBlur`); `Confirm` over everything (UIScale `Scale`,
+    `DesignSize`); `HostBar` with `StartButton` and `LeaveButton`; `Admin.ResetProfile` for admins),
+    `ReplicatedStorage.Transition` (the teleport screen, a ScreenGui: `Fresh` (`Black`, `Water` with
+    `Band` and `Foam`, `Pool` with `Arc1..4` and `Hole`), `Return.Body` (`Edge`/`EdgeFoam`,
+    `Top`/`TopFoam`, `Rays`, `Bubbles`, `Card` with UIScale `Scale`, `DesignSize`, `Logo`, `MapName`,
+    `FillBar.Fill`/`Label`, `Status`) and Sounds `Flood`, `Drain`, `Wave`, `Splash`; common/Transition),
+    the lobby's feel (named in `lobby/src/shared/LobbyCues.luau`): `ReplicatedStorage.Audio`
+    (SoundGroups `Music`, `Sfx`, `Ambience`, `Footsteps` and copies of gameplay's sounds, plus
+    `MusicLobby` and `UiClick`), `ReplicatedStorage.Vfx` (`ScoopSplash`, `Sparkle`, `PadBubbles`),
+    `ReplicatedStorage.Scenery` (`Gull`: parts, `WingL` / `WingR` each with a `Hinge` Attachment,
+    facing -Z; `BaconFat`: the fat bacon-hair at 1.6x gameplay's, anchored, no joints, pivot at his
+    feet where he stands out at sea, with `Belly`, `Head.Mouth` and `Straw`), a `Ripple` Texture on
+    every pad's `Water`, `LobbyHud.Countdown` (TextLabel with UIScale `Pop`), the `Footstep`
+    attribute (`"wood"`) on the boardwalk's Plastic `Path` boards, and the terrain's
+    `WaterWaveSize` 0.2 / `WaterWaveSpeed` 12.
 - The ocean is `workspace.Ocean` at the origin: one straight beach (shore along X, sea toward -Z)
   facing a terrain seabed (y -28) that runs to the horizon; its `Water` holds 5 extra `Tile` parts
-  (2048 studs each, the part size cap) that rise with it. The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
+  (2048 studs each, the part size cap; unturned, edges on the 4-stud grid). They stay hidden and
+  mark where the ocean's Roblox terrain water goes; code writes that water as the ocean fills
+  (`shared/Zones`). The scenery is `workspace.Map` (terrain plus clones of `ServerStorage.MapKit`); the old map
   is kept in `ServerStorage.OldMap_Backup_2026_11_06`.
 - Studio test helpers (gameplay), workspace attributes: `WaterScale` (less water needed),
   `StudioMap` (the map a Studio play test runs, default `map1`) and `StudioMoney` (coins put into the
   team's wallet) and `StudioFill` (a fraction 0-1:
   jumps the fill) and `StudioGolden` (true: starts a golden spring now) and `StudioIntro` (true: the
   run opens on the intro, whatever the save) and `StudioIntroAt` / `StudioEndingAt` (seconds: the
-  intro or the ending holds on that frame, for framing shots; `StudioFill` 1 plays the real ending).
+  intro or the ending holds on that frame, for framing shots; `StudioFill` 1 plays the real ending)
+  and `StudioTransition` (`"fresh"` or `"return"`: you arrive behind that teleport screen, as from
+  the lobby) and `StudioEcho` (both places; false: silences the `[Telemetry]` lines Studio prints for each
+  analytics event instead of sending it).
   Teleports and saving need the published game / Studio API access.
 - To work: `rojo serve` inside `lobby/` or `gameplay/`, then open that place in Studio >
   Plugins > Rojo > Connect (use the folder's port). Both can run at once.

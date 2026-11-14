@@ -4,11 +4,11 @@
 -- distance walked, so its feet never slide) to the lounger, stretches, sits down on it and lies back
 -- (IntroClips.lie). The bacon-hair strolls onto the beach in front of you, sits down and plays in the
 -- sand (Story.SandPile). One camera take (a spline) runs from the music's drop into your eyes as they
--- close. The water stands full, then drains (Zones.setFill); the ball (Story.BaconFat, its Straw down
--- to the Puddle) drinks it far out, burps, rolls for the beach and its slope throws him past you over
--- the island (IntroCut.flight). You get up into the game's own first-person view: from
--- IntroCut.handover the camera is the game's (the same view, no cut) and your tool swings up into
--- your hand (Viewmodel.swingIn); play starts at IntroCut.length.
+-- close. The water stands full, then drains (Cutscene.setWater; server/Run does the same to the
+-- seabed's); the ball (Story.BaconFat, its Straw down to the Puddle) drinks it far out, burps, rolls
+-- for the beach and its slope throws him past you over the island (IntroCut.flight). You get up into
+-- the game's own first-person view: from IntroCut.handover the camera is the game's (the same view,
+-- no cut) and your tool swings up into your hand (Viewmodel.swingIn); play starts at IntroCut.length.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local IntroClips = require(ReplicatedStorage.Shared.IntroClips)

@@ -25,16 +25,17 @@ local function key(userId: number): string
 end
 
 -- Runs fn with retries and backoff; returns ok and the result or the last error.
--- Returns the player's progress, or nil and an error if the DataStore can't be reached.
-function PlayerData.load(userId: number): (Progress.Data?, string?)
+-- Returns the player's progress, or nil and an error if the DataStore can't be reached. The third
+-- value: nothing was stored yet (a brand-new player; lobby Telemetry enters them into the funnels).
+function PlayerData.load(userId: number): (Progress.Data?, string?, boolean)
 	local ok, result = Retry.run(`load {userId}`, function()
 		-- lihfolk-ignore: datastore-no-pcall (runs inside Retry.run, which pcalls with backoff)
 		return getStore():GetAsync(key(userId))
 	end)
 	if not ok then
-		return nil, tostring(result)
+		return nil, tostring(result), false
 	end
-	return Progress.sanitize(result), nil
+	return Progress.sanitize(result), nil, result == nil
 end
 
 -- Applies one Progress change to the stored progress; a change that returns nil (nothing new) writes
@@ -97,6 +98,22 @@ end
 function PlayerData.payMilestones(userId: number, runKey: string, raindrops: { [number]: number }): (Progress.Data?, string?)
 	return update(userId, "pay milestones", function(old)
 		local data, changed = Progress.payMilestones(old, runKey, raindrops)
+		return if changed then data else nil
+	end)
+end
+
+-- A brand-new player enters the one-time analytics funnels (Progress.enterAnalytics).
+function PlayerData.enterAnalytics(userId: number): (Progress.Data?, string?)
+	return update(userId, "enter analytics", function(old)
+		return Progress.enterAnalytics(old)
+	end)
+end
+
+-- The funnel steps sent this visit (Progress.advanceFunnels): one write as the player leaves, none
+-- when nothing rose or they were never entered.
+function PlayerData.saveFunnels(userId: number, steps: { [string]: number }): (Progress.Data?, string?)
+	return update(userId, "save funnels", function(old)
+		local data, changed = Progress.advanceFunnels(old, steps)
 		return if changed then data else nil
 	end)
 end

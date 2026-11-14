@@ -28,6 +28,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local Items = require(ReplicatedStorage.Common.Items)
 local RunSave = require(ReplicatedStorage.Common.RunSave)
 local Payroll = require(script.Parent.Payroll)
+local Telemetry = require(script.Parent.Telemetry)
 
 local TICK = 1 -- seconds between output ticks
 local MAX_BUILDS_PER_SECOND = 2
@@ -42,7 +43,7 @@ export type Hooks = {
 	inReach: (Player, ProximityPrompt) -> boolean,
 	allow: (any, string, number) -> boolean, -- server/Run's per-player rate limit (state, key, max a second)
 	price: (number) -> number, -- a listed price for the team (Items.price)
-	spend: (number) -> (), -- takes coins from the team's wallet
+	spend: (number, Player, string, string) -> (), -- takes coins from the team's wallet (buyer, analytics reason, sku)
 	fill: (number) -> number, -- pours litres into the ocean; returns the litres it took
 	card: (string) -> (), -- a card for everyone
 	tell: (Player, string) -> (), -- a card for one player
@@ -183,6 +184,9 @@ local function onBuild(player: Player, index: unknown, id: unknown)
 	if not ok then
 		if reason == "money" then
 			hooks.tell(player, "Not enough coins")
+			if item then
+				Telemetry.blocked(player, "CantAfford", item.id)
+			end
 		elseif reason == "taken" then
 			hooks.tell(player, "A teammate already built on this plot")
 		end
@@ -192,13 +196,14 @@ local function onBuild(player: Player, index: unknown, id: unknown)
 	if not hooks.inReach(player, plots[plotIndex].prompt) then
 		return
 	end
-	hooks.spend(hooks.price(item.price))
+	hooks.spend(hooks.price(item.price), player, "Build", item.id)
 	save.plots[tostring(plotIndex)] = item.id
 	if save.buildings[item.id] == nil then
 		save.buildings[item.id] = 0
 	end
 	place(plotIndex, item)
 	publishLevels()
+	Telemetry.buildingBuilt(player, item.id)
 	hooks.card(`{player.DisplayName} built a {item.name} for the team!`)
 	hooks.save(`{player.Name} built {item.id} on plot {plotIndex}`)
 end
@@ -223,9 +228,10 @@ function Buildings.buy(player: Player, id: string): boolean
 	end
 	if not standing then
 		hooks.tell(player, `Build a {item.name} on a plot first`)
+		Telemetry.blocked(player, "NotBuilt", id)
 		return false
 	end
-	hooks.spend(cost)
+	hooks.spend(cost, player, "BuildingLevel", id)
 	save.buildings[id] += 1
 	publishLevels()
 	hooks.card(`{player.DisplayName} levelled up the team's {item.name}: Lv {save.buildings[id] + 1}!`)
@@ -267,7 +273,7 @@ local function tick(dt: number)
 		end
 	end
 	if litres > 0 then
-		Payroll.owe(hooks.fill(litres) * BuildingRules.payPerLitre(Config, hooks.openIds()))
+		Payroll.owe(hooks.fill(litres) * BuildingRules.payPerLitre(Config, hooks.openIds()), "Buildings")
 	end
 end
 

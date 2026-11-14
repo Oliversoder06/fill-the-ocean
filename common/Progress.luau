@@ -10,6 +10,9 @@ export type Data = {
 	mapsCleared: { [string]: boolean },
 	paidRuns: { [string]: boolean },
 	paidMilestones: { [string]: { number } },
+	-- Analytics (common/Analytics): the highest step sent per one-time funnel. Nil for a profile
+	-- that predates the funnels: it is never entered (only a brand-new one is, enterAnalytics).
+	funnels: { [string]: number }?,
 }
 
 local Progress = {}
@@ -68,6 +71,15 @@ function Progress.sanitize(raw: any): Data
 					data.paidMilestones[key] = indices
 				end
 			end
+		end
+		if type(raw.funnels) == "table" then
+			local funnels = {}
+			for id, step in raw.funnels do
+				if type(id) == "string" and id ~= "" and type(step) == "number" and step % 1 == 0 and step >= 1 then
+					funnels[id] = step
+				end
+			end
+			data.funnels = funnels
 		end
 	end
 	return data
@@ -139,6 +151,33 @@ function Progress.payMilestones(raw: any, runKey: string, raindrops: { [number]:
 	end
 	if #paid > 0 then
 		data.paidMilestones[runKey] = paid
+	end
+	return data, changed
+end
+
+-- A brand-new player enters the one-time funnels (their first lobby load). Keeps any progress.
+-- Returns a new table.
+function Progress.enterAnalytics(raw: any): Data
+	local data = Progress.sanitize(raw)
+	data.funnels = data.funnels or {}
+	return data
+end
+
+-- The funnel steps sent (funnel id -> highest step), merged by the highest: a stale lower count
+-- from another place never lowers one. A player never entered stays out. Returns a new table and
+-- whether anything rose (false: nothing to write).
+function Progress.advanceFunnels(raw: any, steps: { [string]: number }): (Data, boolean)
+	local data = Progress.sanitize(raw)
+	local funnels = data.funnels
+	if not funnels then
+		return data, false
+	end
+	local changed = false
+	for id, step in steps do
+		if type(step) == "number" and step % 1 == 0 and step > (funnels[id] or 0) then
+			funnels[id] = step
+			changed = true
+		end
 	end
 	return data, changed
 end

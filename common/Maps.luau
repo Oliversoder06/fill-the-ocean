@@ -8,13 +8,14 @@ export type Map = {
 	waterMultiplier: number,
 	rewardRaindrops: number,
 	unlockedBy: string?, -- the map that must be cleared first; nil = always open
+	comingSoon: boolean?, -- listed in the lobby (greyed out), but nobody can start it yet
 }
 
 local Maps = {}
 
 Maps.list = {
 	{ id = "map1", name = "The Ocean", waterMultiplier = 1, rewardRaindrops = 100, unlockedBy = nil },
-	{ id = "map2", name = "Map 2 (placeholder)", waterMultiplier = 1.6, rewardRaindrops = 200, unlockedBy = "map1" },
+	{ id = "map2", name = "Map 2", waterMultiplier = 1.6, rewardRaindrops = 200, unlockedBy = "map1", comingSoon = true },
 } :: { Map }
 
 -- id may be anything (a ticket or attribute value); only a listed map's id returns a map.
@@ -34,6 +35,12 @@ function Maps.unlocked(mapsCleared: { [string]: boolean }, id: string): boolean
 		return false
 	end
 	return map.unlockedBy == nil or mapsCleared[map.unlockedBy] == true
+end
+
+-- Whether a party may start this map: unlocked and not coming soon.
+function Maps.playable(mapsCleared: { [string]: boolean }, id: string): boolean
+	local map = Maps.get(id)
+	return map ~= nil and not map.comingSoon and Maps.unlocked(mapsCleared, id)
 end
 
 return Maps

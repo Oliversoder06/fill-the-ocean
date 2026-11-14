@@ -6,9 +6,12 @@
 -- While the player drives their own vehicle (client/Vehicles.driving) the camera is third person
 -- behind it instead (Classic, zoom DRIVE_ZOOM_MIN-MAX), without bob or tilt; leaving the seat locks
 -- it back to first person.
+-- CameraFeel.face turns the view toward a place (the guide's lane goal) over a moment; moving the
+-- camera yourself cancels it.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local Steps = require(ReplicatedStorage.Shared.Steps)
 local Vehicles = require(script.Parent.Vehicles)
@@ -39,6 +42,7 @@ local CameraFeel = {}
 local stepListeners: { (Humanoid) -> () } = {}
 local phase, intensity = 0, 0 -- walk cycle of the head bob, also read by the viewmodel
 local untilted: CFrame? = nil -- this frame's aim before the tilt (nil while the camera isn't ours)
+local facing: { at: Vector3, seconds: number, elapsed: number }? = nil -- a turn toward a place in progress
 
 -- Called on each footstep (each dip of the head bob) with the local humanoid.
 function CameraFeel.onStep(fn: (Humanoid) -> ())
@@ -53,6 +57,11 @@ end
 -- The camera's CFrame without this frame's tilt, while the first-person camera is in use.
 function CameraFeel.untilted(): CFrame?
 	return untilted
+end
+
+-- Turns the first-person view (yaw only) to face `at` over `seconds`, eased in and out.
+function CameraFeel.face(at: Vector3, seconds: number)
+	facing = { at = at, seconds = math.max(seconds, 1e-3), elapsed = 0 }
 end
 
 local function ease(rate: number, dt: number): number
@@ -94,14 +103,58 @@ function CameraFeel.start()
 		end
 	end
 
+	-- One frame of a CameraFeel.face turn: rotate about the eye by this frame's share of the yaw still
+	-- left, on a smoothstep, so it lands on the place at the end even if the player walks meanwhile.
+	local function turnToward(turn: { at: Vector3, seconds: number, elapsed: number }, dt: number)
+		local camera = workspace.CurrentCamera
+		local cf = camera.CFrame
+		local look = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+		local to = Vector3.new(turn.at.X - cf.Position.X, 0, turn.at.Z - cf.Position.Z)
+		if not usable() or driving or look.Magnitude < 1e-3 or to.Magnitude < 1e-3 then
+			facing = nil
+			return
+		end
+		local yaw = math.atan2(look:Cross(to).Y, look:Dot(to))
+		local function smooth(x: number): number
+			x = math.clamp(x, 0, 1)
+			return x * x * (3 - 2 * x)
+		end
+		local before = smooth(turn.elapsed / turn.seconds)
+		turn.elapsed += dt
+		local after = smooth(turn.elapsed / turn.seconds)
+		local share = if before >= 1 then 1 else (after - before) / (1 - before)
+		camera.CFrame = CFrame.new(cf.Position) * CFrame.Angles(0, yaw * share, 0) * cf.Rotation
+		if after >= 1 then
+			facing = nil
+		end
+	end
+
 	-- Before the default camera: remove last frame's tilt so input applies to the real aim, then pick
 	-- first or third person for this frame.
-	RunService:BindToRenderStep("CameraFeelRestore", Enum.RenderPriority.Camera.Value - 1, function()
+	RunService:BindToRenderStep("CameraFeelRestore", Enum.RenderPriority.Camera.Value - 1, function(dt)
 		if untilted and usable() then
 			workspace.CurrentCamera.CFrame = untilted
 		end
 		if Vehicles.driving() ~= driving then
 			setDriving(not driving)
+		end
+		if facing then
+			turnToward(facing, dt)
+		end
+	end)
+
+	-- The player taking the camera ends a turn at once.
+	UserInputService.InputChanged:Connect(function(input, processed)
+		if not facing or processed then
+			return
+		end
+		local kind = input.UserInputType
+		if
+			(kind == Enum.UserInputType.MouseMovement and input.Delta.Magnitude > 1)
+			or kind == Enum.UserInputType.Touch
+			or (input.KeyCode == Enum.KeyCode.Thumbstick2 and input.Position.Magnitude > 0.2)
+		then
+			facing = nil
 		end
 	end)
 

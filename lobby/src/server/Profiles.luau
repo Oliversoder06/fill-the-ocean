@@ -3,8 +3,9 @@
 -- (shared Admins, mapped from gameplay as ServerStorage.GameplayShared.Admins).
 -- The lobby writes only when a player leaves or deletes a run, starts one over (New Game), is owed a
 -- finished run's Raindrops (the ending couldn't pay them), or an admin resets their own profile
--- (Admin("resetProfile"): their solo runs erased, then their progress back to the start). The
--- gameplay place writes the rest.
+-- (Admin("resetProfile"): their solo runs erased, then their progress back to the start); and, for
+-- analytics (server/Telemetry), once when a brand-new player is entered into the funnels and as a
+-- player leaves with funnel steps sent. The gameplay place writes the rest.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -15,6 +16,7 @@ local Progress = require(ReplicatedStorage.Common.Progress)
 local RunSave = require(ReplicatedStorage.Common.RunSave)
 local RunStore = require(ReplicatedStorage.Common.RunStore)
 local Admins = require(ServerStorage.GameplayShared.Admins)
+local Telemetry = require(script.Parent.Telemetry)
 
 local ADMIN_COOLDOWN = 5 -- seconds between an admin's profile resets
 
@@ -62,10 +64,11 @@ end
 
 local function load(player: Player)
 	player:SetAttribute("Admin", Admins[player.UserId] == true)
-	local data, err = PlayerData.load(player.UserId)
+	local data, err, isNew = PlayerData.load(player.UserId)
 	if not player.Parent then
 		return
 	end
+	task.spawn(Telemetry.loaded, player, data, isNew)
 	if data then
 		loaded[player] = data
 		show(player, data)
@@ -95,13 +98,13 @@ local function bump(player: Player)
 	end
 end
 
--- The map ids this player may start a party on (Common.Maps.unlocked).
+-- The map ids this player may start a party on (Common.Maps.playable: never a coming-soon map).
 function Profiles.unlockedMaps(player: Player): { [string]: boolean }
 	local data = loaded[player]
 	local cleared = if data then data.mapsCleared else {}
 	local open = {}
 	for _, map in Maps.list do
-		if Maps.unlocked(cleared, map.id) then
+		if Maps.playable(cleared, map.id) then
 			open[map.id] = true
 		end
 	end

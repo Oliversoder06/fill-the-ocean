@@ -7,9 +7,11 @@
 --             itself works anywhere next to where the Water will be (shared/Zones.nearFlood)
 --   Basin     the floor of the sunken basin; Water rises from it to ground level
 --   Tap       the Garden Hose's tap by the pour spot, holding an Attachment "Hose" (the rope's end)
---   Water     with a number attribute "Depth"; rises with the fill fraction. It may hold BasePart
---             children: extra tiles for water wider than one part can be (2048 studs); every tile
---             keeps its own X and Z and rises with it
+--   Water     with a number attribute "Depth"; with its BasePart children (extra tiles, for water
+--             wider than one part can be: 2048 studs; all unturned, edges on the 4-stud terrain
+--             grid) it marks where the ocean is. The tiles stay hidden: terrain water fills their
+--             footprints from the Basin up, Depth studs when full (shared/Zones.setFill: the
+--             server's over the seabed and shore; client/Sea: each client's open sea)
 --   PourDecal a flat part on the seabed by PourPoint holding a Decal ("POUR HERE"), shown while the
 --             ocean is nearly empty (client/Channels fades it out as it fills)
 -- Areas 2-5 (Config.areas with a `model`): one Model each in workspace.Areas, named by that model:
@@ -22,6 +24,11 @@
 --   Gate      Model: Blocker and Boards (parts, or models of parts) that close the way in, Sign
 --             (a SurfaceGui with a TextLabel "Label", client/Gates) and a part Prompt holding a
 --             ProximityPrompt "Prompt" (buys the gate)
+--   Walls     Model (ModelStreamingMode Persistent: a client walks through walls it hasn't streamed
+--             in) of invisible, anchored, collidable parts in a closed loop round the area on the
+--             ridge tops, sea front and outer mountains, high enough that the jetpack and bomber
+--             can't clear them; open with the gate. A wall between two areas belongs to the later
+--             one (gates open in order), and it stays above the gate tunnels
 --   Stand     the area's shop stand (a part or Model) holding a ProximityPrompt "Prompt" that buys
 --             the area's items (server/Run); the cove's is workspace.Map.Beach.BackpackStand
 --   Spawn     where players appear in the area
@@ -157,21 +164,29 @@ local function show(piece: Instance)
 	end
 end
 
--- Opens a bought gate: its Boards and Blocker no longer block or show, and its prompt goes away.
+-- An area's Walls on the ridge tops round it (checked by Map.ensure).
+local function walls(ocean: Model, area): Instance
+	return child(Zones.areaModel(ocean, area) :: Instance, "Walls")
+end
+
+-- Opens a bought gate: its Boards and Blocker and the area's Walls no longer block or show, and its
+-- prompt goes away.
 function Map.openGate(ocean: Model, area)
 	local gate = Map.gate(ocean, area)
 	for _, name in { "Boards", "Blocker" } do
 		clear(child(gate, name))
 	end
+	clear(walls(ocean, area))
 	Map.gatePrompt(gate).Enabled = false
 end
 
--- Shuts a gate again (admin run reset): Boards and Blocker as in the place, its prompt back.
+-- Shuts a gate again (admin run reset): Boards, Blocker and Walls as in the place, its prompt back.
 function Map.closeGate(ocean: Model, area)
 	local gate = Map.gate(ocean, area)
 	for _, name in { "Boards", "Blocker" } do
 		show(child(gate, name))
 	end
+	show(walls(ocean, area))
 	Map.gatePrompt(gate).Enabled = true
 end
 
@@ -259,6 +274,16 @@ local function ensureArea(ocean: Model, area)
 	assert(label and label:IsA("TextLabel") and label:FindFirstAncestorWhichIsA("SurfaceGui"), `{gate:GetFullName()}.Sign needs a SurfaceGui with a TextLabel "Label"`)
 	assert(child(gate, "Prompt"):IsA("BasePart"), `{gate:GetFullName()}.Prompt must be a part`)
 	Map.gatePrompt(gate)
+	local wallsModel = walls(ocean, area)
+	assert(wallsModel:IsA("Model") and wallsModel.ModelStreamingMode == Enum.ModelStreamingMode.Persistent, `{wallsModel:GetFullName()} must be a Model with ModelStreamingMode Persistent`)
+	local count = 0
+	for _, part in wallsModel:GetDescendants() do
+		if part:IsA("BasePart") then
+			assert(part.Anchored and part.CanCollide, `{part:GetFullName()} must be Anchored and CanCollide`)
+			count += 1
+		end
+	end
+	assert(count > 0, `{wallsModel:GetFullName()} needs wall parts`)
 end
 
 function Map.ensure(config): Model
@@ -268,6 +293,16 @@ function Map.ensure(config): Model
 		Zones.part(model, partName) -- asserts with the part name
 	end
 	assert(type(Zones.part(model, "Water"):GetAttribute("Depth")) == "number", `Ocean: Water needs a number attribute "Depth"`)
+	local water = Zones.part(model, "Water")
+	local tiles = water:GetChildren()
+	table.insert(tiles, water)
+	for _, tile in tiles do
+		if tile:IsA("BasePart") then
+			local edge = tile.Position - tile.Size / 2
+			local onGrid = math.abs(edge.X / 4 - math.round(edge.X / 4)) < 1e-3 and math.abs(edge.Z / 4 - math.round(edge.Z / 4)) < 1e-3
+			assert(tile.CFrame.Rotation:FuzzyEq(CFrame.identity, 1e-4) and onGrid, `{tile:GetFullName()} must be unturned with its edges on the 4-stud terrain grid (the terrain water is written on it)`)
+		end
+	end
 	Map.tapAttachment(Zones.part(model, "Tap"))
 	assert(Zones.part(model, "PourDecal"):FindFirstChildWhichIsA("Decal"), "Ocean: PourDecal needs a Decal")
 
